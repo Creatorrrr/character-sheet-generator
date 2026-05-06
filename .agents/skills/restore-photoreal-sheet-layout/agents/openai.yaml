@@ -1,4 +1,4 @@
 interface:
-  display_name: "Restore Photoreal Sheet Layout"
-  short_description: "Rebuild sheet layout and text"
-  default_prompt: "Use $restore-photoreal-sheet-layout to rebuild the final character sheet layout and readable text around this photoreal character image."
+  display_name: "Restore Photoreal Sheet Text"
+  short_description: "Add original text to locked photoreal sheet"
+  default_prompt: "Use $restore-photoreal-sheet-layout to restore the original sheet text onto this text-free photoreal sheet without changing layout or character content."

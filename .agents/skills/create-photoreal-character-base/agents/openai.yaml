@@ -1,4 +1,4 @@
 interface:
-  display_name: "Create Photoreal Base"
-  short_description: "Generate text-free photoreal base"
-  default_prompt: "Use $create-photoreal-character-base to make a text-free live-action base from this 2D character sheet."
+  display_name: "Create Text-Free Photoreal Sheet"
+  short_description: "Make layout-locked text-free photoreal sheet"
+  default_prompt: "Use $create-photoreal-character-base to make a text-free live-action sheet with the same structure as this 2D character sheet."

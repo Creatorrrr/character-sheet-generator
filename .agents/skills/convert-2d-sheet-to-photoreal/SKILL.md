@@ -1,13 +1,13 @@
 ---
 name: convert-2d-sheet-to-photoreal
-description: Use when the user wants staged 2D to photoreal live-action character sheet conversion with autonomous continuation, self-verification, final-only feedback, or coordination across the photoreal base, intensify, layout restore, and text repair stage skills.
+description: Use when the user wants staged 2D to photoreal live-action character sheet conversion with autonomous continuation, self-verification, final-only feedback, a layout-locked text-free final sheet, a text-restored final sheet, or coordination across the photoreal base, intensify, layout restore, and text repair stage skills.
 ---
 
 # Convert 2D Sheet to Photoreal
 
 ## Overview
 
-Manage a staged image workflow that separates photoreal character conversion from text and layout restoration. Use the sibling stage skills in order. Always continue through self-verification and regeneration gates without asking for user feedback until the final report.
+Manage a staged image workflow that first creates a photoreal text-free sheet with the same structure as the original 2D character sheet, then restores the original text onto that text-free final. Use the sibling stage skills in order. Always continue through self-verification and regeneration gates without asking for user feedback until the final report.
 
 ## Default Output Location
 
@@ -16,7 +16,7 @@ If the user does not specify where to save files, create a new run folder under 
 - Use `output/<slug>-photoreal-sheet-YYYYMMDD-HHMMSS/` for this workflow.
 - Build `<slug>` from the character name, then the input image filename stem, then `photoreal-sheet`. Normalize it to lowercase ASCII letters, numbers, and hyphens. If the normalized value is empty, use `photoreal-sheet`.
 - If the user is resuming from an existing run folder, keep using that folder instead of creating a new one.
-- Save Stage 1-4 outputs, self-approved intermediates, repair outputs, notes, and optional state or resume artifacts under the selected run folder.
+- Save Stage 1-4 outputs, self-approved intermediates, `final-photoreal-text-free-sheet.png`, `final-photoreal-character-sheet.png`, repair outputs, notes, and optional state or resume artifacts under the selected run folder.
 - Keep `workflow-state.json` and a short `verification-notes.md` in the run folder so the next resumed turn knows the current stage, attempt counts, latest accepted image, latest rejected image, and next intended action.
 - When reporting artifacts, include the selected run folder and write output paths under that folder.
 
@@ -24,9 +24,9 @@ If the user does not specify where to save files, create a new run folder under 
 
 Use these sibling skills from the same `.agents/skills` skill root:
 
-1. `$create-photoreal-character-base` for a text-free live-action base.
+1. `$create-photoreal-character-base` for a text-free live-action sheet that preserves the original canvas, panel layout, view positions, and non-text graphics.
 2. `$intensify-photoreal-character` when the base still feels anime, 3D, CGI, plastic, or overly AI-smoothed.
-3. `$restore-photoreal-sheet-layout` to rebuild the original sheet structure and readable text around the self-approved photoreal base.
+3. `$restore-photoreal-sheet-layout` to restore original text onto the self-approved `final-photoreal-text-free-sheet.png` without changing layout or character content.
 4. `$repair-photoreal-sheet-text` only when the final character is good but text or labels need cleanup.
 
 If explicit skill invocation is unavailable, open the matching sibling `SKILL.md` and follow it directly.
@@ -39,6 +39,8 @@ Before generating or editing, identify:
 - Current stage image, if the user is resuming.
 - Required text preservation level: exact, approximate, translated, or omit until later.
 - Any explicit final-output preference or constraint.
+
+The text removal scope for the text-free sheet is always full removal: title, section numbers, labels, descriptions, captions, logo text, model name, and all other readable text must be removed while non-text structure remains.
 
 If no source image is available, ask for it. If the user provides an existing intermediate image, resume from the matching stage instead of restarting.
 
@@ -73,19 +75,22 @@ Attempt limits:
 
 Autonomous decisions:
 
-- If Stage 1 is convincingly live-action and photographic, self-approve it and proceed to Stage 3.
-- If Stage 1 still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits, proceed to Stage 2.
-- If Stage 2 passes the live-action threshold, self-approve it and proceed to Stage 3.
-- If Stage 2 still fails after its limit, regenerate Stage 1 once if Stage 1 attempts remain; otherwise finish with a failure report.
+- If Stage 1 is convincingly live-action, preserves the original sheet structure, and removes all readable text, self-approve it as `final-photoreal-text-free-sheet.png` and proceed to Stage 3.
+- If Stage 1 preserves structure and removes text but still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits, proceed to Stage 2.
+- If Stage 1 changes the original layout, omits major panels/views, or leaves readable/fake text, retry Stage 1 if attempts remain.
+- If Stage 2 passes the live-action threshold while preserving the text-free sheet layout and adding no text, self-approve it as `final-photoreal-text-free-sheet.png` and proceed to Stage 3.
+- If Stage 2 adds text or changes layout, retry Stage 2 until the attempt limit, then fall back to Stage 1 if allowed.
+- If Stage 2 still fails the live-action threshold after its limit, regenerate Stage 1 once if Stage 1 attempts remain; otherwise finish with a failure report.
+- If Stage 3 restores readable original text while preserving the text-free sheet's character, panels, layout, and non-text graphics, self-approve it as `final-photoreal-character-sheet.png` and finish.
 - If Stage 3 preserves character realism and layout but text is broken, blurry, misaligned, fake, or unreadable, proceed to Stage 4.
-- If Stage 3 pulls the character back toward illustration or breaks the sheet layout, retry Stage 3 if attempts remain; otherwise return to Stage 2 if attempts remain.
+- If Stage 3 changes the character, pulls the character back toward illustration, or changes the locked text-free layout, retry Stage 3 if attempts remain; otherwise return to Stage 2 if attempts remain.
 - If Stage 4 improves text while preserving character, pose, outfit, lighting, and layout, finish.
 - If Stage 4 changes the character or still cannot produce verifiable readable text after its limit, finish with `수동 보정 필요`.
 
 Required final artifacts:
 
-- `final-photoreal-reference.png`: the latest self-approved text-free live-action reference image from Stage 1 or Stage 2.
-- `final-photoreal-character-sheet.png`: the latest self-approved layout and text-inclusive character sheet from Stage 3 or Stage 4, if one passed. If no text-inclusive sheet passes, still save the best failed candidate and mark it as needing human text correction.
+- `final-photoreal-text-free-sheet.png`: the latest self-approved text-free live-action sheet from Stage 1 or Stage 2. It must preserve the original canvas ratio, panel structure, view positions, and non-text graphics while removing all readable text.
+- `final-photoreal-character-sheet.png`: the latest self-approved text-inclusive character sheet from Stage 3 or Stage 4. It must be built on top of `final-photoreal-text-free-sheet.png` by restoring original text without changing character, layout, or non-text graphics. If no text-inclusive sheet passes, still save the best failed candidate and mark it as needing human text correction.
 
 ## Workflow
 
@@ -95,22 +100,23 @@ Use `$create-photoreal-character-base`.
 
 Goal:
 
-- Discard text temporarily.
-- Preserve character identity, hair, outfit, pose, expression, and sheet composition.
-- Produce a text-free image that looks like real live-action reference photography, not illustration, 3D render, or cosplay poster.
+- Remove all readable text while preserving text boxes, panels, callout lines, color chips, and other non-text structure.
+- Preserve character identity, hair, outfit, pose, expression, original canvas ratio, panel layout, and view positions.
+- Produce a text-free sheet that looks like real live-action reference photography, not illustration, 3D render, or cosplay poster.
 
 Report:
 
 - What source image was used.
 - What identity and costume details were preserved.
-- Whether text was omitted.
+- Whether all readable text was removed.
+- Whether the original layout and panel structure stayed aligned.
 - Any remaining non-photoreal risk.
 
 Self-verification gate:
 
-- Self-approve and proceed to Stage 3 only if the base is convincingly photoreal.
-- Proceed to Stage 2 if the image still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits.
-- Retry Stage 1 if the base is structurally unusable and Stage 1 attempts remain.
+- Self-approve as `final-photoreal-text-free-sheet.png` and proceed to Stage 3 only if the base is convincingly photoreal, matches the original structure, and contains no readable or fake text.
+- Proceed to Stage 2 if the image matches the original structure and contains no text but still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits.
+- Retry Stage 1 if the base changes the original layout, omits major panels/views, leaves readable or fake text, or is structurally unusable.
 - Finish with a final report if no valid next action remains within the attempt limits.
 
 ### Stage 2: Photoreal Intensification
@@ -120,7 +126,7 @@ Use `$intensify-photoreal-character` when needed.
 Goal:
 
 - Remove remaining 2D, 3D, CGI, game-render, plastic, or over-retouched qualities.
-- Keep expression, emotion, pose, clothing, and layout stable.
+- Keep expression, emotion, pose, clothing, original text-free layout, empty text areas, and non-text graphics stable.
 
 Report:
 
@@ -130,32 +136,34 @@ Report:
 
 Self-verification gate:
 
-- Self-approve and proceed to Stage 3 only if the result passes the live-action photo threshold.
-- Retry Stage 2 if it still fails the threshold and Stage 2 attempts remain.
+- Self-approve as `final-photoreal-text-free-sheet.png` and proceed to Stage 3 only if the result passes the live-action photo threshold while preserving original structure and adding no text.
+- Retry Stage 2 if it still fails the threshold, changes layout, or adds readable/fake text and Stage 2 attempts remain.
 - Fall back to Stage 1 if Stage 2 fails after its limit and Stage 1 attempts remain.
 - Finish with a final report if no valid next action remains within the attempt limits.
 
-### Stage 3: Layout and Text Restoration
+### Stage 3: Text Restoration On Text-Free Sheet
 
 Use `$restore-photoreal-sheet-layout`.
 
 Goal:
 
-- Keep the self-approved photoreal character unchanged.
-- Restore the original 2D sheet's information structure, view layout, labels, and text boxes.
+- Use `final-photoreal-text-free-sheet.png` as the locked visual base.
+- Restore the original 2D sheet's readable text, labels, section numbers, captions, logo text, and descriptions at the corresponding original positions.
+- Keep character, panels, view positions, text boxes, callout lines, color chips, and other non-text graphics unchanged.
 - Make text readable without pulling the character back into illustration.
 
 Report:
 
-- Which layout elements were restored.
+- Which text areas, labels, section numbers, captions, or descriptions were restored.
 - How text readability was handled.
 - Whether character realism stayed intact.
+- Whether the locked text-free layout stayed unchanged.
 
 Self-verification gate:
 
-- Self-approve and finish when character realism, layout, and text are all acceptable.
+- Self-approve as `final-photoreal-character-sheet.png` and finish when character realism, locked layout, and restored text are all acceptable.
 - Proceed to Stage 4 when the character is good but text or labels are broken, blurry, misaligned, or unreadable.
-- Retry Stage 3 if layout restoration failed or pulled the character back toward illustration and Stage 3 attempts remain.
+- Retry Stage 3 if text restoration changed layout, changed the character, failed to restore text at corresponding positions, or pulled the character back toward illustration and Stage 3 attempts remain.
 - Return to Stage 2 if character quality regressed and Stage 2 attempts remain.
 - Finish with a final report if no valid next action remains within the attempt limits.
 
@@ -215,7 +223,7 @@ Final report:
 ```text
 [최종 결과]
 - 저장 폴더: ...
-- 실사 레퍼런스: ...
+- 무텍스트 실사 시트: ...
 - 텍스트 포함 캐릭터 시트: ...
 - 자체 재시도 이력: ...
 - 통과/실패 기준: ...
@@ -239,11 +247,13 @@ Photorealism check:
 
 Layout check:
 
-- Pass only when the final sheet keeps the original broad information structure: full-body reference, turnaround, face/eye detail, outfit detail, lower-body/accessory detail, and profile or key-point panels when present.
-- Fail or regenerate when the layout loses the reference-sheet purpose, omits major view groups, crops core design details, or lets graphic elements overpower the character.
+- Pass the text-free sheet only when it keeps the original canvas ratio, panel grid, major view groups, detail-panel positions, empty text areas, callout lines, boxes, color chips, and non-text graphic structure.
+- Pass the text-inclusive sheet only when it preserves the self-approved text-free layout and adds text at corresponding original positions.
+- Fail or regenerate when the layout loses the reference-sheet purpose, omits major view groups, crops core design details, changes non-text graphics, adds a new UI structure, or lets graphic elements overpower the character.
 
 Text check:
 
+- For the text-free sheet, fail if any readable text, section number, label, caption, logo text, or fake typography remains.
 - Claim text is readable only for areas that were inspected and can actually be read.
 - Treat broken text, fake typography, hallucinated labels, blurry labels, or misaligned text boxes as Stage 4 input.
 - If text remains unreliable after Stage 4 limits, stop and report human text correction as required instead of continuing to regenerate.

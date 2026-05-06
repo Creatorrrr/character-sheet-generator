@@ -1,13 +1,13 @@
 ---
 name: intensify-photoreal-character
-description: Refine a stage 1 character image that still looks too anime, illustrated, 3D rendered, CGI, plastic, or AI-smoothed. Use during 2D to photoreal character sheet workflows when the base image needs stronger live-action realism while keeping identity, pose, expression, layout, hair, and costume stable.
+description: Refine a stage 1 text-free character sheet that still looks too anime, illustrated, 3D rendered, CGI, plastic, or AI-smoothed. Use during 2D to photoreal character sheet workflows when the base image needs stronger live-action realism while keeping identity, pose, expression, original sheet layout, empty text areas, non-text graphics, hair, and costume stable.
 ---
 
 # Intensify Photoreal Character
 
 ## Overview
 
-Use this stage after a text-free base exists but still carries 2D, CGI, 3D render, game asset, plastic skin, or overly polished AI traits. The goal is stronger real-camera realism without weakening the original expression or design identity.
+Use this stage after a text-free, layout-locked base exists but still carries 2D, CGI, 3D render, game asset, plastic skin, or overly polished AI traits. The goal is stronger real-camera realism without weakening the original expression, design identity, text-free state, or source-sheet structure.
 
 ## Inputs
 
@@ -50,7 +50,10 @@ Use this prompt as the stage instruction:
 - 감정 표현이 약해지지 않게 할 것
 
 중요:
-- 레이아웃은 유지하되, 시각적으로 더 “실제 배우 사진 시트”처럼 보이게 조정
+- 원본 시트 기반 레이아웃은 절대 변경하지 말 것
+- 패널 배치, 뷰 개수, 디테일 컷 위치, 빈 텍스트 영역, 콜아웃 선, 컬러칩, 비문자 그래픽 장식은 그대로 유지할 것
+- 새 텍스트, 가짜 문자, 임의 라벨, 번호, 캡션을 만들지 말 것
+- 시각적으로 더 “실제 배우 사진 시트”처럼 보이게 조정하되 실사감만 강화할 것
 - 디지털 렌더링 느낌보다 다큐멘터리한 라이브액션 참고사진 느낌을 우선
 
 결과물:
@@ -59,6 +62,8 @@ Use this prompt as the stage instruction:
 - true photoreal
 - natural skin
 - realistic fabric
+- same layout and panel structure
+- no readable text or pseudo text
 - no illustration look
 - no CGI look
 ```
@@ -66,8 +71,9 @@ Use this prompt as the stage instruction:
 ## Execution Guidance
 
 - Diagnose the dominant artifact before running: anime proportions, CGI lighting, plastic skin, mannequin body, game-render material, or over-sharpening.
-- Keep layout, pose, expression, hair, costume, and color relationships stable.
+- Keep layout, panel placement, view count, detail crop positions, empty text areas, pose, expression, hair, costume, and color relationships stable.
 - Do not restore text in this stage.
+- Do not add new text, pseudo text, labels, section numbers, or captions.
 - If only one area fails, ask the image tool for localized correction when possible.
 
 ## Quality Check
@@ -77,6 +83,8 @@ Pass only when:
 - The result looks like a live-action photographed person.
 - Skin and hair include believable natural irregularity.
 - Clothing materials look sewn, worn, folded, and physically lit.
+- The original text-free sheet layout, panel structure, view positions, empty text areas, and non-text graphics remain stable.
+- No readable text, labels, section numbers, captions, or fake typography were added.
 - The face is not overly symmetrical, waxy, doll-like, or plastic.
 
 If it passes, hand the image to Stage 3. If it fails, repeat this stage with the failed artifact named explicitly.

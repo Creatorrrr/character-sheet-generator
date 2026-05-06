@@ -1,4 +1,4 @@
 interface:
   display_name: "2D Sheet to Photoreal"
-  short_description: "Manage 2D sheet photoreal workflow"
-  default_prompt: "Use $convert-2d-sheet-to-photoreal to convert this 2D character sheet into a photoreal live-action character sheet."
+  short_description: "Create text-free and text-restored photoreal sheets"
+  default_prompt: "Use $convert-2d-sheet-to-photoreal to convert this 2D character sheet into a layout-locked text-free photoreal sheet, then restore the original text onto it."

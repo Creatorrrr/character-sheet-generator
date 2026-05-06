@@ -2,7 +2,18 @@
 
 Use these templates when the workflow needs image generation, image editing, or text composition prompts. Replace bracketed fields with approved state values.
 
+## Image Generation Tool Policy
+
+- Use built-in `image_gen` by default for anchor images, panel art, draft sheets, and visual regenerations.
+- Label image inputs before calling `image_gen`: template layout reference, primary character identity reference, supporting outfit/prop/detail reference, or approved anchor.
+- Save the selected `image_gen` output under the active run folder before reporting it or using it in later stages.
+- Inspect each generated image before approval. If review fails, regenerate with `image_gen` using the same approved spec/blueprint and only the concrete review issues.
+- Auto-regenerate at most 2 times. After that, stop and report the best result plus remaining blockers.
+- Keep final Korean/body text out of image generation whenever possible; use deterministic final composition for readable text.
+
 ## Anchor Image
+
+Use built-in `image_gen` for this prompt.
 
 ```text
 Create a clean character identity anchor image based on the provided reference images and approved character specification.
@@ -15,8 +26,16 @@ Goal:
 Requested anchor:
 - [front full-body / face closeup / side view / back view / outfit detail]
 
+Input images for image_gen:
+- Template reference: [none / optional, role if attached]
+- Primary character identity reference: [path_or_id and role]
+- Supporting references: [path_or_id and role list]
+
 Character specification:
 [approved character_spec]
+
+Identity lock:
+[identity_lock.must_keep]
 
 Style:
 - [target style]
@@ -32,6 +51,8 @@ Important:
 ## Template-Locked Draft Sheet
 
 Use this when `generation_mode` is `template_locked` or when the bundled `assets/master-sheet-template.png` must stay visually recognizable.
+
+Use built-in `image_gen` for the first draft and for stricter template-locked regenerations.
 
 ```text
 Create a character master sheet by filling the provided template image, not by redesigning the sheet.
@@ -52,9 +73,11 @@ Identity lock:
 Template and blueprint:
 [approved blueprint panel_plan, generation_mode, and template usage]
 
-Required references:
-- Attach `assets/master-sheet-template.png` as the layout reference.
-- Attach the approved character references or anchors as identity references.
+Input images for image_gen:
+- Template layout reference: `assets/master-sheet-template.png`. Preserve this geometry.
+- Primary character identity reference: [path_or_id and role]
+- Supporting outfit/prop/detail references: [path_or_id and role list]
+- Approved anchors, if any: [path_or_id and role list]
 
 Template preservation rules:
 - Keep the top `CHARACTER MASTER SHEET` header and the right project metadata box.
@@ -91,6 +114,8 @@ Visual style:
 
 Use this only when the user wants a custom or adapted layout, or when preserving the exact bundled template geometry is not a priority.
 
+Use built-in `image_gen` for adapted draft generation.
+
 ```text
 Create a high-resolution character design master sheet based on the provided character specification, reference images, anchors, and blueprint.
 
@@ -108,6 +133,12 @@ Identity lock:
 
 Blueprint:
 [approved blueprint panel_plan and layout_style]
+
+Input images for image_gen:
+- Layout/reference image, if any: [path_or_id and role]
+- Primary character identity reference: [path_or_id and role]
+- Supporting outfit/prop/detail references: [path_or_id and role list]
+- Approved anchors, if any: [path_or_id and role list]
 
 Layout reference:
 - Use the bundled master-sheet template image as a structural reference when attached: assets/master-sheet-template.png.
@@ -138,8 +169,15 @@ Important:
 
 ## Draft Regeneration
 
+Use built-in `image_gen` for visual regeneration. Keep the approved identity lock, character spec, blueprint, panel plan, and template usage unchanged. The only new instruction should be the failed-review issues.
+
 ```text
 Regenerate the no-dense-body-copy character sheet using the same approved character specification and blueprint.
+
+Attempt:
+- Current attempt index: [attempt_index]
+- Max automatic regenerations: 2
+- Regeneration reason: [draft_review.issues or user feedback]
 
 Keep:
 - [approved identity lock]
@@ -149,6 +187,12 @@ Keep:
 
 Fix these issues:
 - [issue list from review and user feedback]
+
+Input images for image_gen:
+- Previous failed draft, if available: [path_or_id and role]
+- Template layout reference, if applicable: [path_or_id and role]
+- Primary character identity reference: [path_or_id and role]
+- Approved anchors/supporting references: [path_or_id and role list]
 
 Do not introduce:
 - new hairstyle
@@ -160,7 +204,7 @@ Do not introduce:
 - character redesign
 ```
 
-For bundled-template geometry failures, prefer the Template-Locked Draft Sheet prompt. If template fidelity has already failed once for the same approved blueprint, switch to fallback composition instead of broad prompt repetition.
+For bundled-template geometry failures, prefer the Template-Locked Draft Sheet prompt for the first stricter regeneration. If template fidelity fails again for the same approved blueprint, switch to fallback composition: keep the fixed template background, generate needed panel art with built-in `image_gen`, and compose the sheet programmatically. Do not keep broad-regenerating the whole sheet after the automatic regeneration budget is exhausted.
 
 ## Copywriting Constraints
 

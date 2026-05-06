@@ -39,7 +39,19 @@ Before generating or editing, identify:
 - Required text preservation level: exact, approximate, translated, or omit until later.
 - Whether the user wants step-by-step approval or autonomous continuation.
 
+Default to step-by-step approval unless the user explicitly asks for autonomous continuation.
+
 If no source image is available, ask for it. If the user provides an existing intermediate image, resume from the matching stage instead of restarting.
+
+## Turn Protocol for Image Generation
+
+Image generation calls end the current assistant turn. Because of that, each stage must be split across turns:
+
+1. Before generating or editing an image, send a Korean `[N단계 실행 예정]` report with the current input, run folder, stage goal, resume behavior, and feedback options.
+2. Submit only the current stage prompt and required image inputs to the image generation or editing tool.
+3. Treat the image generation call as the last action of that turn. Do not append a result report, quality claim, or next-step question after the tool call.
+4. On the user's next message, resume from the generated image. Copy or reference the generated artifact under the run folder when possible, inspect the image if available, then send the Korean `[N단계 결과]` report.
+5. Do not start the next stage until the user chooses one of the feedback-gate options for the completed stage. This also applies when the original request asks for the full workflow, because multi-stage image generation cannot be chained in one assistant turn.
 
 ## Workflow
 
@@ -62,8 +74,10 @@ Report:
 
 Feedback gate:
 
-- If the image still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits, recommend Stage 2.
-- If the base is convincingly photoreal, ask whether to proceed to Stage 3.
+- Stop after reporting the Stage 1 result and ask the user to choose one option.
+- Allowed options: `Stage 3 진행`, `Stage 2로 실사감 강화`, `Stage 1 재생성`, `중단`.
+- Recommend `Stage 2로 실사감 강화` if the image still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits.
+- Recommend `Stage 3 진행` only if the base is convincingly photoreal.
 
 ### Stage 2: Photoreal Intensification
 
@@ -82,8 +96,10 @@ Report:
 
 Feedback gate:
 
-- If it still fails the threshold, repeat Stage 2 with sharper diagnosis.
-- If it passes, ask whether to proceed to Stage 3.
+- Stop after reporting the Stage 2 result and ask the user to choose one option.
+- Allowed options: `Stage 3 진행`, `Stage 2 재시도`, `Stage 1부터 재생성`, `중단`.
+- Recommend `Stage 2 재시도` if it still fails the live-action photo threshold.
+- Recommend `Stage 3 진행` only if the result passes the live-action photo threshold.
 
 ### Stage 3: Layout and Text Restoration
 
@@ -103,8 +119,12 @@ Report:
 
 Feedback gate:
 
-- If character quality regressed, go back to Stage 2 or regenerate Stage 3 with stricter preservation.
-- If text is broken but the character is good, proceed to Stage 4.
+- Stop after reporting the Stage 3 result and ask the user to choose one option.
+- Allowed options: `완료`, `Stage 4 텍스트 보정`, `Stage 3 재생성`, `Stage 2로 회귀`.
+- Recommend `Stage 2로 회귀` if character quality regressed.
+- Recommend `Stage 3 재생성` if layout restoration failed or pulled the character back toward illustration.
+- Recommend `Stage 4 텍스트 보정` only when the character is good but text or labels are broken, blurry, misaligned, or unreadable.
+- Recommend `완료` only when character realism, layout, and text are all acceptable.
 
 ### Stage 4: Text Repair
 
@@ -121,7 +141,26 @@ Report:
 - Whether any character or layout changes occurred.
 - Remaining manual text risk, if any.
 
+Feedback gate:
+
+- Stop after reporting the Stage 4 result and ask the user to choose one option.
+- Allowed options: `완료`, `Stage 4 재시도`, `수동 보정 필요로 종료`.
+- Recommend `Stage 4 재시도` if text repair changed the character, pose, outfit, lighting, or layout.
+- Recommend `수동 보정 필요로 종료` if the model still cannot produce verifiable readable text after a focused repair.
+- Recommend `완료` only when the repaired text can be verified and the character remained stable.
+
 ## Reporting Format
+
+Before each stage, send a concise Korean execution report:
+
+```text
+[N단계 실행 예정]
+- 입력: ...
+- 저장 폴더: ...
+- 단계 목표: ...
+- 생성 후 재개: ...
+- 피드백 옵션: ...
+```
 
 After each stage, send a concise Korean status report:
 
@@ -142,7 +181,9 @@ Keep reports factual. Do not claim text is readable unless it was inspected. Do 
 
 - Do not use or include the compressed prompt variant.
 - Prefer staged editing over one-shot generation.
-- Preserve the latest approved image as the next stage input.
-- Pause for user feedback at each gate unless the user explicitly asked to run the full workflow autonomously.
-- When using an image generation or editing tool, submit only the current stage prompt plus the required image inputs. Do not mix future-stage text restoration instructions into Stage 1 or Stage 2.
+- Preserve only the latest user-approved image as the next stage input.
+- Pause for user feedback at every gate. Do not advance to the next stage without an explicit user choice.
+- Even when the user requests autonomous continuation, do not chain multiple image generation stages in one assistant turn. Run one stage per image generation turn and resume on the next user message.
+- When using an image generation or editing tool, submit only the current stage prompt plus the required image inputs. Do not mix future-stage layout or text restoration instructions into Stage 1 or Stage 2.
 - When a model struggles with text, keep the character image stable and isolate text repair in Stage 4.
+- Do not claim text is readable, exact, repaired, or complete unless it was inspected and verified.

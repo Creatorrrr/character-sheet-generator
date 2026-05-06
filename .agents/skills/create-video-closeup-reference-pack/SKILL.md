@@ -31,6 +31,43 @@ Require at least one:
 
 Ask for missing inputs only when identity cannot be inferred. If the user requests a full pack and no master face exists, create `01_face_front` first and use it as the identity anchor after approval or after the user explicitly asks for autonomous continuation.
 
+## Resumable Runner Contract
+
+Use `scripts/video_pack_runner.py` for this workflow. The runner exists because Codex image generation may end the turn immediately after an `image_gen` call. Do not rely on the same turn continuing after image generation.
+
+Default policy:
+
+- Use Codex built-in `image_gen`; do not call an external image API.
+- Use `anchor_policy: "auto_if_pass"` in `state.json`.
+- If `01_face_front.png` is visually inspected and passes, continue to the rest of the pack without asking for another approval unless the user explicitly requested a gated workflow.
+- If the anchor fails inspection, run `rerun` for `01_face_front.png` and do not generate dependent items yet.
+
+Required command flow:
+
+```bash
+python3 scripts/video_pack_runner.py init --source <source-image>
+python3 scripts/video_pack_runner.py next --run-dir <run-dir>
+# Use the printed prompt with image_gen. The turn may end here.
+python3 scripts/video_pack_runner.py import-latest --run-dir <run-dir>
+# Inspect the imported output before marking pass.
+python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<short inspection note>"
+```
+
+If a generated image is wrong:
+
+```bash
+python3 scripts/video_pack_runner.py rerun --run-dir <run-dir> --item <filename> --note "<reason>"
+python3 scripts/video_pack_runner.py next --run-dir <run-dir>
+```
+
+State rules:
+
+- Before every `image_gen` call, run `next` so the target item is marked `generation_requested`.
+- After `image_gen`, do not create a new run folder. Resume the same run and run `import-latest`.
+- If the user provides no run folder, initialize by source image; the runner reuses an incomplete run with the same source image hash.
+- Only `inspect-pass` may mark an item `inspected_pass`. `import-latest` only copies the file into the run folder and marks it `imported`.
+- Treat the pack as complete only when every item is `inspected_pass` or `complete`.
+
 ## Image Skill Map
 
 - `01_face_front.png`: `$create-face-front-closeup`

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Character Sheet Orchestrator"
+  short_description: "Create staged character sheets"
+  default_prompt: "Use $character-sheet-orchestrator to create a character sheet from my character image and notes."

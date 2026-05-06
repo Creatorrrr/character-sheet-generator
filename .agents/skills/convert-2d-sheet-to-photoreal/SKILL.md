@@ -9,6 +9,16 @@ description: Manage the full workflow for converting a 2D character sheet into a
 
 Manage a staged image workflow that separates photoreal character conversion from text and layout restoration. Use the sibling stage skills in order, report each stage result, and ask for feedback when a quality gate is uncertain.
 
+## Default Output Location
+
+If the user does not specify where to save files, create a new run folder under `/Users/chasoik/Projects/character-sheet-generator/output/`.
+
+- Use `output/<slug>-photoreal-sheet-YYYYMMDD-HHMMSS/` for this workflow.
+- Build `<slug>` from the character name, then the input image filename stem, then `photoreal-sheet`. Normalize it to lowercase ASCII letters, numbers, and hyphens. If the normalized value is empty, use `photoreal-sheet`.
+- If the user is resuming from an existing run folder, keep using that folder instead of creating a new one.
+- Save Stage 1-4 outputs, approved intermediates, repair outputs, notes, and optional state or resume artifacts under the selected run folder.
+- When reporting artifacts, include the selected run folder and write output paths under that folder.
+
 ## Stage Skills
 
 Use these sibling skills from the same `.agents/skills` skill root:
@@ -118,6 +128,7 @@ After each stage, send a concise Korean status report:
 ```text
 [N단계 결과]
 - 입력: ...
+- 저장 폴더: ...
 - 산출물: ...
 - 유지한 요소: ...
 - 수정/강화한 요소: ...

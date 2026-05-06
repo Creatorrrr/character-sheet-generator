@@ -9,6 +9,16 @@ description: Coordinate a style-preserving closeup reference pack from an approv
 
 Build a batch plan for closeup and detail reference images from an approved character sheet. This skill coordinates source-of-truth extraction, identity anchoring, output selection, dependency ordering, generation prompts, review, and reporting.
 
+## Default Output Location
+
+If the user does not specify where to save files, create a new run folder under `/Users/chasoik/Projects/character-sheet-generator/output/`.
+
+- Use `output/<slug>-character-closeup-pack-YYYYMMDD-HHMMSS/` for this workflow.
+- Build `<slug>` from the character name, then the input image filename stem, then `character-closeup-pack`. Normalize it to lowercase ASCII letters, numbers, and hyphens. If the normalized value is empty, use `character-closeup-pack`.
+- If the user is resuming from an existing run folder, keep using that folder instead of creating a new one.
+- Save every pack image, paired-view image, approved anchor, batch plan, notes, and optional state or resume artifacts under the selected run folder.
+- Keep the pack filenames from `references/pack-map.md`, but place them inside the selected run folder.
+
 ## Inputs
 
 Require at least one:
@@ -42,7 +52,7 @@ Ask for missing inputs only when identity or source style cannot be inferred. If
    Use this format:
 
 ```text
-- output: ...
+- output: output/<slug>-character-closeup-pack-YYYYMMDD-HHMMSS/<filename>.png
 - purpose: ...
 - request_group: anchor | face_pair | parallel_detail | full_body | optional
 - dependencies: ...
@@ -86,6 +96,7 @@ After each batch, report in Korean:
 [캐릭터 시트 클로즈업 팩 진행 결과]
 - 기준 자료: ...
 - 스타일 모드: ...
+- 저장 폴더: ...
 - 생성 요청: ...
 - 병렬 그룹: ...
 - 좌우 묶음 처리: ...

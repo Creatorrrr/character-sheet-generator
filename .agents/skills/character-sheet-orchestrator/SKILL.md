@@ -9,6 +9,16 @@ description: Orchestrate staged creation of a character design sheet from user-p
 
 Manage a gated character-sheet workflow. Separate character identity decisions, layout decisions, image generation, text writing, text composition, and QA so each expensive regeneration has a clear cause.
 
+## Default Output Location
+
+If the user does not specify where to save files, create a new run folder under `/Users/chasoik/Projects/character-sheet-generator/output/`.
+
+- Use `output/<slug>-character-sheet-YYYYMMDD-HHMMSS/` for this workflow.
+- Build `<slug>` from the character name, then the input image filename stem, then `character-sheet`. Normalize it to lowercase ASCII letters, numbers, and hyphens. If the normalized value is empty, use `character-sheet`.
+- If the user is resuming from an existing run folder, keep using that folder instead of creating a new one.
+- Save all generated sheets, draft images, anchor assets, composed text outputs, QA notes, and optional state JSON under the selected run folder.
+- When reporting artifacts, include the selected run folder and write output paths under that folder.
+
 ## Core Rules
 
 - Require at least one uploaded/reference character image or enough written detail to define the character. Ask for missing inputs only when identity, style, or output language cannot be inferred.
@@ -67,6 +77,8 @@ Use this compact gate report after each major stage:
 
 ```text
 [단계 n/m] 단계명 완료
+
+저장 폴더: ...
 
 요약:
 - ...

@@ -11,6 +11,16 @@ Coordinate a photoreal reference pack for video AI. The pack is not a single bea
 
 Do not hardcode named character examples or character-specific traits from source notes. Use only the user's supplied character sheet, approved master face, and any user-provided generic character detail block.
 
+## Default Output Location
+
+If the user does not specify where to save files, create a new run folder under `/Users/chasoik/Projects/character-sheet-generator/output/`.
+
+- Use `output/<slug>-video-closeup-pack-YYYYMMDD-HHMMSS/` for this workflow.
+- Build `<slug>` from the character name, then the input image filename stem, then `video-closeup-pack`. Normalize it to lowercase ASCII letters, numbers, and hyphens. If the normalized value is empty, use `video-closeup-pack`.
+- If the user is resuming from an existing run folder, keep using that folder instead of creating a new one.
+- Save every pack image, paired-view image, approved anchor, batch plan, notes, and optional state or resume artifacts under the selected run folder.
+- Keep the filenames from the Image Skill Map, but place them inside the selected run folder.
+
 ## Inputs
 
 Require at least one:
@@ -51,7 +61,7 @@ If explicit skill invocation is unavailable, open the sibling `SKILL.md` and reu
 Before generating, build a batch plan with:
 
 ```text
-- output: ...
+- output: output/<slug>-video-closeup-pack-YYYYMMDD-HHMMSS/<filename>.png
 - skill: ...
 - request_group: ...
 - dependencies: ...
@@ -104,6 +114,7 @@ After each batch, report in Korean:
 ```text
 [영상 레퍼런스 팩 진행 결과]
 - 기준 이미지: ...
+- 저장 폴더: ...
 - 생성 요청: ...
 - 병렬 그룹: ...
 - 좌우 묶음 처리: ...

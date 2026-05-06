@@ -1,0 +1,4 @@
+interface:
+  display_name: "Character Sheet Closeup Pack"
+  short_description: "Create style-preserving closeup packs"
+  default_prompt: "Use $create-character-sheet-closeup-reference-pack to build a closeup reference pack from my approved character sheet."

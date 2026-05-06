@@ -1,13 +1,13 @@
 ---
 name: intensify-photoreal-character
-description: Refine a stage 1 text-free character sheet that still looks too anime, illustrated, 3D rendered, CGI, plastic, or AI-smoothed. Use during 2D to photoreal character sheet workflows when the base image needs stronger live-action realism while keeping identity, pose, expression, original sheet layout, empty text areas, non-text graphics, hair, and costume stable.
+description: Refine a stage 1 text-free character sheet that still looks too anime, illustrated, 3D rendered, CGI, plastic, or AI-smoothed. Use during 2D to photoreal character sheet workflows when the base image needs stronger live-action realism while keeping identity, pose, expression, original sheet layout, empty sheet annotation areas, non-text graphics, hair, costume, and in-image typography stable.
 ---
 
 # Intensify Photoreal Character
 
 ## Overview
 
-Use this stage after a text-free, layout-locked base exists but still carries 2D, CGI, 3D render, game asset, plastic skin, or overly polished AI traits. The goal is stronger real-camera realism without weakening the original expression, design identity, text-free state, or source-sheet structure.
+Use this stage after a text-free, layout-locked base exists but still carries 2D, CGI, 3D render, game asset, plastic skin, or overly polished AI traits. The goal is stronger real-camera realism without weakening the original expression, design identity, sheet-annotation-free state, in-image costume/prop typography, or source-sheet structure.
 
 ## Inputs
 
@@ -51,10 +51,11 @@ Use this prompt as the stage instruction:
 
 중요:
 - 원본 시트 기반 레이아웃은 절대 변경하지 말 것
-- 패널 배치, 뷰 개수, 디테일 컷 위치, 빈 텍스트 영역, 콜아웃 선, 컬러칩, 비문자 그래픽 장식은 그대로 유지할 것
+- 패널 배치, 뷰 개수, 디테일 컷 위치, 빈 시트 주석 영역, 콜아웃 선, 컬러칩, 비문자 그래픽 장식은 그대로 유지할 것
 - 모든 이미지 슬롯을 1:1로 유지할 것: 원본/입력 이미지의 각 슬롯은 개별 슬롯으로 남아야 하며 역할, 시점, 표정/감정, 디테일 대상, 소품/의상/신체 부위가 바뀌면 안 됨
 - 둘 이상의 슬롯을 하나로 합치거나, 슬롯을 생략하거나, 같은 이미지를 반복해 다른 슬롯을 대체하지 말 것
-- 새 텍스트, 가짜 문자, 임의 라벨, 번호, 캡션을 만들지 말 것
+- 새 시트 주석 텍스트, 가짜 주석 문자, 임의 라벨, 번호, 캡션을 만들지 말 것
+- 입력 이미지에 이미 남아 있는 의상/소품/액세서리/패치/자수/각인 타이포그래피는 새 라벨로 취급하지 말고 실사화된 디자인 디테일로 유지할 것
 - 시각적으로 더 “실제 배우 사진 시트”처럼 보이게 조정하되 실사감만 강화할 것
 - 디지털 렌더링 느낌보다 다큐멘터리한 라이브액션 참고사진 느낌을 우선
 
@@ -65,7 +66,8 @@ Use this prompt as the stage instruction:
 - natural skin
 - realistic fabric
 - same layout and panel structure
-- no readable text or pseudo text
+- no sheet labels, captions, section numbers, or pseudo annotation text
+- preserve original in-image costume and prop typography
 - no illustration look
 - no CGI look
 ```
@@ -73,9 +75,9 @@ Use this prompt as the stage instruction:
 ## Execution Guidance
 
 - Diagnose the dominant artifact before running: anime proportions, CGI lighting, plastic skin, mannequin body, game-render material, or over-sharpening.
-- Keep layout, panel placement, view count, image-slot count, slot meanings, detail crop positions, empty text areas, pose, expression, hair, costume, and color relationships stable.
-- Do not restore text in this stage.
-- Do not add new text, pseudo text, labels, section numbers, or captions.
+- Keep layout, panel placement, view count, image-slot count, slot meanings, detail crop positions, empty sheet annotation areas, pose, expression, hair, costume, in-image costume/prop typography, and color relationships stable.
+- Do not restore sheet annotation text in this stage.
+- Do not add new sheet annotation text, pseudo annotation text, labels, section numbers, or captions.
 - If a candidate improves photorealism but merges, omits, duplicates, or changes the meaning of a source image slot, reject it instead of self-approving.
 - If only one area fails, ask the image tool for localized correction when possible.
 
@@ -86,8 +88,8 @@ Pass only when:
 - The result looks like a live-action photographed person.
 - Skin and hair include believable natural irregularity.
 - Clothing materials look sewn, worn, folded, and physically lit.
-- The original text-free sheet layout, panel structure, view positions, image-slot count, slot meanings, empty text areas, and non-text graphics remain stable.
-- No readable text, labels, section numbers, captions, or fake typography were added.
+- The original text-free sheet layout, panel structure, view positions, image-slot count, slot meanings, empty sheet annotation areas, in-image costume/prop typography, and non-text graphics remain stable.
+- No readable sheet annotation text, labels, section numbers, captions, or fake annotation typography were added.
 - The face is not overly symmetrical, waxy, doll-like, or plastic.
 
 If it passes, hand the image to Stage 3. If it fails, repeat this stage with the failed artifact named explicitly.

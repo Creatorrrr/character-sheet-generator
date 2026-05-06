@@ -1,13 +1,13 @@
 ---
 name: restore-photoreal-sheet-layout
-description: Restore original text onto a self-approved text-free photoreal character sheet. Use as stage 3 after the text-free sheet already preserves the original 2D sheet layout, character realism, panels, views, and non-text graphics; this stage should add readable labels and copy without changing character, layout, or graphics.
+description: Restore original sheet annotation text onto a self-approved text-free photoreal character sheet. Use as stage 3 after the text-free sheet already preserves the original 2D sheet layout, character realism, panels, views, non-text graphics, and in-image costume/prop typography; this stage should add readable labels and copy without changing character, layout, or graphics.
 ---
 
 # Restore Photoreal Sheet Layout
 
 ## Overview
 
-Use this stage after the text-free photoreal character sheet is self-approved. Add the original 2D sheet's text and labels onto the text-free sheet while keeping the character, panels, view positions, and non-text graphics fully locked.
+Use this stage after the text-free photoreal character sheet is self-approved. Add the original 2D sheet's sheet annotation text and labels onto the text-free sheet while keeping the character, panels, view positions, non-text graphics, and in-image costume/prop typography fully locked.
 
 ## Inputs
 
@@ -17,37 +17,43 @@ Require:
 - Original 2D character sheet for layout and text reference.
 - `structure-inventory.md` for the original section/panel/image-slot/text-slot contract.
 
-Inspect the original first and note any unreadable source text before generation. The text-free photoreal sheet is the visual base; the original 2D sheet is the text source of truth.
+Inspect the original first and note any unreadable source sheet annotation text before generation. The text-free photoreal sheet is the visual base; the original 2D sheet is the sheet annotation text source of truth. Any typography already present inside the character image, costume, props, accessories, patches, embroidery, or engravings is locked visual content, not text to restore.
 
 ## Prompt
 
 Use this prompt as the stage instruction:
 
 ```text
-방금 완성된 무텍스트 실사 캐릭터 시트를 기준으로, 원본 2D 캐릭터 시트의 텍스트와 라벨만 원래 위치에 복원해서 텍스트 포함 최종 실사 캐릭터 시트로 만들어줘.
+방금 완성된 무텍스트 실사 캐릭터 시트를 기준으로, 원본 2D 캐릭터 시트의 시트 주석 텍스트와 라벨만 원래 위치에 복원해서 텍스트 포함 최종 실사 캐릭터 시트로 만들어줘.
 
 목표:
 - 캐릭터와 의상은 이미 완성된 무텍스트 실사 시트 그대로 유지
 - 캔버스 비율, 패널 그리드, 뷰 배치, 디테일 컷 위치, 콜아웃 선, 박스, 컬러칩, 비문자 그래픽은 변경하지 않음
 - 무텍스트 실사 시트의 모든 이미지 슬롯을 그대로 유지: 슬롯 개수, 개별 이미지 내용, 시점, 표정/감정, 디테일 대상, 소품/의상/신체 부위는 절대 바꾸지 않음
-- 원본 캐릭터 시트의 텍스트, 라벨, 제목, 섹션 번호, 설명문만 원래 위치에 복원
+- 무텍스트 실사 시트에 이미 남아 있는 의상/소품/액세서리/패치/자수/각인 타이포그래피는 그대로 유지하고 덮어쓰지 않음
+- 원본 캐릭터 시트의 시트 주석 텍스트, 라벨, 제목, 섹션 번호, 설명문만 원래 위치에 복원
 - 최종 결과물은 “실제 배우를 기준으로 만든 실사 캐릭터 디자인 시트”처럼 보여야 함
 
 유지할 것:
 - 실사 얼굴과 피부 질감
 - 현실적인 의상 재질과 디테일
+- 의상/소품/액세서리/이미지 슬롯 내부의 기존 타이포그래피와 로고형 디자인
 - 자연스러운 표정과 감정
 - 캐릭터 정체성
 - 포즈 및 전반적인 시트 구성
 - 무텍스트 최종본의 패널 배치와 비문자 그래픽
 
 복원할 것:
-- 원본 시트의 제목, 섹션 번호, 라벨, 설명문, 캡션, 로고 텍스트, 모델명, 버전 표기
+- 원본 시트의 제목, 섹션 번호, 라벨, 설명문, 캡션, UI 로고 텍스트, 모델명, 버전 표기
 - 원본과 대응되는 위치의 텍스트 박스와 라벨 영역 내부 텍스트
 - 텍스트의 시각적 위계와 정렬
 
+복원 대상이 아닌 것:
+- 무텍스트 실사 시트에 이미 들어 있는 의상 프린트, 로고형 패치, 자수, 소품 각인, 액세서리 문양 같은 이미지 슬롯 내부 타이포그래피
+- 이런 인이미지 타이포그래피는 캐릭터/소품 디자인 디테일로 보고 새 텍스트로 덮어쓰거나 정렬하지 말 것
+
 텍스트 관련:
-- 원본 캐릭터 시트의 텍스트 내용을 가능한 한 정확하고 읽기 쉽게 복원
+- 원본 캐릭터 시트의 시트 주석 텍스트 내용을 가능한 한 정확하고 읽기 쉽게 복원
 - 텍스트가 깨지지 않도록 또렷하게 배치
 - 원본 문구가 잘 보이도록 정리
 - 텍스트는 실사 캐릭터를 방해하지 않게 깔끔한 캐릭터 시트 디자인으로 정리
@@ -57,6 +63,7 @@ Use this prompt as the stage instruction:
 - 새 레이아웃을 만들거나 패널을 재배치하지 말 것
 - 캐릭터, 의상, 배경, 콜아웃 선, 박스, 컬러칩 등 비문자 요소는 다시 그리지 말 것
 - 텍스트 복원 과정에서 둘 이상의 이미지 슬롯을 하나로 합치거나, 이미지 슬롯을 생략하거나, 슬롯의 의미를 다른 표정/방향/디테일/소품으로 바꾸지 말 것
+- 텍스트 복원 과정에서 의상/소품/액세서리 안의 기존 타이포그래피를 바꾸거나 제거하지 말 것
 - 무텍스트 실사 시트에 있던 이미지 내용을 새로 생성한 다른 내용으로 대체하지 말 것
 - 캐릭터만 다시 2D처럼 보이지 않게 할 것
 - 텍스트와 그래픽 요소를 추가하더라도 캐릭터 본체는 끝까지 완전 실사 느낌 유지
@@ -72,7 +79,7 @@ Use this prompt as the stage instruction:
 
 출력:
 - 고해상도 최종본
-- readable text
+- readable sheet annotation text
 - same layout as the text-free photoreal sheet
 - polished live-action character sheet
 - realistic character design reference board
@@ -82,18 +89,18 @@ Use this prompt as the stage instruction:
 
 - Treat character realism as locked. Do not restyle the face, skin, hair, or outfit to match graphic elements.
 - Treat the text-free photoreal sheet and `structure-inventory.md` as locked. Do not change panel layout, view grouping, image-slot count, slot meanings, detail crop positions, non-text graphics, or empty structural elements.
-- Use the original sheet as the text source of truth and placement reference.
-- If source text is unreadable, report that before claiming exact restoration.
-- If text generation degrades the character, rerun with less text or reserve text cleanup for Stage 4.
-- If text generation changes layout, character content, or any non-text image-slot content, fail this stage and retry with stronger "text-only edit; do not redraw non-text slots" language.
+- Use the original sheet as the sheet annotation text source of truth and placement reference.
+- If source sheet annotation text is unreadable, report that before claiming exact restoration.
+- If sheet annotation text generation degrades the character, rerun with less sheet annotation text or reserve text cleanup for Stage 4.
+- If sheet annotation text generation changes layout, character content, in-image costume/prop typography, or any non-text image-slot content, fail this stage and retry with stronger "sheet annotation text-only edit; do not redraw non-text slots" language.
 
 ## Quality Check
 
 Pass only when:
 
 - The character still looks photographic and live-action.
-- Layout, panel positions, view groups, image-slot count, slot meanings, non-text graphics, and character content match the self-approved text-free sheet and original inventory.
-- Text and labels are readable enough for the user's target.
+- Layout, panel positions, view groups, image-slot count, slot meanings, non-text graphics, in-image costume/prop typography, and character content match the self-approved text-free sheet and original inventory.
+- Sheet annotation text and labels are readable enough for the user's target.
 - Graphic elements support the sheet without overpowering the character.
 
 If text is the only remaining problem, hand the image to Stage 4 instead of regenerating the whole sheet. If layout, character, slot count, or slot content changed, retry Stage 3 as a stricter text-only pass.

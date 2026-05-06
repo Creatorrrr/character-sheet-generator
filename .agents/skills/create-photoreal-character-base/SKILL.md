@@ -1,13 +1,13 @@
 ---
 name: create-photoreal-character-base
-description: Create the stage 1 text-free photoreal live-action sheet from a 2D character sheet. Use when converting a 2D character sheet into a realistic photographed character sheet while preserving the original canvas, panel layout, view positions, non-text graphics, identity, hair, costume, pose, and expression, but removing all readable text.
+description: Create the stage 1 text-free photoreal live-action sheet from a 2D character sheet. Use when converting a 2D character sheet into a realistic photographed character sheet while preserving the original canvas, panel layout, view positions, non-text graphics, identity, hair, costume, in-image typography, pose, and expression, but removing sheet annotation text.
 ---
 
 # Create Photoreal Character Base
 
 ## Overview
 
-Generate or edit from the original 2D character sheet to produce a text-free photoreal character sheet with the same structure as the source. This stage prioritizes real human photography while locking the original sheet layout and removing only readable text.
+Generate or edit from the original 2D character sheet to produce a text-free photoreal character sheet with the same structure as the source. This stage prioritizes real human photography while locking the original sheet layout and removing only sheet annotation text. Typography or logo-like marks inside the character image, costume, props, accessories, patches, embroidery, or engravings are character design details and must stay.
 
 ## Inputs
 
@@ -22,7 +22,8 @@ Use this prompt as the stage instruction:
 
 가장 중요한 목표:
 이 결과물은 실사풍 일러스트, 반실사 그림, 3D 캐릭터 렌더가 아니라, 실제 배우나 모델을 촬영한 라이브액션 캐릭터 레퍼런스 사진처럼 보여야 한다.
-원본 시트를 자유롭게 재구성하지 말고, 읽히는 글자만 제거한 상태로 원본 구조를 유지해야 한다.
+원본 시트를 자유롭게 재구성하지 말고, 시트 설명/라벨/캡션 같은 주석 텍스트만 제거한 상태로 원본 구조를 유지해야 한다.
+여기서 "텍스트 없는"은 시트 주석 텍스트가 없다는 뜻이다. 캐릭터 이미지 안의 의상 프린트, 로고형 패치, 자수, 소품 각인, 액세서리 문양처럼 디자인 일부인 타이포그래피는 제거하지 말고 실사화된 디테일로 유지한다.
 
 유지할 요소:
 - 원본 캔버스 비율과 전체 페이지 구도
@@ -33,13 +34,18 @@ Use this prompt as the stage instruction:
 - 원본 캐릭터의 정체성
 - 헤어스타일과 머리색
 - 의상 디자인과 색상
+- 의상/소품/액세서리/이미지 슬롯 내부에 인쇄, 자수, 각인, 패치 형태로 들어간 원본 타이포그래피와 로고형 디자인
 - 포즈와 구도
 - 표정과 감정
 
 제거할 텍스트 범위:
-- 제목, 섹션 번호, 라벨, 설명문, 캡션, 로고 텍스트, 모델명, 버전 표기 등 읽히는 글자는 모두 제거
-- 가짜 문자, 깨진 문자, 임의의 새 라벨도 만들지 말 것
-- 텍스트가 있던 박스, 선, 빈 라벨 자리, 패널 구조는 가능한 한 유지하되 내부 글자만 비워둘 것
+- 시트의 제목, 섹션 번호, 라벨, 설명문, 캡션, UI성 로고 텍스트, 모델명, 버전 표기 등 시트 레이아웃에 속한 주석 텍스트는 모두 제거
+- 가짜 주석 문자, 깨진 주석 문자, 임의의 새 라벨도 만들지 말 것
+- 시트 주석 텍스트가 있던 박스, 선, 빈 라벨 자리, 패널 구조는 가능한 한 유지하되 내부 글자만 비워둘 것
+
+보존할 텍스트성 디자인:
+- 의상, 소품, 액세서리, 신발, 가방, 무기, 패치, 자수, 각인 등 캐릭터 이미지 범위 안에 들어간 원본 타이포그래피는 디자인 디테일로 유지
+- 너무 작거나 흐려서 정확히 읽기 어려운 경우에도 위치, 크기, 색, 형태감은 유지하되 정확한 글자 재현을 주장하지 말 것
 
 변환 방향:
 - 얼굴은 애니메이션식 비율이 아니라 실제 인간의 얼굴 비율과 골격으로 자연스럽게 변환
@@ -53,7 +59,8 @@ Use this prompt as the stage instruction:
 - 자연스러운 카메라 사진 느낌, 라이브액션 캐릭터 디자인 레퍼런스 사진 시트 느낌
 
 중요:
-- 텍스트는 이번 단계에서 절대 재현하지 말 것
+- 시트 주석 텍스트는 이번 단계에서 절대 재현하지 말 것
+- 원본 의상/소품 타이포그래피는 새 라벨로 취급하지 말고 캐릭터 디자인 일부로 유지할 것
 - 원본 시트의 구조를 단순화하거나 새 레퍼런스 보드로 재배치하지 말 것
 - 둘 이상의 원본 이미지 슬롯을 하나로 합치지 말 것
 - 원본 이미지 슬롯을 생략하거나 다른 의미의 표정, 방향, 디테일, 소품, 의상 영역으로 바꾸지 말 것
@@ -83,7 +90,8 @@ Use this prompt as the stage instruction:
 - 고해상도
 - 텍스트 없는 실사 캐릭터 레퍼런스 시트
 - same canvas ratio and same panel/view structure as the original sheet
-- no readable text, no labels, no numbers, no fake typography
+- no sheet labels, no captions, no section numbers, no pseudo annotation text
+- preserve original in-image costume and prop typography as design detail
 - realistic live-action character reference sheet
 - documentary studio reference photo sheet
 ```
@@ -91,12 +99,12 @@ Use this prompt as the stage instruction:
 ## Execution Guidance
 
 - Use image generation or image editing with the source sheet attached when available.
-- Do not ask for text preservation in this stage.
-- Treat the original sheet and `structure-inventory.md` as a layout/content lock: keep panel placement, view count, image-slot count, slot roles, non-text graphic frames, callout lines, empty text areas, and color chips.
+- Do not ask for sheet annotation text preservation in this stage; preserve original in-image costume/prop typography as part of the visual design.
+- Treat the original sheet and `structure-inventory.md` as a layout/content lock: keep panel placement, view count, image-slot count, slot roles, non-text graphic frames, callout lines, empty sheet annotation areas, color chips, and in-image costume/prop typography.
 - Preserve recognizable design traits even while converting anime proportions into believable human anatomy.
 - If the model changes the sheet structure, rerun with stronger "same layout, same panel grid" language.
 - If the model merges, omits, duplicates, or changes the meaning of any source image slot, rerun with stronger "each source image slot must remain separate and semantically equivalent" language.
-- If the model keeps readable text or invents pseudo text, rerun with stronger "remove all readable text, keep empty boxes" language.
+- If the model keeps readable sheet annotation text or invents pseudo annotation text, rerun with stronger "remove all sheet labels/captions, keep empty boxes" language.
 
 ## Quality Check
 
@@ -105,7 +113,8 @@ Pass only when:
 - The character reads as a real photographed person.
 - Skin, hair, clothing, lighting, and materials are plausibly physical.
 - The original canvas ratio, panel structure, major view groups, image-slot count, detail-panel positions, slot meanings, and non-text graphic structure are preserved.
-- All readable text, labels, section numbers, captions, logo text, and fake typography are absent.
+- All readable sheet annotation text, labels, section numbers, captions, UI logo text, and fake annotation typography are absent.
+- Original in-image typography on clothing, props, accessories, patches, embroidery, or engravings is preserved as character design detail.
 - The result does not look like anime, digital painting, 3D render, game asset, mannequin, doll, or glossy AI retouch.
 
 Report remaining risks to the workflow manager.

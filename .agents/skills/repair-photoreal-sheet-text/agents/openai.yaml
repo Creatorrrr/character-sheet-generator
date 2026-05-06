@@ -1,4 +1,4 @@
 interface:
   display_name: "Repair Photoreal Sheet Text"
   short_description: "Fix labels without changing character"
-  default_prompt: "Use $repair-photoreal-sheet-text to improve only the text and labels on this finished photoreal character sheet."
+  default_prompt: "Use $repair-photoreal-sheet-text to improve only the sheet annotation text and labels on this finished photoreal character sheet without changing in-image costume/prop typography."

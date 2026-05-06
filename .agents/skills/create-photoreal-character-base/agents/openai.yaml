@@ -1,4 +1,4 @@
 interface:
   display_name: "Create Text-Free Photoreal Sheet"
-  short_description: "Make layout-locked text-free photoreal sheet"
-  default_prompt: "Use $create-photoreal-character-base to make a text-free live-action sheet with the same structure as this 2D character sheet."
+  short_description: "Make layout-locked sheet-annotation-free photoreal sheet"
+  default_prompt: "Use $create-photoreal-character-base to make a sheet-annotation-free live-action sheet with the same structure as this 2D character sheet while preserving in-image costume/prop typography."

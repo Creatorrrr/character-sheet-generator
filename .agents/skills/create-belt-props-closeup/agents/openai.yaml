@@ -1,0 +1,4 @@
+interface:
+  display_name: "Belt Props Closeup"
+  short_description: "Create belt and prop closeup"
+  default_prompt: "Use $create-belt-props-closeup to generate a photoreal belt and props closeup."

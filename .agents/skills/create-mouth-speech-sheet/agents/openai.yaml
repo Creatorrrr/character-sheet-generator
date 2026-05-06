@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mouth Speech Sheet"
+  short_description: "Create speaking mouth reference sheet"
+  default_prompt: "Use $create-mouth-speech-sheet to generate a photoreal speaking mouth reference sheet."

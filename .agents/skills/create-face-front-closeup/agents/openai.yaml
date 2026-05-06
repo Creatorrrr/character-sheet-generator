@@ -1,0 +1,4 @@
+interface:
+  display_name: "Face Front Closeup"
+  short_description: "Create front face ID closeup"
+  default_prompt: "Use $create-face-front-closeup to generate a front-facing photoreal face ID closeup."

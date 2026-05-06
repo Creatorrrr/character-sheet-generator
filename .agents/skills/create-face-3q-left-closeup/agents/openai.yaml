@@ -1,0 +1,4 @@
+interface:
+  display_name: "Face 3Q Left Closeup"
+  short_description: "Create left 3/4 face closeup"
+  default_prompt: "Use $create-face-3q-left-closeup to generate a left-facing 3/4 photoreal face closeup."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Expression Six Sheet"
+  short_description: "Create six expression face sheet"
+  default_prompt: "Use $create-expression-six-sheet to generate a six-expression photoreal face reference sheet."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Full Body Front Reference"
+  short_description: "Create full body front reference"
+  default_prompt: "Use $create-full-body-front-reference to generate a photoreal full body front reference."

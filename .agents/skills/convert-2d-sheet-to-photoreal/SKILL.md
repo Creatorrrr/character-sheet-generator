@@ -11,7 +11,7 @@ Manage a staged image workflow that separates photoreal character conversion fro
 
 ## Stage Skills
 
-Use these sibling skills from the same `.agents` skill root:
+Use these sibling skills from the same `.agents/skills` skill root:
 
 1. `$create-photoreal-character-base` for a text-free live-action base.
 2. `$intensify-photoreal-character` when the base still feels anime, 3D, CGI, plastic, or overly AI-smoothed.

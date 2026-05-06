@@ -1,0 +1,4 @@
+interface:
+  display_name: "Face Side Left Profile"
+  short_description: "Create left side face profile"
+  default_prompt: "Use $create-face-side-left-profile to generate a left-facing photoreal side profile closeup."

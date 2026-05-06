@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hand Gesture Four Sheet"
+  short_description: "Create four hand gesture sheet"
+  default_prompt: "Use $create-hand-gesture-four-sheet to generate a four-panel photoreal hand gesture reference sheet."

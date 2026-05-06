@@ -1,0 +1,4 @@
+interface:
+  display_name: "Full Body Side Reference"
+  short_description: "Create full body side reference"
+  default_prompt: "Use $create-full-body-side-reference to generate a photoreal full body side reference."

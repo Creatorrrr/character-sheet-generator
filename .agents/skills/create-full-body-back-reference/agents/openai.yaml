@@ -1,0 +1,4 @@
+interface:
+  display_name: "Full Body Back Reference"
+  short_description: "Create full body back reference"
+  default_prompt: "Use $create-full-body-back-reference to generate a photoreal full body back reference."

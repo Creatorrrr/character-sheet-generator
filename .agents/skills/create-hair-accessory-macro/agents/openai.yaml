@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hair Accessory Macro"
+  short_description: "Create hair accessory macro shot"
+  default_prompt: "Use $create-hair-accessory-macro to generate a photoreal hair accessory macro closeup."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Character Idle Pose"
+  short_description: "Create neutral idle pose reference"
+  default_prompt: "Use $create-character-idle-pose to generate a photoreal neutral idle pose reference."

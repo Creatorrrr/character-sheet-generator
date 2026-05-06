@@ -1,0 +1,4 @@
+interface:
+  display_name: "Eye Brow Macro Closeup"
+  short_description: "Create eye and brow macro shot"
+  default_prompt: "Use $create-eye-brow-macro-closeup to generate a photoreal eye and brow macro closeup."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Upper Costume Closeup"
+  short_description: "Create upper costume closeup"
+  default_prompt: "Use $create-upper-costume-closeup to generate a photoreal upper costume closeup."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Face Turnaround Sheet"
+  short_description: "Create five angle face turnaround"
+  default_prompt: "Use $create-face-turnaround-sheet to generate a five-angle photoreal face turnaround sheet."

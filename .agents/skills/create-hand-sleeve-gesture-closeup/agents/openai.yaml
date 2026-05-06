@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hand Sleeve Gesture Closeup"
+  short_description: "Create hand and sleeve closeup"
+  default_prompt: "Use $create-hand-sleeve-gesture-closeup to generate a photoreal hand and sleeve gesture closeup."

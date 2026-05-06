@@ -1,0 +1,4 @@
+interface:
+  display_name: "Shoes Lower Outfit Closeup"
+  short_description: "Create shoe and lower outfit closeup"
+  default_prompt: "Use $create-shoes-lower-outfit-closeup to generate a photoreal shoes and lower outfit closeup."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Video Closeup Reference Pack"
+  short_description: "Manage video closeup reference pack"
+  default_prompt: "Use $create-video-closeup-reference-pack to build a parallel image generation plan for video character closeup references."

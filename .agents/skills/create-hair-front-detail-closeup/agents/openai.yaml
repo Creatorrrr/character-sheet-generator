@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hair Front Detail Closeup"
+  short_description: "Create front hair detail closeup"
+  default_prompt: "Use $create-hair-front-detail-closeup to generate a photoreal front hair detail closeup."

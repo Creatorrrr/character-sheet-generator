@@ -11,7 +11,7 @@ Generate or edit from the original 2D character sheet to produce a text-free pho
 
 ## Inputs
 
-Require the original 2D character sheet image. If the user has special identity constraints, include them before the prompt.
+Require the original 2D character sheet image. If the workflow has created `structure-inventory.md`, include it as the structure/content contract. If the user has special identity constraints, include them before the prompt.
 
 ## Prompt
 
@@ -28,6 +28,7 @@ Use this prompt as the stage instruction:
 - 원본 캔버스 비율과 전체 페이지 구도
 - 원본 패널 그리드와 섹션 위치
 - 큰 전신 정면도, 턴어라운드, 얼굴/눈 디테일, 의상 디테일, 하체/소품 디테일, 프로필/키포인트 패널의 위치와 크기 관계
+- 원본의 모든 이미지 슬롯을 1:1로 유지: 각 슬롯의 개수, 위치 관계, 역할, 시점, 표정/감정, 디테일 대상, 소품/의상/신체 부위가 원본과 대응되어야 함
 - 콜아웃 선, 박스, 패널 테두리, 컬러칩, 비문자 그래픽 장식
 - 원본 캐릭터의 정체성
 - 헤어스타일과 머리색
@@ -54,6 +55,8 @@ Use this prompt as the stage instruction:
 중요:
 - 텍스트는 이번 단계에서 절대 재현하지 말 것
 - 원본 시트의 구조를 단순화하거나 새 레퍼런스 보드로 재배치하지 말 것
+- 둘 이상의 원본 이미지 슬롯을 하나로 합치지 말 것
+- 원본 이미지 슬롯을 생략하거나 다른 의미의 표정, 방향, 디테일, 소품, 의상 영역으로 바꾸지 말 것
 - 캐릭터와 의상, 표정, 포즈, 실사화 품질과 함께 원본 구조 보존을 최우선으로 할 것
 
 피해야 할 것:
@@ -89,9 +92,10 @@ Use this prompt as the stage instruction:
 
 - Use image generation or image editing with the source sheet attached when available.
 - Do not ask for text preservation in this stage.
-- Treat the original sheet as a layout lock: keep panel placement, view count, non-text graphic frames, callout lines, empty text areas, and color chips.
+- Treat the original sheet and `structure-inventory.md` as a layout/content lock: keep panel placement, view count, image-slot count, slot roles, non-text graphic frames, callout lines, empty text areas, and color chips.
 - Preserve recognizable design traits even while converting anime proportions into believable human anatomy.
 - If the model changes the sheet structure, rerun with stronger "same layout, same panel grid" language.
+- If the model merges, omits, duplicates, or changes the meaning of any source image slot, rerun with stronger "each source image slot must remain separate and semantically equivalent" language.
 - If the model keeps readable text or invents pseudo text, rerun with stronger "remove all readable text, keep empty boxes" language.
 
 ## Quality Check
@@ -100,7 +104,7 @@ Pass only when:
 
 - The character reads as a real photographed person.
 - Skin, hair, clothing, lighting, and materials are plausibly physical.
-- The original canvas ratio, panel structure, major view groups, detail-panel positions, and non-text graphic structure are preserved.
+- The original canvas ratio, panel structure, major view groups, image-slot count, detail-panel positions, slot meanings, and non-text graphic structure are preserved.
 - All readable text, labels, section numbers, captions, logo text, and fake typography are absent.
 - The result does not look like anime, digital painting, 3D render, game asset, mannequin, doll, or glossy AI retouch.
 

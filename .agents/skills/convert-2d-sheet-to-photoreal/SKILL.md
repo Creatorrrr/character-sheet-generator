@@ -78,7 +78,7 @@ Always use autonomous continuation. Keep stage reports factual, but treat them a
 
 Required state:
 
-- `workflow-state.json`: `stage`, `attemptsByStage`, `sourceImage`, `latestAcceptedImage`, `latestRejectedImage`, `nextAction`, and `terminalReason`.
+- `workflow-state.json`: `stage`, `attemptsByStage`, `sourceImage`, `structureInventory`, `latestAcceptedImage`, `latestRejectedImage`, `nextAction`, and `terminalReason`.
 - `structure-inventory.md`: original section/panel/slot contract and any source details that cannot be verified exactly.
 - `verification-notes.md`: chronological notes with each generated artifact, pass/fail decision, visible defects, and why the next stage or retry was chosen.
 

@@ -11,7 +11,7 @@ Use this optional final stage when the character and layout are acceptable but t
 
 ## Inputs
 
-Require the finished photoreal character sheet. Use the original 2D sheet or user-provided text as the source of truth for labels and copy.
+Require the finished photoreal character sheet. Use the original 2D sheet or user-provided text as the source of truth for labels and copy. When available, also use `final-photoreal-text-free-sheet.png` and `structure-inventory.md` to verify that text repair does not alter non-text structure or content.
 
 ## Prompt
 
@@ -26,6 +26,7 @@ Use this prompt as the stage instruction:
 - 전체 레이아웃
 - 포즈와 표정
 - 시트의 구성
+- 모든 비텍스트 이미지 슬롯의 개수와 내용
 
 수정할 것:
 - 깨지거나 흐린 텍스트
@@ -43,6 +44,7 @@ Use this prompt as the stage instruction:
 중요:
 - 캐릭터나 의상의 실사 표현은 절대 약해지지 않게
 - 텍스트만 개선하는 방향으로 최소 수정
+- 이미지 슬롯을 합치거나 생략하거나 다른 의미의 표정, 방향, 디테일, 소품, 의상 영역으로 바꾸지 않게
 ```
 
 ## Execution Guidance
@@ -50,6 +52,7 @@ Use this prompt as the stage instruction:
 - Do not re-render the character unless text repair is impossible otherwise.
 - If possible, provide exact replacement text to the image tool instead of asking it to infer text.
 - Keep text boxes, labels, and alignment consistent with the existing layout.
+- Compare the repaired result against both the Stage 3 input and `final-photoreal-text-free-sheet.png`; reject it if non-text panel structure, slot count, slot meaning, character, pose, clothing, prop, expression, or detail content changed.
 - If text remains unreliable after image editing, recommend a deterministic layout pass outside generative image editing.
 
 ## Quality Check
@@ -57,6 +60,7 @@ Use this prompt as the stage instruction:
 Pass only when:
 
 - Character realism, pose, clothing, and layout remain stable.
+- Non-text image slots remain present, separate, and semantically unchanged.
 - Text is visibly clearer than before.
 - No new labels, incorrect words, or unintended design changes were introduced.
 

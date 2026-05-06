@@ -15,6 +15,7 @@ Require:
 
 - `final-photoreal-text-free-sheet.png` or the latest self-approved text-free photoreal sheet from Stage 1 or Stage 2.
 - Original 2D character sheet for layout and text reference.
+- `structure-inventory.md` for the original section/panel/image-slot/text-slot contract.
 
 Inspect the original first and note any unreadable source text before generation. The text-free photoreal sheet is the visual base; the original 2D sheet is the text source of truth.
 
@@ -28,6 +29,7 @@ Use this prompt as the stage instruction:
 목표:
 - 캐릭터와 의상은 이미 완성된 무텍스트 실사 시트 그대로 유지
 - 캔버스 비율, 패널 그리드, 뷰 배치, 디테일 컷 위치, 콜아웃 선, 박스, 컬러칩, 비문자 그래픽은 변경하지 않음
+- 무텍스트 실사 시트의 모든 이미지 슬롯을 그대로 유지: 슬롯 개수, 개별 이미지 내용, 시점, 표정/감정, 디테일 대상, 소품/의상/신체 부위는 절대 바꾸지 않음
 - 원본 캐릭터 시트의 텍스트, 라벨, 제목, 섹션 번호, 설명문만 원래 위치에 복원
 - 최종 결과물은 “실제 배우를 기준으로 만든 실사 캐릭터 디자인 시트”처럼 보여야 함
 
@@ -54,6 +56,8 @@ Use this prompt as the stage instruction:
 중요:
 - 새 레이아웃을 만들거나 패널을 재배치하지 말 것
 - 캐릭터, 의상, 배경, 콜아웃 선, 박스, 컬러칩 등 비문자 요소는 다시 그리지 말 것
+- 텍스트 복원 과정에서 둘 이상의 이미지 슬롯을 하나로 합치거나, 이미지 슬롯을 생략하거나, 슬롯의 의미를 다른 표정/방향/디테일/소품으로 바꾸지 말 것
+- 무텍스트 실사 시트에 있던 이미지 내용을 새로 생성한 다른 내용으로 대체하지 말 것
 - 캐릭터만 다시 2D처럼 보이지 않게 할 것
 - 텍스트와 그래픽 요소를 추가하더라도 캐릭터 본체는 끝까지 완전 실사 느낌 유지
 - 최종 결과는 실사 인물 사진 기반의 캐릭터 시트여야 함
@@ -77,19 +81,19 @@ Use this prompt as the stage instruction:
 ## Execution Guidance
 
 - Treat character realism as locked. Do not restyle the face, skin, hair, or outfit to match graphic elements.
-- Treat the text-free photoreal sheet as locked. Do not change panel layout, view grouping, detail crop positions, non-text graphics, or empty structural elements.
+- Treat the text-free photoreal sheet and `structure-inventory.md` as locked. Do not change panel layout, view grouping, image-slot count, slot meanings, detail crop positions, non-text graphics, or empty structural elements.
 - Use the original sheet as the text source of truth and placement reference.
 - If source text is unreadable, report that before claiming exact restoration.
 - If text generation degrades the character, rerun with less text or reserve text cleanup for Stage 4.
-- If text generation changes layout or character content, fail this stage and retry with stronger "text-only edit" language.
+- If text generation changes layout, character content, or any non-text image-slot content, fail this stage and retry with stronger "text-only edit; do not redraw non-text slots" language.
 
 ## Quality Check
 
 Pass only when:
 
 - The character still looks photographic and live-action.
-- Layout, panel positions, view groups, non-text graphics, and character content match the self-approved text-free sheet.
+- Layout, panel positions, view groups, image-slot count, slot meanings, non-text graphics, and character content match the self-approved text-free sheet and original inventory.
 - Text and labels are readable enough for the user's target.
 - Graphic elements support the sheet without overpowering the character.
 
-If text is the only remaining problem, hand the image to Stage 4 instead of regenerating the whole sheet. If layout or character changed, retry Stage 3 as a stricter text-only pass.
+If text is the only remaining problem, hand the image to Stage 4 instead of regenerating the whole sheet. If layout, character, slot count, or slot content changed, retry Stage 3 as a stricter text-only pass.

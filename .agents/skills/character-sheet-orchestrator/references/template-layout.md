@@ -2,6 +2,8 @@
 
 Use `assets/master-sheet-template.png` as the default character master-sheet layout reference when the user does not provide a custom layout. The asset is a wireframe reference, not character content.
 
+Default use is `template_locked`: preserve the template's geometry and structural labels, then replace placeholders with character artwork. Use looser adaptation only when the user asks for a custom or redesigned layout.
+
 ## Asset
 
 - Path: `assets/master-sheet-template.png`
@@ -48,8 +50,11 @@ Footer:
 
 ## Adaptation Rules
 
+- In `template_locked` mode, do not redesign the sheet. Preserve the outer border, top title/header area, project metadata box, numbered section headers, panel positions, profile/lower panels, footer boxes, and blue technical-frame style.
+- In `template_locked` mode, replace only mannequin construction bodies, blank face placeholders, plus icons, empty placeholder drawings, and interior art placeholders.
+- In `template_locked` mode, keep structural labels such as `CHARACTER MASTER SHEET`, section numbers, and short section headers. Omit dense profile/body copy until final programmatic text composition.
 - Keep the broad hierarchy: big identity panel left, structural views center, facial/eye details right, detail strips and profile lower down.
-- Use the blue technical-frame style only when it matches the requested aesthetic. It may be recolored to the character palette.
+- Use looser recoloring or panel reinterpretation only in `adapted` or `custom` mode. Do not recolor or restyle the default template in `template_locked` mode unless the user explicitly asks.
 - For mascot, chibi, animal, creature, robot, or non-human characters, reinterpret anatomy panels without forcing a human mannequin.
 - For photoreal sheets, reduce decorative UI density and keep the template as a clean production board.
 - For Korean final sheets, relabel sections in Korean or bilingual Korean/English only if space allows.
@@ -62,3 +67,19 @@ Footer:
 - Do not preserve the exact English labels when the user requested Korean or another language.
 - Do not let the template override the approved character spec, outfit, palette, motifs, or proportions.
 - Do not claim the final text is readable just because the template has text zones; inspect the output.
+
+## Template Fidelity QA
+
+Pass when all are true:
+
+- Top `CHARACTER MASTER SHEET` header and right project metadata box remain.
+- Section numbers `01` through `10` remain in the original relative positions.
+- Left front-view, center turnaround, right expression/eye, middle detail, lower profile/concept/keyword/motif, and footer areas keep the template hierarchy.
+- Body text zones are blank, faint placeholder lines, or ready for programmatic overlay.
+
+Fail when any are true:
+
+- The result becomes a poster, art-book spread, ornate fantasy frame, or new layout.
+- Numbered section headers, project box, lower panels, or footer boxes disappear.
+- Profile or footer areas are replaced by unrelated decorative boxes.
+- Character illustration quality is good but the template geometry is not recognizable.

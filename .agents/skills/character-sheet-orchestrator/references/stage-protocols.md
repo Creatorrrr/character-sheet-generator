@@ -81,12 +81,19 @@ Choose one layout family:
 - Standard: Front View, Turnaround, Expressions, Eye Detail, Outfit Details, Shoes, Profile, Keywords and Mood, Design Motif and Palette.
 - Advanced: Hero Full Body, Turnaround, Expression Sheet, Face and Eye Detail, Outfit Breakdown, Props, Profile Card, Personality or Quotes, Design Keywords, Motifs and Palette.
 
+Choose one generation mode:
+
+- `template_locked`: default for the bundled `master-sheet-template.png`. Preserve template geometry, structural labels, numbered headers, project/profile/lower/footer boxes, and blue technical-frame rhythm.
+- `adapted`: keep the broad hierarchy but allow resizing, relabeling, recoloring, or section merging.
+- `custom`: use a user-provided layout or a new layout family.
+
 Output:
 
 ```json
 {
   "sheet_type": "master_sheet",
   "layout_style": "",
+  "generation_mode": "template_locked | adapted | custom",
   "panel_plan": [
     {"id": "01", "title": "Front View", "priority": "high"}
   ],
@@ -99,7 +106,7 @@ Output:
 
 Report the proposed left/center/right/top/bottom layout, included sections, and the approval choices.
 
-If using the bundled template, state which sections are kept, relabeled, resized, or omitted. Do not present the wireframe mannequin, empty profile lines, or placeholder circles as character content.
+If using the bundled template, state whether the mode is `template_locked` or `adapted`. In `template_locked`, do not plan to resize, recolor, or reorder template structure unless the user asks. Do not present the wireframe mannequin, empty profile lines, or placeholder circles as character content.
 
 ## 4. Anchor Generator
 
@@ -131,15 +138,18 @@ Report which anchors were generated or selected, and whether the draft stage can
 
 ## 5. Draft Generator
 
-Generate a text-free sheet from the approved spec, blueprint, source images, and anchors.
+Generate a no-dense-body-copy sheet from the approved spec, blueprint, source images, and anchors.
 
 Rules:
 
-- If using the bundled template, use it as a layout reference image together with the approved character references. Follow the panel structure, border rhythm, scale areas, and text-space reservations.
+- If using the bundled template in `template_locked` mode, use it as a visual layout base together with the approved character references. Preserve the template's outer border, top title/header area, project metadata box, numbered section headers, panel positions, profile/lower panels, footer boxes, and blue technical wireframe rhythm.
+- In `template_locked` mode, replace only mannequin bodies, blank face placeholders, plus icons, empty placeholder drawings, and interior art placeholders with the approved character content.
+- In `template_locked` mode, keep structural labels such as the large sheet title, section numbers, and short section headers. Do not treat these as unwanted random text.
+- If using the bundled template in `adapted` mode, follow the broad panel structure, border rhythm, scale areas, and text-space reservations, but report any intended resizing or merging.
 - Replace all mannequin silhouettes, blank face circles, plus icons, and empty placeholder boxes with the approved character content or clean empty text/composition areas.
 - Prioritize same person, same face, same hair, same outfit, same palette, and same accessories across all panels.
 - Include all blueprint panels unless a tool limitation makes it impossible; report any omission.
-- Use no dense body text. Allow only large section titles, small placeholder lines, or numbered panel tags.
+- Use no dense body text. Allow structural labels, large section titles, small placeholder lines, or numbered panel tags.
 - Leave clean text areas for final composition.
 - Keep the sheet high-resolution, organized, and useful as a production reference.
 
@@ -168,6 +178,7 @@ Inspect before asking the user to approve.
 
 Check:
 
+- Template fidelity if `generation_mode` is `template_locked`: top header, project metadata box, section numbers `01`-`10`, original relative panel positions, lower profile/concept/keyword/motif areas, and footer boxes.
 - Same-character consistency across views and expressions.
 - Expression variety and required expression count.
 - Missing or duplicated panels.
@@ -181,12 +192,15 @@ Output:
 ```json
 {
   "review_summary": {
+    "template_fidelity": "pass | fail | not_applicable",
     "passed": [],
     "issues": [],
-    "recommended_action": "approve | partial_edit | regenerate | return_to_blueprint"
+    "recommended_action": "approve | partial_edit | regenerate | return_to_blueprint | fallback_composition"
   }
 }
 ```
+
+If a `template_locked` draft has good character art but fails template fidelity, do not approve it. If the same failure already happened once in `draft_feedback_history`, recommend `fallback_composition`: fixed template background, separately generated panel art, and programmatic composition.
 
 ## 7. Copywriter
 
@@ -218,7 +232,7 @@ Output:
 
 ## 8. Final Composer
 
-Combine the approved text-free draft with the approved copy.
+Combine the approved no-dense-body-copy draft with the approved copy.
 
 Preferred order:
 

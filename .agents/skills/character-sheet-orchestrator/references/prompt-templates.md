@@ -29,7 +29,67 @@ Important:
 - Avoid random outfit changes, changed age, changed face shape, changed hairstyle, or extra accessories.
 ```
 
-## Text-Free Draft Sheet
+## Template-Locked Draft Sheet
+
+Use this when `generation_mode` is `template_locked` or when the bundled `assets/master-sheet-template.png` must stay visually recognizable.
+
+```text
+Create a character master sheet by filling the provided template image, not by redesigning the sheet.
+
+Highest priority:
+- Preserve the template layout almost exactly.
+- If there is a conflict between making the sheet more beautiful and preserving the template geometry, preserve the template geometry.
+- Keep the same vertical page structure, outer border, top title/header area, project metadata box, numbered section headers, panel positions, profile/lower panels, footer boxes, and blue technical wireframe style.
+- Do not invent a new decorative frame, fantasy border, poster layout, art-book composition, ornate parchment board, or replacement UI.
+- Treat `assets/master-sheet-template.png` as the layout base. Replace only the mannequin bodies, face placeholders, plus icons, empty placeholder drawings, and interior art placeholders with approved character artwork.
+
+Approved character specification:
+[approved character_spec]
+
+Identity lock:
+[identity_lock.must_keep]
+
+Template and blueprint:
+[approved blueprint panel_plan, generation_mode, and template usage]
+
+Required references:
+- Attach `assets/master-sheet-template.png` as the layout reference.
+- Attach the approved character references or anchors as identity references.
+
+Template preservation rules:
+- Keep the top `CHARACTER MASTER SHEET` header and the right project metadata box.
+- Keep section `01` as the large left Front View panel.
+- Keep section `02` as the top-center Turnaround panel with front, side, and back views.
+- Keep section `03` as the top-right 2x2 Expressions grid.
+- Keep section `04` as the Eye Detail panel below expressions.
+- Keep section `05` as the horizontal Details strip.
+- Keep section `06` as the Shoes or lower-detail panel.
+- Keep section `07` as the Profile card area with blank body fields or faint placeholder lines.
+- Keep sections `08`, `09`, and `10` in their original lower positions.
+- Keep footer boxes for Notes / Remarks, Checklist, and Creator in their original lower positions.
+- Keep section numbers `01`-`10` visible and aligned to the original template rhythm.
+
+Text policy:
+- This is a no-dense-body-copy draft, not a structural-label-free redesign.
+- Preserve structural labels such as the sheet title, section numbers, and short section headers.
+- Do not add dense body copy, long paragraphs, tiny unreadable filler text, watermark, credits, or logo marks.
+- Leave profile, concept, notes, checklist, creator, and other copy fields blank or as faint placeholder lines for later programmatic text overlay.
+
+Character content:
+- Fill the template with the approved character.
+- Keep the same face, hair, outfit, palette, accessories, and proportions across every panel.
+- Fit character artwork inside the existing template boxes.
+- Include the required expression, turnaround, detail, footwear/lower-detail, motif, and palette content from the blueprint.
+
+Visual style:
+- Official production reference sheet.
+- Clean rendering appropriate to [approved target style].
+- Layout fidelity is more important than decorative polish.
+```
+
+## Adapted Draft Sheet
+
+Use this only when the user wants a custom or adapted layout, or when preserving the exact bundled template geometry is not a priority.
 
 ```text
 Create a high-resolution character design master sheet based on the provided character specification, reference images, anchors, and blueprint.
@@ -54,6 +114,7 @@ Layout reference:
 - Follow the same overall page hierarchy: large front view column, central turnaround area, right expression and eye-detail stack, middle detail strip, lower shoes/profile/concept/keyword/motif areas, and footer metadata.
 - Use the template for panel geometry, spacing, numbered section rhythm, and reserved text zones only.
 - Do not copy the mannequin construction lines, blank face placeholders, plus icons, empty profile lines, or exact English wireframe copy as final content.
+- If exact template fidelity is required, stop and use the Template-Locked Draft Sheet prompt instead.
 
 Required sections:
 [approved section list]
@@ -78,7 +139,7 @@ Important:
 ## Draft Regeneration
 
 ```text
-Regenerate the text-free character sheet using the same approved character specification and blueprint.
+Regenerate the no-dense-body-copy character sheet using the same approved character specification and blueprint.
 
 Keep:
 - [approved identity lock]
@@ -98,6 +159,8 @@ Do not introduce:
 - copied mannequin placeholders from the template
 - character redesign
 ```
+
+For bundled-template geometry failures, prefer the Template-Locked Draft Sheet prompt. If template fidelity has already failed once for the same approved blueprint, switch to fallback composition instead of broad prompt repetition.
 
 ## Copywriting Constraints
 
@@ -135,7 +198,7 @@ Output shape:
 
 Prefer deterministic rendering:
 
-- Use the approved text-free draft as the base image.
+- Use the approved no-dense-body-copy draft as the base image.
 - Place the approved copy into the blueprint text boxes.
 - If the bundled master-sheet template was used, align text with its intended zones while adapting labels to the user's language.
 - Use a font that supports the requested language.
@@ -146,7 +209,7 @@ Prefer deterministic rendering:
 If using image editing instead:
 
 ```text
-Add the approved final text to the approved text-free character sheet while preserving the character art and panel layout exactly.
+Add the approved final text to the approved no-dense-body-copy character sheet while preserving the character art and panel layout exactly.
 
 Text payload:
 [approved final_text_payload]

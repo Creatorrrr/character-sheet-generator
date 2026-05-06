@@ -22,19 +22,27 @@ Use this schema in conversation. Persist it to a JSON file only when the user as
   },
   "character_spec": {},
   "blueprint": {},
+  "generation_mode": "template_locked | adapted | custom",
   "template": {
     "asset": "assets/master-sheet-template.png",
-    "usage": "default | adapted | custom | none",
+    "usage": "default | template_locked | adapted | custom | none",
     "kept_sections": [],
     "modified_sections": [],
     "omitted_sections": []
+  },
+  "prompt": {
+    "path_or_id": "",
+    "template": "template_locked | adapted | regeneration | final_composition",
+    "notes": ""
   },
   "anchor_assets": {},
   "draft_sheet": {
     "path_or_id": "",
     "generation_notes": ""
   },
-  "draft_review": {},
+  "draft_review": {
+    "template_fidelity": "pass | fail | not_applicable"
+  },
   "draft_feedback_history": [],
   "final_text_payload": {},
   "final_sheet": {
@@ -63,6 +71,7 @@ Use this schema in conversation. Persist it to a JSON file only when the user as
 - `draft_review`
 - `copywriter`
 - `final_composer`
+- `fallback_composition`
 - `qa`
 - `complete`
 
@@ -74,6 +83,8 @@ new identity/spec facts -> spec_normalizer
 section or layout feedback -> blueprint_planner
 need more stable references -> anchor_generator
 art quality, expression, view, outfit, palette issues -> draft_generator
+template geometry, top header, numbered sections, profile/lower panels, or footer boxes missing -> draft_generator with template_locked prompt
+same template fidelity failure already recorded -> fallback_composition
 panel-specific visual issue -> draft_generator with partial-edit request when possible
 copy wording, tone, language, keyword changes -> copywriter
 broken text, clipping, typo, Korean readability -> final_composer
@@ -86,5 +97,6 @@ major identity drift in final -> return to draft_generator using approved anchor
 - Do not mark `spec_approved` true until the user approves the normalized character spec or explicitly asks to continue autonomously.
 - Do not mark `blueprint_approved` true until sections and rough layout are accepted.
 - Do not mark `draft_approved` true when the reviewer recommends regeneration unless the user chooses to proceed anyway.
+- Do not mark `draft_approved` true when `generation_mode` is `template_locked` and `draft_review.template_fidelity` is `fail`, even if character identity looks good.
 - Do not mark `text_approved` true until the copy payload is accepted or autonomous mode is active.
 - Do not mark `final_approved` true until QA passes or the user accepts known issues.

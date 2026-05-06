@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Photoreal Base"
+  short_description: "Generate text-free photoreal base"
+  default_prompt: "Use $create-photoreal-character-base to make a text-free live-action base from this 2D character sheet."

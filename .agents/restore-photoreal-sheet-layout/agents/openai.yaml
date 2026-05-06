@@ -1,0 +1,4 @@
+interface:
+  display_name: "Restore Photoreal Sheet Layout"
+  short_description: "Rebuild sheet layout and text"
+  default_prompt: "Use $restore-photoreal-sheet-layout to rebuild the final character sheet layout and readable text around this photoreal character image."

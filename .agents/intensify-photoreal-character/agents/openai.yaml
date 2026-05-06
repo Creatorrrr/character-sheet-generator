@@ -1,0 +1,4 @@
+interface:
+  display_name: "Intensify Photoreal Character"
+  short_description: "Remove anime CGI render residue"
+  default_prompt: "Use $intensify-photoreal-character to make this character image look more like a live-action photograph."

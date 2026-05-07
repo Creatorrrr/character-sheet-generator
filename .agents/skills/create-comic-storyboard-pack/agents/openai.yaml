@@ -1,4 +1,4 @@
 interface:
   display_name: "Comic Storyboard Pack"
-  short_description: "Create and verify comic storyboard panels"
-  default_prompt: "Use $create-comic-storyboard-pack to turn this story outline or scenario into an approved comic storyboard plan, then generate and verify panels in three parallel stages."
+  short_description: "Create and verify multi-panel comic pages"
+  default_prompt: "Use $create-comic-storyboard-pack to turn this story outline or scenario into approved multi-panel Korean comic pages with adapted dialogue, SFX, and three verified generation stages."

@@ -44,35 +44,71 @@ def run_dir_from_init(result):
     raise AssertionError(f"RUN_DIR not found in output: {result.stdout}")
 
 
-def sample_plan(panel_count=5):
+def sample_page(page_index, panel_count=3):
+    panels = []
+    for panel_index in range(1, panel_count + 1):
+        panels.append(
+            {
+                "id": f"{page_index:03d}-panel-{panel_index}",
+                "panel_no": panel_index,
+                "scene_refs": [f"S{page_index:02d}"],
+                "beat": f"Story beat {page_index}-{panel_index}",
+                "visual_brief": f"Comic panel visual brief {page_index}-{panel_index}",
+                "setting": "school gym",
+                "characters": ["main character"],
+                "action": "shoots the basketball toward the hoop",
+                "composition": "subject in foreground with hoop in background",
+                "source_dialogue": [f"raw line {page_index}-{panel_index}"],
+                "adapted_dialogue": [f"각색 대사 {page_index}-{panel_index}"],
+                "sfx": ["휙"],
+                "caption": ["방과 후 체육관"],
+                "speech_balloon": "small balloon near the speaker",
+                "sfx_placement": "near the moving basketball",
+                "spatial_logic_notes": "ball travels from hand toward hoop",
+                "motion_checks": ["basketball moves toward hoop, not behind shooter"],
+                "must_match": ["hoop stays on far wall"],
+                "prompt": f"Generate comic panel {page_index}-{panel_index}",
+            }
+        )
+    return {
+        "id": f"{page_index:03d}-page-{page_index}",
+        "filename": f"{page_index:03d}-page-{page_index}.png",
+        "page_no": page_index,
+        "scene_refs": [f"S{page_index:02d}"],
+        "layout_brief": "Three-panel Korean comic page with one wide top panel and two lower panels.",
+        "reading_order": "top-to-bottom, left-to-right within rows",
+        "page_dialogue_notes": "Adapt dialogue for comic timing; do not copy source lines verbatim.",
+        "spatial_logic_notes": "Hoop remains on far wall; ball moves toward hoop after release.",
+        "motion_checks": ["basketball shot trajectory follows the hand release toward the hoop"],
+        "must_match": ["multi-panel comic page", "legible balloons and SFX"],
+        "panels": panels,
+        "references": [],
+        "prompt": f"Generate complete comic page {page_index}",
+    }
+
+
+def sample_plan(page_count=5, panel_count=3):
+    return {
+        "scenario_title": "Gym Story",
+        "style_brief": "clean cinematic Korean comic style",
+        "reading_order": "top-to-bottom, left-to-right within rows",
+        "pages": [sample_page(index, panel_count=panel_count) for index in range(1, page_count + 1)],
+    }
+
+
+def legacy_panel_plan(panel_count=2):
     panels = []
     for index in range(1, panel_count + 1):
         panels.append(
             {
-                "id": f"{index:03d}-panel-{index}",
-                "filename": f"{index:03d}-panel-{index}.png",
+                "id": f"{index:03d}-legacy-panel",
+                "filename": f"{index:03d}-legacy-panel.png",
                 "panel_no": index,
-                "scene_refs": ["S01"],
-                "beat": f"Story beat {index}",
-                "visual_brief": f"Comic panel visual brief {index}",
-                "setting": "school gym",
-                "characters": ["main character"],
-                "action": "looks toward the hoop",
-                "camera": "wide shot",
-                "composition": "subject in foreground with hoop in background",
-                "dialogue": [f"line {index}"],
-                "sfx": [],
-                "narration": [],
-                "continuity_notes": "hoop stays on the far wall",
-                "prompt": f"Generate comic panel {index}",
+                "visual_brief": f"Legacy panel brief {index}",
+                "prompt": f"Generate legacy panel {index}",
             }
         )
-    return {
-        "scenario_title": "Gym Story",
-        "style_brief": "clean cinematic comic style",
-        "reading_order": "left-to-right",
-        "panels": panels,
-    }
+    return {"scenario_title": "Legacy Story", "panels": panels}
 
 
 def init_run(root):
@@ -89,9 +125,9 @@ def init_run(root):
     return run_dir_from_init(result)
 
 
-def approve_plan(root, run_dir, panel_count=5):
+def approve_plan(root, run_dir, page_count=5, panel_count=3):
     plan_path = root / "plan.json"
-    plan_path.write_text(json.dumps(sample_plan(panel_count), indent=2), encoding="utf-8")
+    plan_path.write_text(json.dumps(sample_plan(page_count, panel_count), indent=2), encoding="utf-8")
     return run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
 
 
@@ -111,29 +147,45 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(state["workflow"], "create-comic-storyboard-pack")
             self.assertFalse(state["plan_approved"])
             self.assertEqual(state["stage_order"], ["storyboard", "sketch_ink", "finish"])
-            self.assertEqual(state["panels"], [])
+            self.assertEqual(state["pages"], [])
             self.assertTrue((run_dir / "scenario.md").exists())
             self.assertTrue((run_dir / "prompts" / "storyboard").exists())
             self.assertTrue((run_dir / "01_storyboard").exists())
 
-    def test_approve_plan_normalizes_panels_and_stage_state(self):
+    def test_approve_plan_normalizes_pages_and_nested_panels(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = init_run(root)
 
-            result = approve_plan(root, run_dir, panel_count=2)
-            self.assertIn("APPROVED_PANELS: 2", result.stdout)
+            result = approve_plan(root, run_dir, page_count=2, panel_count=3)
+            self.assertIn("APPROVED_PAGES: 2", result.stdout)
             state = json.loads((run_dir / "state.json").read_text())
 
             self.assertTrue(state["plan_approved"])
-            self.assertEqual(len(state["panels"]), 2)
-            first = state["panels"][0]
-            self.assertEqual(first["id"], "001-panel-1")
-            self.assertEqual(first["filename"], "001-panel-1.png")
+            self.assertEqual(len(state["pages"]), 2)
+            first = state["pages"][0]
+            self.assertEqual(first["id"], "001-page-1")
+            self.assertEqual(first["filename"], "001-page-1.png")
+            self.assertEqual(len(first["panels"]), 3)
+            self.assertEqual(first["panels"][0]["adapted_dialogue"], ["각색 대사 1-1"])
             self.assertEqual(set(first["stages"].keys()), {"storyboard", "sketch_ink", "finish"})
             self.assertEqual(first["stages"]["storyboard"]["status"], "pending")
             self.assertTrue((run_dir / "approved_storyboard_plan.json").exists())
             self.assertTrue((run_dir / "batch_plan.md").exists())
+
+    def test_legacy_flat_panels_are_converted_to_single_panel_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan_path = root / "legacy-plan.json"
+            plan_path.write_text(json.dumps(legacy_panel_plan(), indent=2), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+
+            self.assertEqual(len(state["pages"]), 2)
+            self.assertEqual(len(state["pages"][0]["panels"]), 1)
+            self.assertNotIn("panels", state)
 
     def test_next_batch_requires_approved_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,30 +196,49 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Plan is not approved", result.stderr)
 
-    def test_next_batch_reserves_at_most_four_current_stage_panels(self):
+    def test_next_batch_reserves_at_most_four_current_stage_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = init_run(root)
-            approve_plan(root, run_dir, panel_count=5)
+            approve_plan(root, run_dir, page_count=5)
 
             result = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "10", cwd=root)
             self.assertIn("STAGE: storyboard", result.stdout)
             self.assertEqual(result.stdout.count("ITEM: "), 4)
             state = json.loads((run_dir / "state.json").read_text())
             reserved = [
-                panel
-                for panel in state["panels"]
-                if panel["stages"]["storyboard"]["status"] == "generation_requested"
+                page
+                for page in state["pages"]
+                if page["stages"]["storyboard"]["status"] == "generation_requested"
             ]
             self.assertEqual(len(reserved), 4)
-            self.assertEqual({panel["stages"]["storyboard"]["batch_id"] for panel in reserved}, {"batch-001"})
-            self.assertEqual(state["panels"][4]["stages"]["storyboard"]["status"], "pending")
+            self.assertEqual({page["stages"]["storyboard"]["batch_id"] for page in reserved}, {"batch-001"})
+            self.assertEqual(state["pages"][4]["stages"]["storyboard"]["status"], "pending")
 
-    def test_imported_or_requested_items_block_next_batch(self):
+    def test_prompt_contains_page_text_and_spatial_motion_checks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = init_run(root)
-            approve_plan(root, run_dir, panel_count=4)
+            approve_plan(root, run_dir, page_count=1, panel_count=3)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            prompt_path = Path(state["pages"][0]["stages"]["storyboard"]["prompt_file"])
+            prompt = prompt_path.read_text(encoding="utf-8")
+
+            self.assertIn("one complete Korean comic-book page image with multiple panels", prompt)
+            self.assertIn("Use adapted_dialogue", prompt)
+            self.assertIn("각색 대사 1-1", prompt)
+            self.assertIn("휙", prompt)
+            self.assertIn("ball moves toward hoop after release", prompt)
+            self.assertIn("basketball moves toward hoop, not behind shooter", prompt)
+            self.assertIn("No examples of impossible staging", prompt)
+
+    def test_imported_or_requested_pages_block_next_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=4)
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             generated = generate_file(root)
 
@@ -176,7 +247,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--run-dir",
                 str(run_dir),
                 "--item",
-                "001-panel-1.png",
+                "001-page-1.png",
                 "--stage",
                 "storyboard",
                 "--generated",
@@ -192,16 +263,16 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Resolve current batch before reserving another", result.stderr)
 
-    def test_next_stage_waits_until_all_panels_pass_parent_inspection(self):
+    def test_next_stage_waits_until_all_pages_pass_parent_inspection(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = init_run(root)
-            approve_plan(root, run_dir, panel_count=5)
+            approve_plan(root, run_dir, page_count=5)
             generated = generate_file(root)
 
             run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
             for index in range(1, 5):
-                item = f"{index:03d}-panel-{index}.png"
+                item = f"{index:03d}-page-{index}.png"
                 run_cli(
                     "import",
                     "--run-dir",
@@ -233,7 +304,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
 
             remaining = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
             self.assertIn("STAGE: storyboard", remaining.stdout)
-            self.assertIn("005-panel-5.png", remaining.stdout)
+            self.assertIn("005-page-5.png", remaining.stdout)
             self.assertNotIn("STAGE: sketch_ink", remaining.stdout)
 
             run_cli(
@@ -241,7 +312,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--run-dir",
                 str(run_dir),
                 "--item",
-                "005-panel-5.png",
+                "005-page-5.png",
                 "--stage",
                 "storyboard",
                 "--generated",
@@ -257,7 +328,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--run-dir",
                 str(run_dir),
                 "--item",
-                "005-panel-5.png",
+                "005-page-5.png",
                 "--stage",
                 "storyboard",
                 "--note",
@@ -273,7 +344,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = init_run(root)
-            approve_plan(root, run_dir, panel_count=1)
+            approve_plan(root, run_dir, page_count=1)
             generated = generate_file(root)
 
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
@@ -282,7 +353,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--run-dir",
                 str(run_dir),
                 "--item",
-                "001-panel-1.png",
+                "001-page-1.png",
                 "--stage",
                 "storyboard",
                 "--generated",
@@ -290,12 +361,12 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--worker-status",
                 "needs_rerun",
                 "--worker-note",
-                "worker sees rough anatomy",
+                "worker sees impossible ball trajectory",
                 cwd=root,
             )
 
             state = json.loads((run_dir / "state.json").read_text())
-            first = state["panels"][0]["stages"]["storyboard"]
+            first = state["pages"][0]["stages"]["storyboard"]
             self.assertEqual(first["status"], "imported")
             self.assertEqual(first["worker_status"], "needs_rerun")
 
@@ -304,15 +375,15 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--run-dir",
                 str(run_dir),
                 "--item",
-                "001-panel-1.png",
+                "001-page-1.png",
                 "--stage",
                 "storyboard",
                 "--note",
-                "parent accepts the rough storyboard",
+                "parent accepts after inspection",
                 cwd=root,
             )
             state = json.loads((run_dir / "state.json").read_text())
-            first = state["panels"][0]["stages"]["storyboard"]
+            first = state["pages"][0]["stages"]["storyboard"]
             self.assertEqual(first["status"], "inspected_pass")
             self.assertEqual(first["worker_status"], "needs_rerun")
 
@@ -321,7 +392,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--run-dir",
                 str(run_dir),
                 "--item",
-                "001-panel-1.png",
+                "001-page-1.png",
                 "--stage",
                 "storyboard",
                 "--note",
@@ -329,7 +400,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 cwd=root,
             )
             state = json.loads((run_dir / "state.json").read_text())
-            first = state["panels"][0]["stages"]["storyboard"]
+            first = state["pages"][0]["stages"]["storyboard"]
             self.assertEqual(first["status"], "pending")
             self.assertTrue(first["rerun_pending"])
 

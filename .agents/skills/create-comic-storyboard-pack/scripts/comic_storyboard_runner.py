@@ -18,19 +18,19 @@ STAGES = [
         "id": "storyboard",
         "label": "storyboard",
         "dir": "01_storyboard",
-        "purpose": "comic storyboard thumbnail and composition pass",
+        "purpose": "comic page storyboard, panel layout, dialogue/SFX placement pass",
     },
     {
         "id": "sketch_ink",
         "label": "sketch/ink",
         "dir": "02_sketch_ink",
-        "purpose": "clean sketch and ink line pass",
+        "purpose": "clean sketch and ink line pass for the approved page layout",
     },
     {
         "id": "finish",
         "label": "tone/color/finish",
         "dir": "03_finish",
-        "purpose": "tone, color, and final polish pass",
+        "purpose": "tone, color, lettering, and final polish pass",
     },
 ]
 STAGE_IDS = [stage["id"] for stage in STAGES]
@@ -71,6 +71,60 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def stage_meta(stage_id: str) -> dict[str, str]:
+    for stage in STAGES:
+        if stage["id"] == stage_id:
+            return stage
+    raise SystemExit(f"Unknown stage: {stage_id}")
+
+
+def build_stage_states() -> dict[str, dict[str, Any]]:
+    return {
+        stage_id: {
+            "status": "pending",
+            "attempts": 0,
+            "rerun_pending": False,
+            "batch_id": "",
+            "prompt_file": "",
+            "output_path": "",
+            "generated_source": "",
+            "worker_status": "",
+            "worker_note": "",
+            "parent_note": "",
+        }
+        for stage_id in STAGE_IDS
+    }
+
+
+def normalize_state(state: dict[str, Any]) -> None:
+    if "pages" not in state and "panels" in state:
+        state["pages"] = legacy_panels_to_pages({"panels": state.get("panels", [])})
+    state.setdefault("pages", [])
+    for page in state.get("pages", []):
+        page.setdefault("dependencies", [])
+        page.setdefault("references", [])
+        page.setdefault("panels", [])
+        page.setdefault("page_dialogue_notes", "")
+        page.setdefault("spatial_logic_notes", "")
+        page.setdefault("motion_checks", [])
+        page.setdefault("must_match", [])
+        stages = page.setdefault("stages", {})
+        for stage_id in STAGE_IDS:
+            stage = stages.setdefault(stage_id, {})
+            stage.setdefault("status", "pending")
+            stage.setdefault("attempts", 0)
+            stage.setdefault("rerun_pending", False)
+            stage.setdefault("batch_id", "")
+            stage.setdefault("prompt_file", "")
+            stage.setdefault("output_path", "")
+            stage.setdefault("generated_source", "")
+            stage.setdefault("worker_status", "")
+            stage.setdefault("worker_note", "")
+            stage.setdefault("parent_note", "")
+            if stage["status"] not in VALID_STATUSES:
+                raise SystemExit(f"Invalid stage status for {page.get('id')}:{stage_id}: {stage['status']}")
+
+
 def load_state(run_dir: Path) -> dict[str, Any]:
     state = load_json(run_dir / "state.json")
     if state.get("workflow") != WORKFLOW:
@@ -85,53 +139,25 @@ def save_state(run_dir: Path, state: dict[str, Any]) -> None:
     write_json(run_dir / "state.json", state)
 
 
-def normalize_state(state: dict[str, Any]) -> None:
-    for panel in state.get("panels", []):
-        panel.setdefault("dependencies", [])
-        panel.setdefault("references", [])
-        stages = panel.setdefault("stages", {})
-        for stage_id in STAGE_IDS:
-            stage = stages.setdefault(stage_id, {})
-            stage.setdefault("status", "pending")
-            stage.setdefault("attempts", 0)
-            stage.setdefault("rerun_pending", False)
-            stage.setdefault("batch_id", "")
-            stage.setdefault("prompt_file", "")
-            stage.setdefault("output_path", "")
-            stage.setdefault("generated_source", "")
-            stage.setdefault("worker_status", "")
-            stage.setdefault("worker_note", "")
-            stage.setdefault("parent_note", "")
-            if stage["status"] not in VALID_STATUSES:
-                raise SystemExit(f"Invalid stage status for {panel.get('id')}:{stage_id}: {stage['status']}")
-
-
-def stage_meta(stage_id: str) -> dict[str, str]:
-    for stage in STAGES:
-        if stage["id"] == stage_id:
-            return stage
-    raise SystemExit(f"Unknown stage: {stage_id}")
-
-
-def stage_state(panel: dict[str, Any], stage_id: str) -> dict[str, Any]:
+def stage_state(page: dict[str, Any], stage_id: str) -> dict[str, Any]:
     if stage_id not in STAGE_IDS:
         raise SystemExit(f"Unknown stage: {stage_id}")
-    return panel["stages"][stage_id]
+    return page["stages"][stage_id]
 
 
-def panel_complete_for_stage(panel: dict[str, Any], stage_id: str) -> bool:
-    return stage_state(panel, stage_id).get("status") in PASS_STATUSES
+def page_complete_for_stage(page: dict[str, Any], stage_id: str) -> bool:
+    return stage_state(page, stage_id).get("status") in PASS_STATUSES
 
 
 def stage_complete(state: dict[str, Any], stage_id: str) -> bool:
-    panels = state.get("panels", [])
-    return bool(panels) and all(panel_complete_for_stage(panel, stage_id) for panel in panels)
+    pages = state.get("pages", [])
+    return bool(pages) and all(page_complete_for_stage(page, stage_id) for page in pages)
 
 
 def workflow_complete(state: dict[str, Any]) -> bool:
-    panels = state.get("panels", [])
-    return bool(panels) and all(
-        panel_complete_for_stage(panel, stage_id) for panel in panels for stage_id in STAGE_IDS
+    pages = state.get("pages", [])
+    return bool(pages) and all(
+        page_complete_for_stage(page, stage_id) for page in pages for stage_id in STAGE_IDS
     )
 
 
@@ -142,32 +168,32 @@ def current_stage_id(state: dict[str, Any]) -> str | None:
     return None
 
 
-def resolve_panel(state: dict[str, Any], panel_ref: str) -> dict[str, Any]:
-    ref_slug = slugify(str(Path(panel_ref).stem), str(panel_ref))
+def resolve_page(state: dict[str, Any], page_ref: str) -> dict[str, Any]:
+    ref_slug = slugify(str(Path(page_ref).stem), str(page_ref))
     matches = []
-    for panel in state.get("panels", []):
+    for page in state.get("pages", []):
         aliases = {
-            panel.get("id", ""),
-            panel.get("filename", ""),
-            Path(panel.get("filename", "")).stem,
-            slugify(panel.get("id", "")),
-            slugify(Path(panel.get("filename", "")).stem),
+            page.get("id", ""),
+            page.get("filename", ""),
+            Path(page.get("filename", "")).stem,
+            slugify(page.get("id", "")),
+            slugify(Path(page.get("filename", "")).stem),
         }
-        if panel_ref in aliases or ref_slug in aliases:
-            matches.append(panel)
+        if page_ref in aliases or ref_slug in aliases:
+            matches.append(page)
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        raise SystemExit(f"Ambiguous panel reference: {panel_ref}")
-    raise SystemExit(f"Unknown panel: {panel_ref}")
+        raise SystemExit(f"Ambiguous page reference: {page_ref}")
+    raise SystemExit(f"Unknown page: {page_ref}")
 
 
-def stage_output_path(run_dir: Path, panel: dict[str, Any], stage_id: str) -> Path:
-    return run_dir / stage_meta(stage_id)["dir"] / panel["filename"]
+def stage_output_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Path:
+    return run_dir / stage_meta(stage_id)["dir"] / page["filename"]
 
 
-def stage_prompt_path(run_dir: Path, panel: dict[str, Any], stage_id: str) -> Path:
-    stem = Path(panel["filename"]).stem
+def stage_prompt_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Path:
+    stem = Path(page["filename"]).stem
     return run_dir / "prompts" / stage_id / f"{stem}.prompt.txt"
 
 
@@ -178,138 +204,153 @@ def previous_stage_id(stage_id: str) -> str:
     return STAGE_IDS[index - 1]
 
 
+def prior_stage_reference(run_dir: Path, page: dict[str, Any], stage_id: str) -> str:
+    prior = previous_stage_id(stage_id)
+    if not prior:
+        return "none"
+    path = stage_output_path(run_dir, page, prior)
+    return str(path) if path.exists() else f"{path} (not found yet)"
+
+
 def current_blockers(state: dict[str, Any]) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
     blockers: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
-    for panel in state.get("panels", []):
+    for page in state.get("pages", []):
         for stage_id in STAGE_IDS:
-            stage = stage_state(panel, stage_id)
+            stage = stage_state(page, stage_id)
             if stage.get("status") in CURRENT_STATUSES:
-                blockers.append((panel, stage_id, stage))
+                blockers.append((page, stage_id, stage))
     return blockers
 
 
-def dependency_passed_for_stage(state: dict[str, Any], panel_id: str, stage_id: str) -> bool:
-    for panel in state.get("panels", []):
-        if panel.get("id") == panel_id:
-            return panel_complete_for_stage(panel, stage_id)
+def dependency_passed_for_stage(state: dict[str, Any], page_id: str, stage_id: str) -> bool:
+    for page in state.get("pages", []):
+        if page.get("id") == page_id:
+            return page_complete_for_stage(page, stage_id)
     return False
 
 
-def dependencies_ready(state: dict[str, Any], panel: dict[str, Any], stage_id: str) -> bool:
-    return all(dependency_passed_for_stage(state, dep, stage_id) for dep in panel.get("dependencies", []))
+def dependencies_ready(state: dict[str, Any], page: dict[str, Any], stage_id: str) -> bool:
+    return all(dependency_passed_for_stage(state, dep, stage_id) for dep in page.get("dependencies", []))
 
 
-def panel_sort_key(panel: dict[str, Any], stage_id: str) -> tuple[int, int, str]:
-    stage = stage_state(panel, stage_id)
-    return (0 if stage.get("rerun_pending") else 1, int(panel.get("order", 9999)), panel.get("id", ""))
+def page_sort_key(page: dict[str, Any], stage_id: str) -> tuple[int, int, str]:
+    stage = stage_state(page, stage_id)
+    return (0 if stage.get("rerun_pending") else 1, int(page.get("order", 9999)), page.get("id", ""))
 
 
 def stage_instruction(stage_id: str) -> str:
     if stage_id == "storyboard":
         return (
-            "Create a rough but readable comic storyboard panel. Prioritize shot composition, panel "
-            "framing, character blocking, camera angle, action clarity, and story beat readability. "
-            "Use simple grayscale thumbnail rendering; do not polish details."
+            "Create a rough but readable Korean comic-book page storyboard. Show a full page with "
+            "multiple panels, gutters, panel size variation, reading order, speech balloon placement, "
+            "SFX placement, captions where useful, and clear action blocking."
         )
     if stage_id == "sketch_ink":
         return (
-            "Create the clean sketch and ink line pass for the approved storyboard panel. Preserve the "
-            "same composition, camera, character blocking, props, and continuity. Use crisp comic line "
-            "art, clear silhouettes, clean facial/action readability, and no final color yet unless the "
-            "approved style requires a minimal guide."
+            "Create the clean sketch and ink line pass for the approved comic page. Preserve the page "
+            "layout, panel count, reading order, speech/SFX placement, character blocking, props, "
+            "motion direction, and spatial continuity."
         )
     if stage_id == "finish":
         return (
-            "Create the final comic panel finish using the approved sketch/ink image as the structure. "
-            "Add tones, color, lighting, shadows, material treatment, and final cleanup consistent with "
-            "the approved style. Keep composition and story beat unchanged."
+            "Create the final Korean comic-book page using the approved sketch/ink image as structure. "
+            "Add tones, color if requested, lighting, shadows, final lettering, speech balloons, SFX, "
+            "short captions, and cleanup without changing page layout or action logic."
         )
     raise SystemExit(f"Unknown stage: {stage_id}")
 
 
-def prior_stage_reference(run_dir: Path, panel: dict[str, Any], stage_id: str) -> str:
-    prior = previous_stage_id(stage_id)
-    if not prior:
-        return "none"
-    path = stage_output_path(run_dir, panel, prior)
-    return str(path) if path.exists() else f"{path} (not found yet)"
+def panel_line(panel: dict[str, Any]) -> str:
+    source_dialogue = "; ".join(as_list(panel.get("source_dialogue") or panel.get("dialogue"))) or "none"
+    adapted_dialogue = "; ".join(as_list(panel.get("adapted_dialogue"))) or "none"
+    sfx = "; ".join(as_list(panel.get("sfx"))) or "none"
+    captions = "; ".join(as_list(panel.get("caption") or panel.get("narration"))) or "none"
+    checks = "; ".join(as_list(panel.get("motion_checks"))) or "none"
+    must_match = "; ".join(as_list(panel.get("must_match"))) or "none"
+    return (
+        f"- panel {panel.get('panel_no', panel.get('order', ''))}: "
+        f"beat={panel.get('beat') or panel.get('purpose') or ''}; "
+        f"view={panel.get('composition') or panel.get('camera') or ''}; "
+        f"characters={', '.join(as_list(panel.get('characters'))) or 'unspecified'}; "
+        f"action={panel.get('action') or 'unspecified'}; "
+        f"source_dialogue={source_dialogue}; adapted_dialogue={adapted_dialogue}; "
+        f"sfx={sfx}; captions={captions}; "
+        f"speech_balloon={panel.get('speech_balloon') or 'place naturally without covering faces/action'}; "
+        f"sfx_placement={panel.get('sfx_placement') or 'near the sound source'}; "
+        f"spatial_logic={panel.get('spatial_logic_notes') or panel.get('continuity_notes') or 'keep positions and directions plausible'}; "
+        f"motion_checks={checks}; must_match={must_match}"
+    )
 
 
-def prompt_text(run_dir: Path, panel: dict[str, Any], stage_id: str, state: dict[str, Any]) -> str:
+def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[str, Any]) -> str:
     meta = stage_meta(stage_id)
-    references = as_list(panel.get("references"))
+    references = as_list(page.get("references"))
     reference_text = "\n".join(f"- {ref}" for ref in references) or "- none"
-    dialogue = "\n".join(f"- {line}" for line in as_list(panel.get("dialogue"))) or "- none"
-    sfx = "\n".join(f"- {line}" for line in as_list(panel.get("sfx"))) or "- none"
-    narration = "\n".join(f"- {line}" for line in as_list(panel.get("narration"))) or "- none"
-    characters = ", ".join(as_list(panel.get("characters"))) or "unspecified"
-    negative = panel.get("negative_prompt") or (
-        "low resolution, watermark, logo, caption text, speech bubble text, subtitles, panel number, "
-        "handwritten labels, random typography, unreadable text, malformed hands, distorted faces, "
-        "duplicated limbs, broken perspective, inconsistent character design, inconsistent setting, "
-        "wrong costume, cropped key action, blurry subject, over-smoothed AI texture."
+    panels = page.get("panels", [])
+    panel_text = "\n".join(panel_line(panel) for panel in panels) or "- no panel details supplied"
+    page_dialogue_notes = page.get("page_dialogue_notes") or (
+        "Adapt source dialogue to fit comic timing, mood, panel rhythm, and balloon space. "
+        "Do not copy source dialogue verbatim unless the approved plan explicitly says to preserve it."
+    )
+    spatial_logic_notes = page.get("spatial_logic_notes") or "Keep character, object, prop, and environment positions physically plausible."
+    motion_checks = "\n".join(f"- {entry}" for entry in as_list(page.get("motion_checks"))) or "- no impossible motion: thrown, kicked, or shot objects move in the direction implied by body pose and panel action"
+    must_match = "\n".join(f"- {entry}" for entry in as_list(page.get("must_match"))) or "- preserve approved page layout, panel count, action direction, and character/object continuity"
+    negative = page.get("negative_prompt") or (
+        "low resolution, watermark, random logo, unrelated captions, garbled lettering, unreadable "
+        "speech balloons, duplicated limbs, broken perspective, impossible object motion, ball moving "
+        "opposite the throw or shot, inconsistent character design, inconsistent setting, wrong costume, "
+        "cropped key action, blurry subject, over-smoothed AI texture."
     )
     return "\n".join(
         [
             f"Workflow: {WORKFLOW}",
             f"Scenario title: {state.get('title', '')}",
             f"Stage: {stage_id} ({meta['purpose']})",
-            f"Assigned output: {stage_output_path(run_dir, panel, stage_id)}",
-            f"Panel id: {panel['id']}",
-            f"Panel number: {panel.get('panel_no', panel.get('order', ''))}",
-            f"Scene refs: {', '.join(panel.get('scene_refs', [])) or 'unspecified'}",
-            f"Prior stage reference: {prior_stage_reference(run_dir, panel, stage_id)}",
+            f"Assigned output: {stage_output_path(run_dir, page, stage_id)}",
+            f"Page id: {page['id']}",
+            f"Page number: {page.get('page_no', page.get('order', ''))}",
+            f"Reading order: {page.get('reading_order') or state.get('reading_order') or 'right-to-left or top-to-bottom as approved'}",
+            f"Scene refs: {', '.join(page.get('scene_refs', [])) or 'unspecified'}",
+            f"Prior stage reference: {prior_stage_reference(run_dir, page, stage_id)}",
             "",
             "Stage instruction:",
             stage_instruction(stage_id),
             "",
-            "Panel story beat:",
-            panel.get("beat") or panel.get("purpose") or "",
+            "Page format:",
+            "Generate one complete Korean comic-book page image with multiple panels on the same page. Use panel gutters, varied panel sizes, clear reading flow, speech balloons, SFX lettering, and short captions where approved.",
             "",
-            "Visual brief:",
-            panel.get("visual_brief") or panel.get("prompt") or "",
+            "Page layout brief:",
+            page.get("layout_brief") or page.get("visual_brief") or page.get("prompt") or "",
             "",
-            "Composition and camera:",
-            panel.get("composition") or panel.get("camera") or "unspecified",
+            "Page dialogue and lettering policy:",
+            page_dialogue_notes,
+            "Use adapted_dialogue, approved SFX, and approved captions inside the page image. Keep lettering short, legible, and placed so it does not cover key faces, hands, props, or action.",
             "",
-            "Setting:",
-            panel.get("setting") or "unspecified",
+            "Panels on this page:",
+            panel_text,
             "",
-            "Characters:",
-            characters,
+            "Spatial and motion sanity rules:",
+            spatial_logic_notes,
+            motion_checks,
             "",
-            "Action:",
-            panel.get("action") or "unspecified",
-            "",
-            "Mood and tone:",
-            panel.get("mood") or state.get("style_brief") or "unspecified",
-            "",
-            "Continuity notes:",
-            panel.get("continuity_notes") or "none",
+            "Must match:",
+            must_match,
             "",
             "Reference paths:",
             reference_text,
             "",
-            "Dialogue notes, not image text:",
-            dialogue,
-            "",
-            "Sound effect notes, not image text:",
-            sfx,
-            "",
-            "Caption/narration notes, not image text:",
-            narration,
-            "",
-            "Image text policy:",
-            "Do not draw speech bubbles, subtitles, panel numbers, handwritten labels, captions, or any readable text inside the panel image. Keep dialogue, SFX, and captions as metadata only unless the user explicitly approved visible text.",
-            "",
             "Generation prompt:",
-            panel.get("prompt") or panel.get("visual_brief") or "",
+            page.get("prompt") or page.get("layout_brief") or "",
             "",
             "Worker inspection checklist:",
-            "- Matches this exact panel and stage",
-            "- Preserves story beat, camera, composition, and continuity",
+            "- Matches this exact page and stage",
+            "- Contains multiple panels on one page with clear Korean comic-book layout",
+            "- Uses adapted dialogue/SFX/captions from the approved plan, not raw source dialogue by default",
+            "- Speech balloons, SFX, and captions are legible and do not cover key art",
+            "- Preserves story beat, reading order, composition, and continuity",
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists",
-            "- Contains no unapproved image text, labels, subtitles, watermarks, or random typography",
+            "- Character/object positions, action direction, object trajectory, and cause-effect motion are physically plausible",
+            "- No examples of impossible staging such as a basketball shot where the ball travels behind the shooter",
             "- Has no obvious anatomy, perspective, crop, object, or continuity defects",
             "",
             "Negative prompt:",
@@ -322,37 +363,41 @@ def prompt_text(run_dir: Path, panel: dict[str, Any], stage_id: str, state: dict
 
 def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
     lines = [
-        "# Approved Comic Storyboard Plan",
+        "# Approved Comic Storyboard Page Plan",
         "",
         f"Run folder: {run_dir}",
         f"Scenario title: {state.get('title', '')}",
         f"Plan approved: {state.get('plan_approved', False)}",
         "",
         "Generation policy:",
-        "- Use Codex built-in image_gen only through one subagent per reserved panel.",
+        "- Use Codex built-in image_gen only through one subagent per reserved page.",
         "- Do not reserve images before approve-plan.",
         "- Generate stages in order: storyboard, sketch_ink, finish.",
-        "- Reserve at most four panels per batch.",
-        "- Parent inspection is required before a panel stage counts as passed.",
-        "- Dialogue, SFX, captions, and panel numbers stay in metadata unless visible text is explicitly approved.",
+        "- Reserve at most four pages per batch.",
+        "- Parent inspection is required before a page stage counts as passed.",
+        "- Approved adapted dialogue, SFX, and short captions are included in the page image.",
+        "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction.",
         "",
-        "Panels:",
+        "Pages:",
         "",
     ]
-    for panel in state.get("panels", []):
+    for page in state.get("pages", []):
         stage_summary = ", ".join(
-            f"{stage_id}={stage_state(panel, stage_id).get('status')}" for stage_id in STAGE_IDS
+            f"{stage_id}={stage_state(page, stage_id).get('status')}" for stage_id in STAGE_IDS
         )
         lines.extend(
             [
-                f"- panel: {panel['id']}",
-                f"  filename: {panel['filename']}",
-                f"  order: {panel.get('order')}",
-                f"  scenes: {', '.join(panel.get('scene_refs', [])) or 'unspecified'}",
-                f"  beat: {panel.get('beat') or panel.get('purpose') or ''}",
-                f"  camera: {panel.get('camera') or panel.get('composition') or 'unspecified'}",
-                f"  characters: {', '.join(as_list(panel.get('characters'))) or 'unspecified'}",
-                f"  dependencies: {', '.join(panel.get('dependencies', [])) or 'none'}",
+                f"- page: {page['id']}",
+                f"  filename: {page['filename']}",
+                f"  order: {page.get('order')}",
+                f"  page_no: {page.get('page_no')}",
+                f"  scenes: {', '.join(page.get('scene_refs', [])) or 'unspecified'}",
+                f"  layout: {page.get('layout_brief') or ''}",
+                f"  reading_order: {page.get('reading_order') or state.get('reading_order') or 'unspecified'}",
+                f"  panel_count: {len(page.get('panels', []))}",
+                f"  dialogue_notes: {page.get('page_dialogue_notes') or ''}",
+                f"  spatial_logic: {page.get('spatial_logic_notes') or ''}",
+                f"  dependencies: {', '.join(page.get('dependencies', [])) or 'none'}",
                 f"  stages: {stage_summary}",
                 "",
             ]
@@ -391,7 +436,7 @@ def command_init(args: argparse.Namespace) -> None:
         "stage_order": STAGE_IDS,
         "plan_approved": False,
         "complete": False,
-        "panels": [],
+        "pages": [],
         "batches": [],
         "notes": ["Generation is blocked until approve-plan is run after explicit user approval."],
     }
@@ -399,107 +444,158 @@ def command_init(args: argparse.Namespace) -> None:
     print(f"RUN_DIR: {run_dir}")
     print(f"STATE: {run_dir / 'state.json'}")
     print(f"STORY_INPUT: {scenario_path}")
-    print("NEXT: Present the Korean storyboard approval request, then run approve-plan after user approval.")
+    print("NEXT: Present the Korean page plan approval request, then run approve-plan after user approval.")
 
 
-def build_stage_states() -> dict[str, dict[str, Any]]:
+def normalize_panel(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    base = raw.get("id") or raw.get("filename") or raw.get("beat") or raw.get("visual_brief") or f"panel-{index}"
+    panel_id = slugify(str(base), f"panel-{index}")[:80]
     return {
-        stage_id: {
-            "status": "pending",
-            "attempts": 0,
-            "rerun_pending": False,
-            "batch_id": "",
-            "prompt_file": "",
-            "output_path": "",
-            "generated_source": "",
-            "worker_status": "",
-            "worker_note": "",
-            "parent_note": "",
-        }
-        for stage_id in STAGE_IDS
+        "id": panel_id,
+        "panel_no": raw.get("panel_no") or raw.get("order") or index,
+        "order": int(raw.get("panel_no") or raw.get("order") or index),
+        "scene_refs": as_list(raw.get("scene_refs") or raw.get("scenes")),
+        "beat": str(raw.get("beat") or raw.get("purpose") or ""),
+        "purpose": str(raw.get("purpose") or raw.get("beat") or ""),
+        "visual_brief": str(raw.get("visual_brief") or raw.get("brief") or ""),
+        "setting": str(raw.get("setting") or ""),
+        "characters": as_list(raw.get("characters")),
+        "action": str(raw.get("action") or ""),
+        "camera": str(raw.get("camera") or ""),
+        "composition": str(raw.get("composition") or ""),
+        "mood": str(raw.get("mood") or ""),
+        "source_dialogue": as_list(raw.get("source_dialogue") or raw.get("dialogue")),
+        "adapted_dialogue": as_list(raw.get("adapted_dialogue")),
+        "sfx": as_list(raw.get("sfx")),
+        "caption": as_list(raw.get("caption") or raw.get("narration")),
+        "speech_balloon": str(raw.get("speech_balloon") or raw.get("speech_balloon_placement") or ""),
+        "sfx_placement": str(raw.get("sfx_placement") or ""),
+        "continuity_notes": str(raw.get("continuity_notes") or ""),
+        "spatial_logic_notes": str(raw.get("spatial_logic_notes") or ""),
+        "motion_checks": as_list(raw.get("motion_checks")),
+        "must_match": as_list(raw.get("must_match")),
+        "prompt": str(raw.get("prompt") or raw.get("visual_brief") or raw.get("brief") or ""),
+        "notes": str(raw.get("notes") or ""),
     }
 
 
-def normalize_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_panels = plan.get("panels") or plan.get("items")
+def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
+    base = raw.get("id") or raw.get("filename") or raw.get("layout_brief") or raw.get("title") or f"page-{index}"
+    page_id = slugify(str(base), f"page-{index}")[:80]
+    filename = raw.get("filename")
+    if filename:
+        filename = slugify(Path(str(filename)).stem, page_id) + ".png"
+    else:
+        filename = f"{index:03d}_{page_id}.png"
+    raw_panels = raw.get("panels")
     if not isinstance(raw_panels, list) or not raw_panels:
-        raise SystemExit("Plan must contain a non-empty panels list.")
+        raw_panels = [
+            {
+                "id": f"{page_id}-panel-1",
+                "panel_no": 1,
+                "scene_refs": raw.get("scene_refs") or raw.get("scenes"),
+                "beat": raw.get("beat") or raw.get("purpose") or "",
+                "visual_brief": raw.get("visual_brief") or raw.get("layout_brief") or raw.get("prompt") or "",
+                "setting": raw.get("setting") or "",
+                "characters": raw.get("characters") or [],
+                "action": raw.get("action") or "",
+                "camera": raw.get("camera") or "",
+                "composition": raw.get("composition") or "",
+                "mood": raw.get("mood") or "",
+                "source_dialogue": raw.get("source_dialogue") or raw.get("dialogue") or [],
+                "adapted_dialogue": raw.get("adapted_dialogue") or [],
+                "sfx": raw.get("sfx") or [],
+                "caption": raw.get("caption") or raw.get("narration") or [],
+                "continuity_notes": raw.get("continuity_notes") or "",
+                "spatial_logic_notes": raw.get("spatial_logic_notes") or "",
+                "motion_checks": raw.get("motion_checks") or [],
+                "must_match": raw.get("must_match") or [],
+                "prompt": raw.get("prompt") or raw.get("visual_brief") or raw.get("layout_brief") or "",
+            }
+        ]
+    panels = [normalize_panel(panel, panel_index) for panel_index, panel in enumerate(raw_panels, start=1)]
+    if not any(panel.get("visual_brief") or panel.get("prompt") for panel in panels):
+        raise SystemExit(f"Page {page_id} needs at least one panel with visual_brief or prompt.")
 
-    panels: list[dict[str, Any]] = []
+    return {
+        "id": page_id,
+        "filename": filename,
+        "order": int(raw.get("page_no") or raw.get("order") or index),
+        "page_no": raw.get("page_no") or index,
+        "scene_refs": as_list(raw.get("scene_refs") or raw.get("scenes")),
+        "layout_brief": str(raw.get("layout_brief") or raw.get("visual_brief") or ""),
+        "reading_order": str(raw.get("reading_order") or ""),
+        "page_dialogue_notes": str(raw.get("page_dialogue_notes") or ""),
+        "spatial_logic_notes": str(raw.get("spatial_logic_notes") or ""),
+        "motion_checks": as_list(raw.get("motion_checks")),
+        "must_match": as_list(raw.get("must_match")),
+        "references": as_list(raw.get("references") or raw.get("reference_paths")),
+        "prompt": str(raw.get("prompt") or raw.get("layout_brief") or raw.get("visual_brief") or ""),
+        "negative_prompt": str(raw.get("negative_prompt") or ""),
+        "dependencies": as_list(raw.get("dependencies")),
+        "notes": str(raw.get("notes") or ""),
+        "panels": panels,
+        "stages": build_stage_states(),
+    }
+
+
+def legacy_panels_to_pages(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    pages = []
+    for index, raw_panel in enumerate(plan.get("panels", []), start=1):
+        if not isinstance(raw_panel, dict):
+            raise SystemExit(f"Panel {index} is not an object.")
+        page_seed = dict(raw_panel)
+        page_seed.setdefault("id", raw_panel.get("id") or f"page-{index}")
+        page_seed.setdefault("filename", raw_panel.get("filename") or f"{index:03d}_page-{index}.png")
+        page_seed.setdefault("page_no", raw_panel.get("panel_no") or index)
+        page_seed.setdefault("layout_brief", raw_panel.get("visual_brief") or raw_panel.get("prompt") or "")
+        page_seed["panels"] = [raw_panel]
+        pages.append(page_from_raw(page_seed, index))
+    return pages
+
+
+def normalize_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    if isinstance(plan.get("pages"), list) and plan["pages"]:
+        pages = []
+        for index, raw_page in enumerate(plan["pages"], start=1):
+            if not isinstance(raw_page, dict):
+                raise SystemExit(f"Page {index} is not an object.")
+            pages.append(page_from_raw(raw_page, index))
+    elif isinstance(plan.get("panels"), list) and plan["panels"]:
+        pages = legacy_panels_to_pages(plan)
+    else:
+        raise SystemExit("Plan must contain a non-empty pages list, or a legacy non-empty panels list.")
+
     seen_ids: set[str] = set()
     seen_files: set[str] = set()
-    for index, raw in enumerate(raw_panels, start=1):
-        if not isinstance(raw, dict):
-            raise SystemExit(f"Panel {index} is not an object.")
-        base = raw.get("id") or raw.get("filename") or raw.get("visual_brief") or f"panel-{index}"
-        panel_id = slugify(str(base), f"panel-{index}")[:80]
-        if panel_id in seen_ids:
-            panel_id = f"{index:03d}-{panel_id}"
-        seen_ids.add(panel_id)
-
-        filename = raw.get("filename")
-        if filename:
-            filename = slugify(Path(str(filename)).stem, panel_id) + ".png"
-        else:
-            filename = f"{index:03d}_{panel_id}.png"
-        if filename in seen_files:
-            filename = f"{index:03d}_{filename}"
-        seen_files.add(filename)
-
-        visual_brief = str(raw.get("visual_brief") or raw.get("brief") or "").strip()
-        prompt = str(raw.get("prompt") or visual_brief).strip()
-        if not visual_brief and not prompt:
-            raise SystemExit(f"Panel {panel_id} needs visual_brief or prompt.")
-
-        panels.append(
-            {
-                "id": panel_id,
-                "filename": filename,
-                "order": int(raw.get("panel_no") or raw.get("order") or index),
-                "panel_no": raw.get("panel_no") or index,
-                "scene_refs": as_list(raw.get("scene_refs") or raw.get("scenes")),
-                "beat": str(raw.get("beat") or raw.get("purpose") or ""),
-                "purpose": str(raw.get("purpose") or raw.get("beat") or ""),
-                "visual_brief": visual_brief,
-                "setting": str(raw.get("setting") or ""),
-                "characters": as_list(raw.get("characters")),
-                "action": str(raw.get("action") or ""),
-                "camera": str(raw.get("camera") or ""),
-                "composition": str(raw.get("composition") or ""),
-                "mood": str(raw.get("mood") or ""),
-                "dialogue": as_list(raw.get("dialogue")),
-                "sfx": as_list(raw.get("sfx")),
-                "narration": as_list(raw.get("narration") or raw.get("caption")),
-                "continuity_notes": str(raw.get("continuity_notes") or ""),
-                "references": as_list(raw.get("references") or raw.get("reference_paths")),
-                "prompt": prompt,
-                "negative_prompt": str(raw.get("negative_prompt") or ""),
-                "dependencies": as_list(raw.get("dependencies")),
-                "notes": str(raw.get("notes") or ""),
-                "stages": build_stage_states(),
-            }
-        )
+    for index, page in enumerate(pages, start=1):
+        if page["id"] in seen_ids:
+            page["id"] = f"{index:03d}-{page['id']}"
+        seen_ids.add(page["id"])
+        if page["filename"] in seen_files:
+            page["filename"] = f"{index:03d}_{page['filename']}"
+        seen_files.add(page["filename"])
 
     id_aliases: dict[str, str] = {}
-    for panel in panels:
-        id_aliases[panel["id"]] = panel["id"]
-        id_aliases[slugify(panel["id"])] = panel["id"]
-        id_aliases[panel["filename"]] = panel["id"]
-        id_aliases[Path(panel["filename"]).stem] = panel["id"]
-        id_aliases[slugify(Path(panel["filename"]).stem)] = panel["id"]
+    for page in pages:
+        id_aliases[page["id"]] = page["id"]
+        id_aliases[slugify(page["id"])] = page["id"]
+        id_aliases[page["filename"]] = page["id"]
+        id_aliases[Path(page["filename"]).stem] = page["id"]
+        id_aliases[slugify(Path(page["filename"]).stem)] = page["id"]
 
-    for panel in panels:
+    for page in pages:
         normalized_deps = []
-        for dep in panel.get("dependencies", []):
+        for dep in page.get("dependencies", []):
             dep_key = slugify(Path(str(dep)).stem, str(dep))
             dep_id = id_aliases.get(str(dep)) or id_aliases.get(dep_key)
             if not dep_id:
-                raise SystemExit(f"Panel {panel['id']} has unknown dependency: {dep}")
-            if dep_id != panel["id"] and dep_id not in normalized_deps:
+                raise SystemExit(f"Page {page['id']} has unknown dependency: {dep}")
+            if dep_id != page["id"] and dep_id not in normalized_deps:
                 normalized_deps.append(dep_id)
-        panel["dependencies"] = normalized_deps
-    panels.sort(key=lambda panel: (panel["order"], panel["id"]))
-    return panels
+        page["dependencies"] = normalized_deps
+    pages.sort(key=lambda page: (page["order"], page["id"]))
+    return pages
 
 
 def command_approve_plan(args: argparse.Namespace) -> None:
@@ -515,28 +611,29 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     else:
         raise SystemExit("Use --plan-file or --plan-json.")
 
-    panels = normalize_plan(plan)
-    state["title"] = plan.get("scenario_title") or state.get("title")
+    pages = normalize_plan(plan)
+    state["title"] = plan.get("scenario_title") or plan.get("story_title") or state.get("title")
     state["style_brief"] = str(plan.get("style_brief") or "")
-    state["reading_order"] = str(plan.get("reading_order") or "left-to-right")
+    state["reading_order"] = str(plan.get("reading_order") or "right-to-left or top-to-bottom as approved")
     state["plan_approved"] = True
     state["approved_at"] = now_iso()
-    state["panels"] = panels
+    state["pages"] = pages
+    state.pop("panels", None)
     state["batches"] = []
-    state.setdefault("notes", []).append(f"Approved {len(panels)} storyboard panels at {state['approved_at']}.")
+    state.setdefault("notes", []).append(f"Approved {len(pages)} comic pages at {state['approved_at']}.")
 
     write_json(
         run_dir / "approved_storyboard_plan.json",
         {
             "scenario_title": state["title"],
             "style_brief": state.get("style_brief", ""),
-            "reading_order": state.get("reading_order", "left-to-right"),
-            "panels": panels,
+            "reading_order": state.get("reading_order", ""),
+            "pages": pages,
         },
     )
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
-    print(f"APPROVED_PANELS: {len(panels)}")
+    print(f"APPROVED_PAGES: {len(pages)}")
     print(f"PLAN: {run_dir / 'approved_storyboard_plan.json'}")
     print("NEXT: comic_storyboard_runner.py next-batch --run-dir <run-dir> --limit 4")
 
@@ -545,12 +642,12 @@ def command_next_batch(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
     if not state.get("plan_approved"):
-        raise SystemExit("Plan is not approved. Present the Korean approval request, then run approve-plan.")
+        raise SystemExit("Plan is not approved. Present the Korean page approval request, then run approve-plan.")
 
     blockers = current_blockers(state)
     if blockers:
         names = ", ".join(
-            f"{panel['filename']}:{stage_id}({stage.get('status')})" for panel, stage_id, stage in blockers
+            f"{page['filename']}:{stage_id}({stage.get('status')})" for page, stage_id, stage in blockers
         )
         raise SystemExit(f"Resolve current batch before reserving another: {names}")
 
@@ -560,14 +657,14 @@ def command_next_batch(args: argparse.Namespace) -> None:
         return
 
     candidates = []
-    for panel in state.get("panels", []):
-        stage = stage_state(panel, stage_id)
+    for page in state.get("pages", []):
+        stage = stage_state(page, stage_id)
         if stage.get("status") != "pending":
             continue
-        if not dependencies_ready(state, panel, stage_id):
+        if not dependencies_ready(state, page, stage_id):
             continue
-        candidates.append(panel)
-    candidates.sort(key=lambda panel: panel_sort_key(panel, stage_id))
+        candidates.append(page)
+    candidates.sort(key=lambda page: page_sort_key(page, stage_id))
 
     if not candidates:
         print("NO_ELIGIBLE_ITEMS")
@@ -577,8 +674,8 @@ def command_next_batch(args: argparse.Namespace) -> None:
     limit = min(max(args.limit, 1), 4)
     selected = candidates[:limit]
     batch_id = f"batch-{len(state.get('batches', [])) + 1:03d}"
-    for panel in selected:
-        stage = stage_state(panel, stage_id)
+    for page in selected:
+        stage = stage_state(page, stage_id)
         stage["status"] = "generation_requested"
         stage["batch_id"] = batch_id
         stage["attempts"] = int(stage.get("attempts", 0)) + 1
@@ -587,18 +684,18 @@ def command_next_batch(args: argparse.Namespace) -> None:
         stage["worker_status"] = ""
         stage["worker_note"] = ""
         stage["parent_note"] = ""
-        prompt_path = stage_prompt_path(run_dir, panel, stage_id)
+        prompt_path = stage_prompt_path(run_dir, page, stage_id)
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        prompt_path.write_text(prompt_text(run_dir, panel, stage_id, state), encoding="utf-8")
+        prompt_path.write_text(prompt_text(run_dir, page, stage_id, state), encoding="utf-8")
         stage["prompt_file"] = str(prompt_path)
-        stage["output_path"] = str(stage_output_path(run_dir, panel, stage_id))
+        stage["output_path"] = str(stage_output_path(run_dir, page, stage_id))
 
     state.setdefault("batches", []).append(
         {
             "id": batch_id,
             "stage": stage_id,
             "created_at": now_iso(),
-            "panels": [panel["id"] for panel in selected],
+            "pages": [page["id"] for page in selected],
             "limit": limit,
         }
     )
@@ -608,10 +705,10 @@ def command_next_batch(args: argparse.Namespace) -> None:
     print(f"BATCH_ID: {batch_id}")
     print(f"STAGE: {stage_id}")
     print(f"RUN_DIR: {run_dir}")
-    for panel in selected:
-        stage = stage_state(panel, stage_id)
-        print(f"ITEM: {panel['filename']}")
-        print(f"ITEM_ID: {panel['id']}")
+    for page in selected:
+        stage = stage_state(page, stage_id)
+        print(f"ITEM: {page['filename']}")
+        print(f"ITEM_ID: {page['id']}")
         print(f"PROMPT_FILE: {stage['prompt_file']}")
         print(f"OUTPUT: {stage['output_path']}")
 
@@ -621,16 +718,16 @@ def command_import(args: argparse.Namespace) -> None:
         raise SystemExit(f"Invalid worker-status: {args.worker_status}")
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
-    panel = resolve_panel(state, args.item)
+    page = resolve_page(state, args.item)
     stage_id = args.stage
-    stage = stage_state(panel, stage_id)
+    stage = stage_state(page, stage_id)
     if stage.get("status") not in {"generation_requested", "imported"}:
-        raise SystemExit(f"Panel stage is not waiting for import: {panel['filename']} {stage_id} ({stage.get('status')})")
+        raise SystemExit(f"Page stage is not waiting for import: {page['filename']} {stage_id} ({stage.get('status')})")
     generated = Path(args.generated)
     if not generated.exists():
         raise SystemExit(f"Generated file not found: {generated}")
 
-    destination = stage_output_path(run_dir, panel, stage_id)
+    destination = stage_output_path(run_dir, page, stage_id)
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(generated, destination)
     stage["status"] = "imported"
@@ -649,12 +746,12 @@ def command_import(args: argparse.Namespace) -> None:
 def command_inspect_pass(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
-    panel = resolve_panel(state, args.item)
+    page = resolve_page(state, args.item)
     stage_id = args.stage
-    stage = stage_state(panel, stage_id)
+    stage = stage_state(page, stage_id)
     if stage.get("status") not in {"imported", "inspected_pass", "complete"}:
-        raise SystemExit(f"Panel stage is not imported for inspection: {panel['filename']} {stage_id} ({stage.get('status')})")
-    output = stage_output_path(run_dir, panel, stage_id)
+        raise SystemExit(f"Page stage is not imported for inspection: {page['filename']} {stage_id} ({stage.get('status')})")
+    output = stage_output_path(run_dir, page, stage_id)
     if not output.exists():
         raise SystemExit(f"Output file does not exist: {output}")
     stage["status"] = "inspected_pass"
@@ -663,17 +760,17 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
     stage["output_path"] = str(output)
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
-    print(f"INSPECTED_PASS: {panel['filename']} {stage_id}")
+    print(f"INSPECTED_PASS: {page['filename']} {stage_id}")
 
 
 def command_rerun(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
-    panel = resolve_panel(state, args.item)
+    page = resolve_page(state, args.item)
     stage_id = args.stage
-    stage = stage_state(panel, stage_id)
+    stage = stage_state(page, stage_id)
     if stage.get("status") not in {"pending", "generation_requested", "imported", "inspected_pass", "complete"}:
-        raise SystemExit(f"Cannot rerun panel stage in status {stage.get('status')}: {panel['filename']} {stage_id}")
+        raise SystemExit(f"Cannot rerun page stage in status {stage.get('status')}: {page['filename']} {stage_id}")
     history = stage.setdefault("rerun_history", [])
     history.append(
         {
@@ -694,7 +791,7 @@ def command_rerun(args: argparse.Namespace) -> None:
     stage["parent_note"] = args.note
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
-    print(f"RERUN_PENDING: {panel['filename']} {stage_id}")
+    print(f"RERUN_PENDING: {page['filename']} {stage_id}")
     print("NEXT: Resolve any other current items, then run next-batch.")
 
 
@@ -707,10 +804,10 @@ def command_batch_status(args: argparse.Namespace) -> None:
     stage_id = batch.get("stage")
     print(f"BATCH_ID: {args.batch_id}")
     print(f"STAGE: {stage_id}")
-    for panel_id in batch.get("panels", []):
-        panel = resolve_panel(state, panel_id)
-        stage = stage_state(panel, stage_id)
-        print(f"- {panel['filename']}: {stage.get('status')} worker={stage.get('worker_status', '')}")
+    for page_id in batch.get("pages", []):
+        page = resolve_page(state, page_id)
+        stage = stage_state(page, stage_id)
+        print(f"- {page['filename']}: {stage.get('status')} worker={stage.get('worker_status', '')}")
 
 
 def command_status(args: argparse.Namespace) -> None:
@@ -718,20 +815,20 @@ def command_status(args: argparse.Namespace) -> None:
     state = load_state(run_dir)
     print(f"RUN_DIR: {run_dir}")
     print(f"PLAN_APPROVED: {state.get('plan_approved')}")
-    print(f"PANELS: {len(state.get('panels', []))}")
+    print(f"PAGES: {len(state.get('pages', []))}")
     print(f"CURRENT_STAGE: {current_stage_id(state) or 'complete'}")
     for stage_id in STAGE_IDS:
         counts: dict[str, int] = {}
-        for panel in state.get("panels", []):
-            status = stage_state(panel, stage_id).get("status", "unknown")
+        for page in state.get("pages", []):
+            status = stage_state(page, stage_id).get("status", "unknown")
             counts[status] = counts.get(status, 0) + 1
         parts = ", ".join(f"{status}={counts[status]}" for status in sorted(counts)) or "none"
         print(f"{stage_id}: {parts}")
     blockers = current_blockers(state)
     if blockers:
         print("CURRENT_BLOCKERS:")
-        for panel, stage_id, stage in blockers:
-            print(f"- {panel['filename']}:{stage_id}: {stage.get('status')}")
+        for page, stage_id, stage in blockers:
+            print(f"- {page['filename']}:{stage_id}: {stage.get('status')}")
     print(f"COMPLETE: {str(workflow_complete(state)).lower()}")
 
 

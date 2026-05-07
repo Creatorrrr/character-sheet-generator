@@ -42,7 +42,7 @@ Default policy:
 - If `01_face_front.png` is visually inspected and passes, continue to the rest of the pack without asking for another approval unless the user explicitly requested a gated workflow.
 - If the anchor fails inspection, run `rerun` for `01_face_front.png` and do not generate dependent items yet.
 
-Required command flow:
+Serial command flow:
 
 ```bash
 python3 scripts/video_pack_runner.py init --source <source-image>
@@ -51,6 +51,18 @@ python3 scripts/video_pack_runner.py next --run-dir <run-dir>
 python3 scripts/video_pack_runner.py import-latest --run-dir <run-dir>
 # Inspect the imported output before marking pass.
 python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<short inspection note>"
+```
+
+Parallel command flow after the master face anchor is approved:
+
+```bash
+python3 scripts/video_pack_runner.py next-batch --run-dir <run-dir> --limit 4
+# Spawn one subagent per printed item, with fork_context=true.
+# Each subagent generates exactly one assigned output with image_gen and reports the generated file path plus a first-pass inspection note.
+python3 scripts/video_pack_runner.py import --run-dir <run-dir> --item <filename> --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
+# Parent session inspects each imported image before marking final pass.
+python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<parent inspection note>"
+python3 scripts/video_pack_runner.py batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
 
 If a generated image is wrong:
@@ -63,9 +75,12 @@ python3 scripts/video_pack_runner.py next --run-dir <run-dir>
 State rules:
 
 - Before every `image_gen` call, run `next` so the target item is marked `generation_requested`.
+- For parallel batches, run `next-batch --limit 4` once, then assign one printed item to each subagent.
 - After `image_gen`, do not create a new run folder. Resume the same run and run `import-latest`.
+- In parallel mode, do not use `import-latest`; use `import --item <filename> --generated <path>` so each generated file is mapped to the correct output.
 - If the user provides no run folder, initialize by source image; the runner reuses an incomplete run with the same source image hash.
 - Only `inspect-pass` may mark an item `inspected_pass`. `import-latest` only copies the file into the run folder and marks it `imported`.
+- Subagent inspection is advisory only. Store it through `import --worker-status ... --worker-note ...`, but the parent session must visually inspect and run `inspect-pass` before the item counts as complete.
 - Treat the pack as complete only when every item is `inspected_pass` or `complete`.
 
 ## Image Skill Map
@@ -110,7 +125,30 @@ Use these dependency rules:
 - `01_face_front` blocks the rest only when no approved master face exists.
 - After a master face exists, detail images can be requested in parallel.
 - Costume, props, shoes, hands, expression, mouth, hair, and full-body views are independent enough to batch together.
-- If an image generation tool supports parallel or batch requests, submit the independent requests at once. If the tool is serial-only, still prepare the full request list so the user can run them in parallel elsewhere.
+- Use a maximum batch size of 4. Do not reserve the next batch while any current batch item is still `generation_requested` or `imported`.
+- If a batch item fails parent inspection, run `rerun` for that item and reserve the rerun before starting new pending items.
+
+## Subagent Batch Contract
+
+When spawning subagents for `next-batch`, use `fork_context=true` and pass explicit task context even though the session is forked:
+
+```text
+You are generating exactly one image for create-video-closeup-reference-pack.
+Do not edit state.json.
+Run folder: <run-dir>
+Source character sheet: <run-dir>/source_character_sheet.png
+Approved master face anchor: <run-dir>/01_face_front.png
+Assigned output: <filename>
+Prompt file: <prompt-file>
+Batch id: <batch-id>
+
+Use image_gen with the assigned prompt and visual references. After generation, inspect the output for prompt fit, photorealism, identity consistency, direction/crop correctness where applicable, and obvious defects. Return only:
+- generated file path
+- worker_status: pass or needs_rerun
+- worker_note: concise inspection note
+```
+
+The parent session imports the result, performs final visual inspection, and decides `inspect-pass` or `rerun`.
 
 ## Left/Right Pair Rule
 

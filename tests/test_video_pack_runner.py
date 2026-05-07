@@ -104,6 +104,141 @@ class VideoPackRunnerTest(unittest.TestCase):
             state = json.loads((run_dir / "state.json").read_text())
             self.assertEqual(state["items"][0]["status"], "needs_rerun")
 
+    def test_next_batch_blocks_dependents_until_anchor_passes_then_reserves_four(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            source.write_bytes(b"fake image")
+
+            init = run_cli("init", "--source", str(source), cwd=root)
+            run_dir = root / init.stdout.strip()
+
+            first_batch = run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn("items: 1", first_batch.stdout)
+            self.assertIn("01_face_front.png", first_batch.stdout)
+            self.assertNotIn("02_03_face_3q_pair.png", first_batch.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            self.assertEqual(state["items"][0]["status"], "generation_requested")
+            self.assertIsNotNone(state["items"][0]["batch_id"])
+            self.assertIsNotNone(state["items"][0]["requested_at"])
+
+            anchor = run_dir / "01_face_front.png"
+            anchor.write_bytes(b"anchor")
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "01_face_front.png",
+                cwd=root,
+            )
+
+            second_batch = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            self.assertIn("items: 4", second_batch.stdout)
+            self.assertIn("02_03_face_3q_pair.png", second_batch.stdout)
+            self.assertIn("04_05_face_side_pair.png", second_batch.stdout)
+            self.assertIn("06_eye_macro.png", second_batch.stdout)
+            self.assertIn("07_expression_sheet.png", second_batch.stdout)
+
+            state = json.loads((run_dir / "state.json").read_text())
+            reserved = state["items"][1:5]
+            self.assertTrue(all(item["status"] == "generation_requested" for item in reserved))
+            self.assertEqual(len({item["batch_id"] for item in reserved}), 1)
+            self.assertTrue(all(item["requested_at"] for item in reserved))
+            self.assertEqual(state["items"][5]["status"], "pending")
+
+    def test_explicit_import_maps_parallel_outputs_and_parent_pass_controls_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            generated_a = root / "generated-a.png"
+            generated_b = root / "generated-b.png"
+            source.write_bytes(b"fake image")
+            generated_a.write_bytes(b"generated image a")
+            generated_b.write_bytes(b"generated image b")
+
+            init = run_cli("init", "--source", str(source), cwd=root)
+            run_dir = root / init.stdout.strip()
+            state_path = run_dir / "state.json"
+            state = json.loads(state_path.read_text())
+            state["items"][0]["status"] = "inspected_pass"
+            state_path.write_text(json.dumps(state, indent=2) + "\n")
+
+            batch = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            batch_id = next(line.split(": ", 1)[1] for line in batch.stdout.splitlines() if line.startswith("batch_id: "))
+
+            import_a = run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "02_03_face_3q_pair.png",
+                "--generated",
+                str(generated_a),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker visual pass",
+                cwd=root,
+            )
+            self.assertIn("worker_status: pass", import_a.stdout)
+
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "04_05_face_side_pair.png",
+                "--generated",
+                str(generated_b),
+                "--worker-status",
+                "needs_rerun",
+                "--worker-note",
+                "direction mismatch",
+                cwd=root,
+            )
+
+            self.assertEqual((run_dir / "02_03_face_3q_pair.png").read_bytes(), b"generated image a")
+            self.assertEqual((run_dir / "04_05_face_side_pair.png").read_bytes(), b"generated image b")
+            state = json.loads(state_path.read_text())
+            self.assertFalse(state["complete"])
+            self.assertEqual(state["items"][1]["status"], "imported")
+            self.assertEqual(state["items"][1]["worker_status"], "pass")
+            self.assertEqual(state["items"][2]["worker_status"], "needs_rerun")
+
+            status = run_cli("batch-status", "--run-dir", str(run_dir), "--batch-id", batch_id, cwd=root)
+            self.assertIn("items: 4", status.stdout)
+            self.assertIn("worker_pass: 1", status.stdout)
+            self.assertIn("worker_needs_rerun: 1", status.stdout)
+
+            run_cli(
+                "rerun",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "04_05_face_side_pair.png",
+                "--note",
+                "parent rejected direction",
+                cwd=root,
+            )
+            status_after_rerun = run_cli("batch-status", "--run-dir", str(run_dir), "--batch-id", batch_id, cwd=root)
+            self.assertIn("needs_rerun: 1", status_after_rerun.stdout)
+
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "02_03_face_3q_pair.png",
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            state = json.loads(state_path.read_text())
+            self.assertEqual(state["items"][1]["status"], "inspected_pass")
+            self.assertIsNotNone(state["items"][1]["parent_inspected_at"])
+            self.assertFalse(state["complete"])
+
     def test_completion_status_and_next_when_all_items_complete(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

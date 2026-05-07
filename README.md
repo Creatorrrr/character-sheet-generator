@@ -10,6 +10,7 @@
 | 승인된 캐릭터 시트에서 스타일을 유지한 클로즈업/디테일 팩 만들기 | `$create-character-sheet-closeup-reference-pack` |
 | 2D 캐릭터 시트를 실사 라이브액션 캐릭터 시트로 변환하기 | `$convert-2d-sheet-to-photoreal` |
 | 실사 캐릭터 시트나 마스터 얼굴을 바탕으로 영상 AI용 포토리얼 레퍼런스 팩 만들기 | `$create-video-closeup-reference-pack` |
+| 줄거리/시나리오를 만화 콘티, 스케치/펜선, 톤/채색/마무리 패널로 단계별 생성하기 | `$create-comic-storyboard-pack` |
 | 특정 부위나 특정 각도의 이미지 한 장만 만들기 | 아래의 개별 생성 skill |
 
 ## 공통 운영 규칙
@@ -100,6 +101,22 @@
 | `19_face_turnaround_sheet.png` | `$create-face-turnaround-sheet` |
 | `20_hand_gesture_four_sheet.png` | `$create-hand-gesture-four-sheet` |
 
+### `$create-comic-storyboard-pack`
+
+줄거리/시나리오, 장면 메모, 대본, 씬 브리프, 샷 리스트를 바탕으로 만화 콘티 패널 목록을 만들고, 승인 후 3단계 이미지 생성을 진행합니다. 각 단계는 최대 4개 패널씩 서브에이전트 병렬 생성, 서브에이전트 1차 검수, 부모 세션 최종 검수를 거칩니다.
+
+진행 단계:
+
+1. 콘티 `storyboard`
+2. 스케치/펜선 `sketch_ink`
+3. 톤/채색/마무리 `finish`
+
+기본 정책:
+
+- 승인 전에는 이미지를 생성하지 않습니다.
+- 말풍선, 자막, 패널 번호, 효과음 글자는 기본적으로 이미지 내부에 넣지 않고 계획/노트에만 보관합니다.
+- 다음 단계는 이전 단계의 모든 패널이 부모 검수를 통과한 뒤에만 진행합니다.
+
 ## 2D to Photoreal Stage Skills
 
 | Skill | 용도 |
@@ -169,6 +186,14 @@ $convert-2d-sheet-to-photoreal
 ```text
 $create-video-closeup-reference-pack
 승인된 실사 캐릭터 시트를 기준으로 영상 AI용 face, expression, hand, costume, full-body 레퍼런스 팩을 만들어줘.
+```
+
+만화 콘티 팩:
+
+```text
+$create-comic-storyboard-pack
+이 줄거리/시나리오를 만화 콘티로 구성해줘.
+먼저 패널 목록과 단계별 진행 방식을 보고하고, 승인 후 콘티 -> 스케치/펜선 -> 톤/채색/마무리 순서로 생성해줘.
 ```
 
 스타일 보존 클로즈업 팩:

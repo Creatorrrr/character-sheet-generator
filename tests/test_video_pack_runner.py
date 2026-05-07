@@ -46,7 +46,15 @@ class VideoPackRunnerTest(unittest.TestCase):
             self.assertEqual(first_state["items"][0]["output"], "01_face_front.png")
             self.assertEqual(first_state["items"][1]["output"], "02_03_face_3q_pair.png")
             self.assertEqual(first_state["items"][2]["output"], "04_05_face_side_pair.png")
+            outputs = [item["output"] for item in first_state["items"]]
+            self.assertIn("19_face_turnaround_sheet.png", outputs)
+            self.assertIn("20_hand_gesture_four_sheet.png", outputs)
+            self.assertNotIn("face_turnaround_sheet.png", outputs)
+            self.assertNotIn("hand_gesture_four_sheet.png", outputs)
             self.assertTrue((root / first.stdout.strip() / "batch_plan.md").exists())
+            batch_plan = (root / first.stdout.strip() / "batch_plan.md").read_text()
+            self.assertIn("- output: 19_face_turnaround_sheet.png", batch_plan)
+            self.assertIn("- output: 20_hand_gesture_four_sheet.png", batch_plan)
 
             second = run_cli("init", "--source", str(source), cwd=root)
             self.assertEqual(first.stdout.strip(), second.stdout.strip())

@@ -145,14 +145,14 @@ ITEMS = [
         "prompt": "Generate a relaxed neutral idle standing pose of the same character for video reference. Preserve identity, outfit, accessories, and shoes. Keep the pose age-appropriate, non-glamour, and studio-reference oriented.",
     },
     {
-        "output": "face_turnaround_sheet.png",
+        "output": "19_face_turnaround_sheet.png",
         "skill": "create-face-turnaround-sheet",
         "dependencies": ["01_face_front.png"],
         "notes": "Five-angle face sheet with no labels.",
         "prompt": "Generate a no-label five-angle photoreal face turnaround sheet of the same person: front, left 3/4, right 3/4, left side profile, and right side profile. Keep lighting, crop, hairstyle, and upper outfit consistent.",
     },
     {
-        "output": "hand_gesture_four_sheet.png",
+        "output": "20_hand_gesture_four_sheet.png",
         "skill": "create-hand-gesture-four-sheet",
         "dependencies": [SOURCE_NAME, "01_face_front.png"],
         "notes": "Four no-label hand gesture panels.",
@@ -334,11 +334,11 @@ def request_group(output):
         return "anchor"
     if output in {"02_03_face_3q_pair.png", "04_05_face_side_pair.png"}:
         return "paired-face-views"
-    if output.startswith(("06_", "07_", "08_", "09_", "10_")) or output == "face_turnaround_sheet.png":
+    if output.startswith(("06_", "07_", "08_", "09_", "10_", "19_")):
         return "parallel-face-detail"
     if output.startswith(("11_", "13_", "14_")):
         return "parallel-costume-props"
-    if output.startswith("12_") or output == "hand_gesture_four_sheet.png":
+    if output.startswith(("12_", "20_")):
         return "parallel-hands"
     return "parallel-full-body"
 

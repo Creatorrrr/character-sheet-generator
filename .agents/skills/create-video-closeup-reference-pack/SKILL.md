@@ -116,8 +116,8 @@ State rules:
 - `16_full_body_back.png`: `$create-full-body-back-reference`
 - `17_full_body_side.png`: `$create-full-body-side-reference`
 - `18_character_pose_idle.png`: `$create-character-idle-pose`
-- `face_turnaround_sheet.png`: `$create-face-turnaround-sheet`
-- `hand_gesture_four_sheet.png`: `$create-hand-gesture-four-sheet`
+- `19_face_turnaround_sheet.png`: `$create-face-turnaround-sheet`
+- `20_hand_gesture_four_sheet.png`: `$create-hand-gesture-four-sheet`
 
 If explicit skill invocation is unavailable, open the sibling `SKILL.md` and reuse its prompt directly.
 

@@ -17,7 +17,11 @@ SOURCE_NAME = "source_character_sheet.png"
 GENERATED_ROOT = Path("/Users/chasoik/.codex/generated_images")
 STYLE_MODES = {"preserve_source_style", "photoreal_conversion", "custom_style_override"}
 PRESETS = {"core", "full"}
+ANCHOR_OUTPUT = "01_face_front.png"
+DEPENDENT_NEXT_ERROR = "Anchor is approved; use next-batch --limit 4 and subagents for dependent items."
+DEPENDENT_IMPORT_LATEST_ERROR = "Anchor is approved; import dependent items with `import --item <filename> --generated <path>`."
 DONE_STATUSES = {"inspected_pass", "complete"}
+WORKER_STATUS_VALUES = {None, "pass", "needs_rerun"}
 STATUS_VALUES = {
     "pending",
     "generation_requested",
@@ -273,6 +277,10 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def new_batch_id():
+    return "batch-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
+
 def sha256_file(path):
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -320,6 +328,7 @@ def read_state(run_dir):
     state_path = run_dir / "state.json"
     with state_path.open() as handle:
         state = json.load(handle)
+    normalize_state(state)
     validate_state(state)
     return state
 
@@ -341,6 +350,16 @@ def validate_state(state):
     for item in state.get("items", []):
         if item.get("status") not in STATUS_VALUES:
             raise ValueError(f"invalid item status: {item.get('status')}")
+        if item.get("worker_status") not in WORKER_STATUS_VALUES:
+            raise ValueError(f"invalid worker_status: {item.get('worker_status')}")
+
+
+def normalize_state(state):
+    for item in state.get("items", []):
+        item.setdefault("batch_id", None)
+        item.setdefault("worker_status", None)
+        item.setdefault("worker_note", "")
+        item.setdefault("parent_inspected_at", None)
 
 
 def find_incomplete_run(source_hash, preset, style_mode):
@@ -435,8 +454,10 @@ def write_batch_plan(run_dir, state, items):
         "- Use state.json as the source of truth.",
         "- Use Codex built-in image_gen for every pack output.",
         "- Crop-only or manually extracted sheet regions do not count as completed pack outputs.",
-        "- Call `next` before each image generation so the item is marked generation_requested.",
-        "- After image_gen returns in a later turn, run `import-latest`, inspect the image, then run `inspect-pass` or `rerun`.",
+        "- Use `next` and `import-latest` only for the 01_face_front.png anchor flow before the anchor is approved.",
+        "- After the anchor is approved, call `next-batch --limit 4` and assign one reserved dependent item to each subagent.",
+        "- Import each dependent subagent output with explicit `import --item <filename> --generated <path>` mapping.",
+        "- After import, the parent session must inspect the image, then run `inspect-pass` or `rerun`.",
         "- Do not create a new run when an incomplete run with the same source hash, preset, and style mode exists.",
         "",
         "Batch items:",
@@ -471,6 +492,10 @@ def create_state(run_dir, source, source_hash, preset, style_mode):
                 "status": "pending",
                 "requested_at": None,
                 "generated_source": None,
+                "batch_id": None,
+                "worker_status": None,
+                "worker_note": "",
+                "parent_inspected_at": None,
                 "inspection": {},
             }
         )
@@ -534,7 +559,21 @@ def item_by_output(state, output):
     raise SystemExit(f"item not found: {output}")
 
 
+def is_anchor_item(item):
+    return item["output"] == ANCHOR_OUTPUT
+
+
+def anchor_ready(state):
+    try:
+        anchor = item_by_output(state, ANCHOR_OUTPUT)
+    except SystemExit:
+        return False
+    return anchor["status"] in DONE_STATUSES
+
+
 def dependency_ready(state, item):
+    if not is_anchor_item(item) and not anchor_ready(state):
+        return False
     by_output = {entry["output"]: entry for entry in state["items"]}
     for dependency in item["dependencies"]:
         if dependency in by_output and by_output[dependency]["status"] not in DONE_STATUSES:
@@ -542,14 +581,100 @@ def dependency_ready(state, item):
     return True
 
 
+def import_blocking_items(state):
+    return [item for item in state["items"] if item["status"] == "imported"]
+
+
+def requested_items(state):
+    return [item for item in state["items"] if item["status"] == "generation_requested"]
+
+
 def next_item(state):
-    for item in state["items"]:
-        if item["status"] == "generation_requested":
-            return item, False
+    requested = requested_items(state)
+    if requested:
+        return requested[0], False
+    if import_blocking_items(state):
+        return None, False
     for item in state["items"]:
         if item["status"] in {"needs_rerun", "pending"} and dependency_ready(state, item):
             return item, True
     return None, False
+
+
+def next_batch_candidates(state, limit):
+    if limit < 1:
+        raise SystemExit("--limit must be greater than 0")
+
+    imported = import_blocking_items(state)
+    if imported:
+        return [], None, "imported_blocking"
+
+    requested = requested_items(state)
+    if requested:
+        batch_id = requested[0].get("batch_id") or "single-item"
+        return requested, batch_id, "existing"
+
+    candidates = []
+    for status in ("needs_rerun", "pending"):
+        for item in state["items"]:
+            if item["status"] == status and dependency_ready(state, item):
+                candidates.append(item)
+                if len(candidates) >= limit:
+                    return candidates, None, "new"
+    return candidates, None, "new"
+
+
+def print_item_request(run_dir, item, include_prompt=True):
+    prompt_path = run_dir / item["prompt_file"]
+    print(f"output: {item['output']}")
+    print(f"prompt_template: {item['prompt_template']}")
+    print(f"prompt_file: {item['prompt_file']}")
+    if item.get("batch_id"):
+        print(f"batch_id: {item['batch_id']}")
+    print("")
+    if include_prompt:
+        print(prompt_path.read_text())
+
+
+def print_batch_request(run_dir, batch_id, items):
+    print(f"batch_id: {batch_id}")
+    print(f"items: {len(items)}")
+    print("")
+    for index, item in enumerate(items, start=1):
+        print(f"--- item {index} ---")
+        print_item_request(run_dir, item, include_prompt=True)
+
+
+def command_next_batch(args):
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    state = read_state(run_dir)
+    if is_complete(state):
+        print("No pending items. Pack is complete.")
+        return 0
+
+    items, batch_id, mode = next_batch_candidates(state, args.limit)
+    if mode == "imported_blocking":
+        print("A batch has imported items awaiting parent inspection. Inspect or rerun them before reserving another batch.")
+        return 0
+    if not items:
+        print("No pending items are dependency-ready. Inspect or rerun the blocking item first.")
+        return 0
+
+    if mode == "new":
+        batch_id = new_batch_id()
+        requested_at = now_iso()
+        for item in items:
+            item["status"] = "generation_requested"
+            item["requested_at"] = requested_at
+            item["batch_id"] = batch_id
+            item["worker_status"] = None
+            item["worker_note"] = ""
+            item["parent_inspected_at"] = None
+            item["inspection"] = {}
+        write_state(run_dir, state)
+
+    print_batch_request(run_dir, batch_id, items)
+    return 0
 
 
 def command_next(args):
@@ -559,6 +684,15 @@ def command_next(args):
         print("No pending items. Pack is complete.")
         return 0
 
+    if anchor_ready(state):
+        dependent_serial_items = [
+            item
+            for item in state["items"]
+            if not is_anchor_item(item) and item["status"] in {"pending", "needs_rerun", "generation_requested"}
+        ]
+        if dependent_serial_items:
+            raise SystemExit(DEPENDENT_NEXT_ERROR)
+
     item, should_mark = next_item(state)
     if item is None:
         print("No pending items are dependency-ready. Inspect or rerun the blocking item first.")
@@ -566,22 +700,23 @@ def command_next(args):
     if should_mark:
         item["status"] = "generation_requested"
         item["requested_at"] = now_iso()
+        item["batch_id"] = None
+        item["worker_status"] = None
+        item["worker_note"] = ""
+        item["parent_inspected_at"] = None
         item["inspection"] = {}
         write_state(run_dir, state)
 
-    prompt_path = run_dir / item["prompt_file"]
-    print(f"output: {item['output']}")
-    print(f"prompt_template: {item['prompt_template']}")
-    print(f"prompt_file: {item['prompt_file']}")
-    print("")
-    print(prompt_path.read_text())
+    print_item_request(run_dir, item, include_prompt=True)
     return 0
 
 
 def requested_item(state):
-    for item in state["items"]:
-        if item["status"] == "generation_requested":
-            return item
+    requested = requested_items(state)
+    if len(requested) == 1:
+        return requested[0]
+    if len(requested) > 1:
+        raise SystemExit("multiple items are marked generation_requested; use `import --item <filename> --generated <path>`")
     raise SystemExit("no item is marked generation_requested")
 
 
@@ -604,6 +739,8 @@ def command_import_latest(args):
     run_dir = Path(args.run_dir).expanduser().resolve()
     state = read_state(run_dir)
     item = requested_item(state)
+    if anchor_ready(state) and not is_anchor_item(item):
+        raise SystemExit(DEPENDENT_IMPORT_LATEST_ERROR)
     if args.generated:
         generated = Path(args.generated).expanduser().resolve()
     else:
@@ -614,10 +751,39 @@ def command_import_latest(args):
     shutil.copy2(generated, run_dir / item["output"])
     item["status"] = "imported"
     item["generated_source"] = str(generated)
+    item["worker_status"] = None
+    item["worker_note"] = ""
+    item["parent_inspected_at"] = None
     item["inspection"] = {}
     write_state(run_dir, state)
     print(f"imported: {item['output']}")
     print(f"generated_source: {generated}")
+    return 0
+
+
+def command_import(args):
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    state = read_state(run_dir)
+    item = item_by_output(state, args.item)
+    if item["status"] != "generation_requested":
+        raise SystemExit(f"item is not marked generation_requested: {item['output']}")
+
+    generated = Path(args.generated).expanduser().resolve()
+    if not generated.exists():
+        raise SystemExit(f"generated image not found: {generated}")
+
+    shutil.copy2(generated, run_dir / item["output"])
+    item["status"] = "imported"
+    item["generated_source"] = str(generated)
+    item["worker_status"] = args.worker_status
+    item["worker_note"] = args.worker_note or ""
+    item["parent_inspected_at"] = None
+    item["inspection"] = {}
+    write_state(run_dir, state)
+    print(f"imported: {item['output']}")
+    print(f"generated_source: {generated}")
+    if args.worker_status:
+        print(f"worker_status: {args.worker_status}")
     return 0
 
 
@@ -627,11 +793,13 @@ def command_inspect_pass(args):
     item = item_by_output(state, args.item)
     if not (run_dir / item["output"]).exists():
         raise SystemExit(f"output file does not exist: {item['output']}")
+    inspected_at = now_iso()
     item["status"] = "inspected_pass"
+    item["parent_inspected_at"] = inspected_at
     item["inspection"] = {
         "result": "pass",
         "note": args.note or "",
-        "inspected_at": now_iso(),
+        "inspected_at": inspected_at,
     }
     write_state(run_dir, state)
     print(f"inspected_pass: {item['output']}")
@@ -646,6 +814,13 @@ def command_status(args):
     needs_rerun = sum(1 for item in state["items"] if item["status"] == "needs_rerun")
     generation_requested = sum(1 for item in state["items"] if item["status"] == "generation_requested")
     imported = sum(1 for item in state["items"] if item["status"] == "imported")
+    active_batches = sorted(
+        {
+            item["batch_id"]
+            for item in state["items"]
+            if item.get("batch_id") and item["status"] in {"generation_requested", "imported"}
+        }
+    )
     complete = is_complete(state)
 
     print(f"run_dir: {display_path(run_dir)}")
@@ -655,6 +830,32 @@ def command_status(args):
     print(f"pending: {pending}")
     print(f"needs_rerun: {needs_rerun}")
     print(f"generation_requested: {generation_requested}")
+    print(f"active_batches: {len(active_batches)}")
+    for batch_id in active_batches:
+        print(f"- {batch_id}")
+    return 0
+
+
+def command_batch_status(args):
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    state = read_state(run_dir)
+    items = [item for item in state["items"] if item.get("batch_id") == args.batch_id]
+    if not items:
+        raise SystemExit(f"batch not found: {args.batch_id}")
+
+    print(f"batch_id: {args.batch_id}")
+    print(f"items: {len(items)}")
+    for status in ("generation_requested", "imported", "inspected_pass", "needs_rerun", "pending", "complete"):
+        count = sum(1 for item in items if item["status"] == status)
+        print(f"{status}: {count}")
+    worker_pass = sum(1 for item in items if item.get("worker_status") == "pass")
+    worker_needs_rerun = sum(1 for item in items if item.get("worker_status") == "needs_rerun")
+    print(f"worker_pass: {worker_pass}")
+    print(f"worker_needs_rerun: {worker_needs_rerun}")
+    print("items_detail:")
+    for item in items:
+        worker_status = item.get("worker_status") or "none"
+        print(f"- {item['output']}: status={item['status']} worker_status={worker_status}")
     return 0
 
 
@@ -664,6 +865,9 @@ def command_rerun(args):
     item = item_by_output(state, args.item)
     item["status"] = "needs_rerun"
     item["requested_at"] = None
+    item["worker_status"] = None
+    item["worker_note"] = ""
+    item["parent_inspected_at"] = None
     item["inspection"] = {
         "result": "needs_rerun",
         "note": args.note or "",
@@ -689,10 +893,23 @@ def build_parser():
     next_parser.add_argument("--run-dir", required=True)
     next_parser.set_defaults(func=command_next)
 
+    next_batch = subparsers.add_parser("next-batch")
+    next_batch.add_argument("--run-dir", required=True)
+    next_batch.add_argument("--limit", type=int, default=4)
+    next_batch.set_defaults(func=command_next_batch)
+
     import_latest = subparsers.add_parser("import-latest")
     import_latest.add_argument("--run-dir", required=True)
     import_latest.add_argument("--generated")
     import_latest.set_defaults(func=command_import_latest)
+
+    import_parser = subparsers.add_parser("import")
+    import_parser.add_argument("--run-dir", required=True)
+    import_parser.add_argument("--item", required=True)
+    import_parser.add_argument("--generated", required=True)
+    import_parser.add_argument("--worker-status", choices=["pass", "needs_rerun"])
+    import_parser.add_argument("--worker-note")
+    import_parser.set_defaults(func=command_import)
 
     inspect_pass = subparsers.add_parser("inspect-pass")
     inspect_pass.add_argument("--run-dir", required=True)
@@ -703,6 +920,11 @@ def build_parser():
     status = subparsers.add_parser("status")
     status.add_argument("--run-dir", required=True)
     status.set_defaults(func=command_status)
+
+    batch_status = subparsers.add_parser("batch-status")
+    batch_status.add_argument("--run-dir", required=True)
+    batch_status.add_argument("--batch-id", required=True)
+    batch_status.set_defaults(func=command_batch_status)
 
     rerun = subparsers.add_parser("rerun")
     rerun.add_argument("--run-dir", required=True)

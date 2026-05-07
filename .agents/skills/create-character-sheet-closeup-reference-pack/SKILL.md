@@ -28,7 +28,7 @@ Require at least one:
 - Approved face, full-body, or identity anchor asset.
 - User-provided character detail block sufficient to identify the character.
 
-Ask for missing inputs only when identity or source style cannot be inferred. Create `01_face_front.png` through the runner first and use it as the master identity anchor after `inspect-pass`, unless a resumed run already has an inspected anchor.
+Ask for missing inputs only when identity or source style cannot be inferred. Create `01_face_front.png` through the runner first and use it as the master identity anchor after parent inspection passes, unless a resumed run already has an inspected anchor. Dependent items must wait until this anchor is `inspected_pass` or `complete`.
 
 ## Resumable Runner Contract
 
@@ -38,34 +38,62 @@ Default policy:
 
 - Use Codex built-in `image_gen`; do not call an external image API.
 - Use `anchor_policy: "auto_if_pass"` in `state.json`.
+- Use the anchor command flow only for `01_face_front.png` before the master face anchor is approved.
 - If `01_face_front.png` is visually inspected and passes, continue to the rest of the pack without asking for another approval unless the user explicitly requested a gated workflow.
+- After the master face anchor is approved, dependent images must be generated through `next-batch --limit 4` and one `fork_context=true` subagent per batch item.
+- Do not use serial fallback for dependent images. Do not call parent-session `image_gen`, `next`, or `import-latest` for dependent images after the anchor is approved.
+- If subagents are unavailable after the anchor is approved, stop and report that dependent generation is blocked by missing subagent support.
 - If the anchor fails inspection, run `rerun` for `01_face_front.png` and do not generate dependent items yet.
 - Do not treat crop-only or manually extracted source-sheet regions as completed pack outputs. Crops may be used only as source or anchor references when the user explicitly asks.
 
-Required command flow:
+Anchor command flow:
 
 ```bash
 python3 scripts/character_closeup_pack_runner.py init --source <source-image> --preset core
 python3 scripts/character_closeup_pack_runner.py next --run-dir <run-dir>
-# Use the printed prompt with Codex built-in image_gen. The turn may end here.
+# Use the printed prompt with parent-session image_gen only for 01_face_front.png. The turn may end here.
 python3 scripts/character_closeup_pack_runner.py import-latest --run-dir <run-dir>
 # Inspect the imported output before marking pass.
-python3 scripts/character_closeup_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<short inspection note>"
+python3 scripts/character_closeup_pack_runner.py inspect-pass --run-dir <run-dir> --item 01_face_front.png --note "<short inspection note>"
 ```
 
-If a generated image is wrong:
+Do not use this flow for dependent images after `01_face_front.png` is `inspected_pass` or `complete`.
+
+Parallel command flow after the master face anchor is approved:
+
+```bash
+python3 scripts/character_closeup_pack_runner.py next-batch --run-dir <run-dir> --limit 4
+# Spawn one subagent per printed item, with fork_context=true.
+# Each subagent generates exactly one assigned output with image_gen and reports the generated file path plus a first-pass inspection note.
+python3 scripts/character_closeup_pack_runner.py import --run-dir <run-dir> --item <filename> --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
+# Parent session inspects each imported image before marking final pass.
+python3 scripts/character_closeup_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<parent inspection note>"
+python3 scripts/character_closeup_pack_runner.py batch-status --run-dir <run-dir> --batch-id <batch-id>
+```
+
+If the anchor image is wrong:
+
+```bash
+python3 scripts/character_closeup_pack_runner.py rerun --run-dir <run-dir> --item 01_face_front.png --note "<reason>"
+python3 scripts/character_closeup_pack_runner.py next --run-dir <run-dir>
+```
+
+If a dependent batch image is wrong after the anchor is approved:
 
 ```bash
 python3 scripts/character_closeup_pack_runner.py rerun --run-dir <run-dir> --item <filename> --note "<reason>"
-python3 scripts/character_closeup_pack_runner.py next --run-dir <run-dir>
+python3 scripts/character_closeup_pack_runner.py next-batch --run-dir <run-dir> --limit 4
 ```
 
 State rules:
 
-- Before every `image_gen` call, run `next` so the target item is marked `generation_requested`.
-- After `image_gen`, do not create a new run folder. Resume the same run and run `import-latest`.
+- Before the anchor `image_gen` call, run `next` so `01_face_front.png` is marked `generation_requested`.
+- For dependent parallel batches, run `next-batch --limit 4` once, then assign one printed item to each subagent.
+- After anchor `image_gen`, do not create a new run folder. Resume the same run and run `import-latest` only for `01_face_front.png`.
+- After dependent subagent `image_gen`, do not use `import-latest`; use `import --item <filename> --generated <path>` so each generated file is mapped to the correct output.
 - If the user provides no run folder, initialize by source image; the runner reuses an incomplete run with the same source image hash, preset, and style mode.
 - Only `inspect-pass` may mark an item `inspected_pass`. `import-latest` only copies the file into the run folder and marks it `imported`.
+- Subagent inspection is advisory only. Store it through `import --worker-status ... --worker-note ...`, but the parent session must visually inspect and run `inspect-pass` before the item counts as complete.
 - Treat the pack as complete only when every item is `inspected_pass` or `complete`.
 
 ## Core Rules
@@ -106,7 +134,7 @@ State rules:
    Run `next`, generate `01_face_front.png` with Codex built-in `image_gen`, import the generated image, inspect it, and mark it with `inspect-pass` only if it preserves identity and source style. With `anchor_policy: "auto_if_pass"`, continue automatically after a passing inspection unless the user requested a gated workflow.
 
 6. Generate requested assets.
-   For each output, run `next`, use the printed prompt with Codex built-in `image_gen`, then run `import-latest`. Use the style-preserving prompt templates in `references/prompt-templates.md`; the runner embeds those requirements in each prompt. If an image generation tool supports parallel or batch requests, group independent detail outputs together. If the tool is serial-only, still present the parallel plan.
+   After the anchor is approved, run `next-batch --limit 4`, spawn one `fork_context=true` subagent per printed item, and give each subagent exactly one output. Use the style-preserving prompt templates in `references/prompt-templates.md`; the runner embeds those requirements in each prompt. Import each generated result with explicit `import --item <filename> --generated <path>` mapping. If subagents are unavailable, stop instead of falling back to parent-session serial generation.
 
 7. Review and route fixes.
    Check source-style preservation, same-character consistency, left/right direction for paired views, outfit/detail fidelity, missing outputs, and text/template artifact leakage. Mark passing outputs with `inspect-pass`; mark failures with `rerun`.
@@ -150,3 +178,27 @@ After each batch, report in Korean:
 ```
 
 Read `references/pack-map.md` for output presets, `references/prompt-templates.md` for reusable prompts, and `references/state-schema.md` when persisting or resuming the workflow.
+
+## Subagent Batch Contract
+
+When spawning subagents for `next-batch`, use `fork_context=true` and pass explicit task context even though the session is forked:
+
+```text
+You are generating exactly one image for create-character-sheet-closeup-reference-pack.
+Do not edit state.json.
+Run folder: <run-dir>
+Source character sheet: <run-dir>/source_character_sheet.png
+Approved identity anchor: <run-dir>/01_face_front.png
+Assigned output: <filename>
+Prompt file: <prompt-file>
+Batch id: <batch-id>
+Preset: <core|full>
+Style mode: <preserve_source_style|photoreal_conversion|custom_style_override>
+
+Use image_gen with the assigned prompt and visual references. Preserve the source sheet's approved style unless style_mode explicitly requests conversion or override. After generation, inspect the output for prompt fit, source-style preservation, identity consistency, direction/crop correctness where applicable, outfit/detail fidelity, and obvious artifacts. Return only:
+- generated file path
+- worker_status: pass or needs_rerun
+- worker_note: concise inspection note
+```
+
+The parent session imports the result, performs final visual inspection, and decides `inspect-pass` or `rerun`.

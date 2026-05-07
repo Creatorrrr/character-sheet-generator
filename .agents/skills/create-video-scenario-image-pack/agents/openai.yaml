@@ -1,0 +1,4 @@
+interface:
+  display_name: "Video Scenario Image Pack"
+  short_description: "Create approved non-character video source packs"
+  default_prompt: "Use $create-video-scenario-image-pack to extract non-character image sources from this video scenario, request approval, then generate and verify them with the root scenario runner and strict no-background-people policy."

@@ -20,6 +20,16 @@ def run_cli(*args, cwd):
     )
 
 
+def run_cli_raw(*args, cwd):
+    return subprocess.run(
+        [sys.executable, str(RUNNER), *args],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 class VideoPackRunnerTest(unittest.TestCase):
     def test_init_creates_full_queue_and_reuses_incomplete_run_for_same_source(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -146,6 +156,68 @@ class VideoPackRunnerTest(unittest.TestCase):
             self.assertEqual(len({item["batch_id"] for item in reserved}), 1)
             self.assertTrue(all(item["requested_at"] for item in reserved))
             self.assertEqual(state["items"][5]["status"], "pending")
+
+    def test_next_rejects_dependent_serial_generation_after_anchor_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            source.write_bytes(b"fake image")
+
+            init = run_cli("init", "--source", str(source), cwd=root)
+            run_dir = root / init.stdout.strip()
+            anchor = run_dir / "01_face_front.png"
+            anchor.write_bytes(b"anchor")
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "01_face_front.png",
+                cwd=root,
+            )
+
+            next_result = run_cli_raw("next", "--run-dir", str(run_dir), cwd=root)
+            self.assertNotEqual(next_result.returncode, 0)
+            self.assertIn(
+                "Anchor is approved; use next-batch --limit 4 and subagents for dependent items.",
+                next_result.stderr,
+            )
+
+            state = json.loads((run_dir / "state.json").read_text())
+            self.assertEqual(state["items"][1]["status"], "pending")
+            self.assertIsNone(state["items"][1].get("requested_at"))
+
+    def test_import_latest_rejects_dependent_serial_import_after_anchor_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            generated = root / "generated-dependent.png"
+            source.write_bytes(b"fake image")
+            generated.write_bytes(b"generated image")
+
+            init = run_cli("init", "--source", str(source), cwd=root)
+            run_dir = root / init.stdout.strip()
+            state_path = run_dir / "state.json"
+            state = json.loads(state_path.read_text())
+            state["items"][0]["status"] = "inspected_pass"
+            state["items"][1]["status"] = "generation_requested"
+            state["items"][1]["requested_at"] = "2026-01-01T00:00:00+00:00"
+            state_path.write_text(json.dumps(state, indent=2) + "\n")
+
+            import_result = run_cli_raw(
+                "import-latest",
+                "--run-dir",
+                str(run_dir),
+                "--generated",
+                str(generated),
+                cwd=root,
+            )
+            self.assertNotEqual(import_result.returncode, 0)
+            self.assertIn(
+                "Anchor is approved; import dependent items with `import --item <filename> --generated <path>`.",
+                import_result.stderr,
+            )
+            self.assertFalse((run_dir / "02_03_face_3q_pair.png").exists())
 
     def test_explicit_import_maps_parallel_outputs_and_parent_pass_controls_completion(self):
         with tempfile.TemporaryDirectory() as tmp:

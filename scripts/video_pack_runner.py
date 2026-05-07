@@ -15,6 +15,9 @@ WORKFLOW = "create-video-closeup-reference-pack"
 ANCHOR_POLICY = "auto_if_pass"
 SOURCE_NAME = "source_character_sheet.png"
 GENERATED_ROOT = Path("/Users/chasoik/.codex/generated_images")
+ANCHOR_OUTPUT = "01_face_front.png"
+DEPENDENT_NEXT_ERROR = "Anchor is approved; use next-batch --limit 4 and subagents for dependent items."
+DEPENDENT_IMPORT_LATEST_ERROR = "Anchor is approved; import dependent items with `import --item <filename> --generated <path>`."
 DONE_STATUSES = {"inspected_pass", "complete"}
 GENERATED_STATUSES = {"imported", "inspected_pass", "complete"}
 WORKER_STATUS_VALUES = {None, "pass", "needs_rerun"}
@@ -303,9 +306,9 @@ def write_batch_plan(run_dir):
         "",
         "Generation policy:",
         "- Use state.json as the source of truth.",
-        "- For serial generation, call `next` before each image generation so the item is marked generation_requested.",
-        "- For parallel generation, call `next-batch --limit 4` and assign one reserved item to each subagent.",
-        "- In parallel mode, import each generated file with explicit `import --item <filename> --generated <path>` mapping.",
+        "- Use `next` and `import-latest` only for the 01_face_front.png anchor flow before the anchor is approved.",
+        "- After the anchor is approved, call `next-batch --limit 4` and assign one reserved dependent item to each subagent.",
+        "- Import each dependent subagent output with explicit `import --item <filename> --generated <path>` mapping.",
         "- After import, the parent session must inspect the image, then run `inspect-pass` or `rerun`.",
         "- Do not create a new run when an incomplete run with the same source hash exists.",
         "",
@@ -415,14 +418,18 @@ def item_by_output(state, output):
 
 def anchor_ready(state):
     try:
-        anchor = item_by_output(state, "01_face_front.png")
+        anchor = item_by_output(state, ANCHOR_OUTPUT)
     except SystemExit:
         return False
     return anchor["status"] in DONE_STATUSES
 
 
+def is_anchor_item(item):
+    return item["output"] == ANCHOR_OUTPUT
+
+
 def dependency_ready(state, item):
-    if item["output"] != "01_face_front.png" and not anchor_ready(state):
+    if not is_anchor_item(item) and not anchor_ready(state):
         return False
     by_output = {entry["output"]: entry for entry in state["items"]}
     for dependency in item["dependencies"]:
@@ -534,6 +541,15 @@ def command_next(args):
         print("No pending items. Pack is complete.")
         return 0
 
+    if anchor_ready(state):
+        dependent_serial_items = [
+            item
+            for item in state["items"]
+            if not is_anchor_item(item) and item["status"] in {"pending", "needs_rerun", "generation_requested"}
+        ]
+        if dependent_serial_items:
+            raise SystemExit(DEPENDENT_NEXT_ERROR)
+
     item, should_mark = next_item(state)
     if item is None:
         print("No pending items are dependency-ready. Inspect or rerun the blocking item first.")
@@ -580,6 +596,8 @@ def command_import_latest(args):
     run_dir = Path(args.run_dir).expanduser().resolve()
     state = read_state(run_dir)
     item = requested_item(state)
+    if anchor_ready(state) and not is_anchor_item(item):
+        raise SystemExit(DEPENDENT_IMPORT_LATEST_ERROR)
     if args.generated:
         generated = Path(args.generated).expanduser().resolve()
     else:

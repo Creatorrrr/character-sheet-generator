@@ -1,6 +1,6 @@
 ---
 name: create-video-closeup-reference-pack
-description: Manage a video-production character closeup reference pack made from an approved photoreal character sheet or master face reference. Use when the user wants multiple high-resolution images for video AI identity consistency, wants Codex to coordinate image-specific skills, wants a parallel image generation batch, or needs left/right view pairs generated together in one image to avoid same-direction mistakes.
+description: Use when the user wants a video-production character closeup reference pack from an approved photoreal character sheet or master face reference, a parallel image generation batch, or left/right view pairs for AI video identity consistency.
 ---
 
 # Create Video Closeup Reference Pack
@@ -29,7 +29,7 @@ Require at least one:
 - Approved master face reference.
 - User-provided character detail block.
 
-Ask for missing inputs only when identity cannot be inferred. If the user requests a full pack and no master face exists, create `01_face_front` first and use it as the identity anchor after approval or after the user explicitly asks for autonomous continuation.
+Ask for missing inputs only when identity cannot be inferred. If the user requests a full pack and no master face exists, create `01_face_front` first and use it as the identity anchor after parent inspection passes. Dependent items must wait until this anchor is `inspected_pass` or `complete`.
 
 ## Resumable Runner Contract
 
@@ -39,19 +39,25 @@ Default policy:
 
 - Use Codex built-in `image_gen`; do not call an external image API.
 - Use `anchor_policy: "auto_if_pass"` in `state.json`.
+- Use the anchor command flow only for `01_face_front.png` before the master face anchor is approved.
 - If `01_face_front.png` is visually inspected and passes, continue to the rest of the pack without asking for another approval unless the user explicitly requested a gated workflow.
+- After the master face anchor is approved, dependent images must be generated through `next-batch --limit 4` and one `fork_context=true` subagent per batch item.
+- Do not use serial fallback for dependent images. Do not call parent-session `image_gen`, `next`, or `import-latest` for dependent images after the anchor is approved.
+- If subagents are unavailable after the anchor is approved, stop and report that dependent generation is blocked by missing subagent support.
 - If the anchor fails inspection, run `rerun` for `01_face_front.png` and do not generate dependent items yet.
 
-Serial command flow:
+Anchor command flow:
 
 ```bash
 python3 scripts/video_pack_runner.py init --source <source-image>
 python3 scripts/video_pack_runner.py next --run-dir <run-dir>
-# Use the printed prompt with image_gen. The turn may end here.
+# Use the printed prompt with parent-session image_gen only for 01_face_front.png. The turn may end here.
 python3 scripts/video_pack_runner.py import-latest --run-dir <run-dir>
 # Inspect the imported output before marking pass.
-python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<short inspection note>"
+python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item 01_face_front.png --note "<short inspection note>"
 ```
+
+Do not use this flow for dependent images after `01_face_front.png` is `inspected_pass` or `complete`.
 
 Parallel command flow after the master face anchor is approved:
 
@@ -65,19 +71,26 @@ python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item <fi
 python3 scripts/video_pack_runner.py batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
 
-If a generated image is wrong:
+If the anchor image is wrong:
+
+```bash
+python3 scripts/video_pack_runner.py rerun --run-dir <run-dir> --item 01_face_front.png --note "<reason>"
+python3 scripts/video_pack_runner.py next --run-dir <run-dir>
+```
+
+If a dependent batch image is wrong after the anchor is approved:
 
 ```bash
 python3 scripts/video_pack_runner.py rerun --run-dir <run-dir> --item <filename> --note "<reason>"
-python3 scripts/video_pack_runner.py next --run-dir <run-dir>
+python3 scripts/video_pack_runner.py next-batch --run-dir <run-dir> --limit 4
 ```
 
 State rules:
 
-- Before every `image_gen` call, run `next` so the target item is marked `generation_requested`.
-- For parallel batches, run `next-batch --limit 4` once, then assign one printed item to each subagent.
-- After `image_gen`, do not create a new run folder. Resume the same run and run `import-latest`.
-- In parallel mode, do not use `import-latest`; use `import --item <filename> --generated <path>` so each generated file is mapped to the correct output.
+- Before the anchor `image_gen` call, run `next` so `01_face_front.png` is marked `generation_requested`.
+- For dependent parallel batches, run `next-batch --limit 4` once, then assign one printed item to each subagent.
+- After anchor `image_gen`, do not create a new run folder. Resume the same run and run `import-latest` only for `01_face_front.png`.
+- After dependent subagent `image_gen`, do not use `import-latest`; use `import --item <filename> --generated <path>` so each generated file is mapped to the correct output.
 - If the user provides no run folder, initialize by source image; the runner reuses an incomplete run with the same source image hash.
 - Only `inspect-pass` may mark an item `inspected_pass`. `import-latest` only copies the file into the run folder and marks it `imported`.
 - Subagent inspection is advisory only. Store it through `import --worker-status ... --worker-note ...`, but the parent session must visually inspect and run `inspect-pass` before the item counts as complete.
@@ -122,11 +135,11 @@ Before generating, build a batch plan with:
 
 Use these dependency rules:
 
-- `01_face_front` blocks the rest only when no approved master face exists.
-- After a master face exists, detail images can be requested in parallel.
+- `01_face_front` blocks the rest until the parent session marks it `inspected_pass` or `complete`.
+- After a master face exists, dependent detail images must be requested in parallel with subagents.
 - Costume, props, shoes, hands, expression, mouth, hair, and full-body views are independent enough to batch together.
 - Use a maximum batch size of 4. Do not reserve the next batch while any current batch item is still `generation_requested` or `imported`.
-- If a batch item fails parent inspection, run `rerun` for that item and reserve the rerun before starting new pending items.
+- If a batch item fails parent inspection, run `rerun` for that item and reserve the rerun with `next-batch` before starting new pending items.
 
 ## Subagent Batch Contract
 

@@ -7,11 +7,11 @@ description: Repair only the sheet annotation text, labels, and text box alignme
 
 ## Overview
 
-Use this optional final stage when the character and layout are acceptable but sheet annotation text quality is not. Keep edits minimal and scoped to sheet annotation text, labels, and text box alignment. Typography inside the character image, costume, props, accessories, patches, embroidery, or engravings is locked visual content, not repair text.
+Use this optional final stage when the character, layout, and approved photoreal image set are acceptable but sheet annotation text quality is not. Keep edits minimal and scoped to sheet annotation text, labels, and text box alignment. Typography inside the character image, costume, props, accessories, patches, embroidery, or engravings is locked visual content, not repair text.
 
 ## Inputs
 
-Require the finished photoreal character sheet. Use the original 2D sheet or user-provided sheet annotation text as the source of truth for labels and copy. When available, also use `final-photoreal-text-free-sheet.png` and `structure-inventory.md` to verify that sheet annotation text repair does not alter non-text structure, in-image costume/prop typography, or content.
+Require the finished photoreal character sheet. Use the original 2D sheet or user-provided sheet annotation text as the source of truth for labels and copy. When available, also use `final-photoreal-text-free-sheet.png` and `structure-inventory.md` to verify that sheet annotation text repair does not alter non-text structure, in-image costume/prop typography, content, or the approved photoreal image set.
 
 ## Prompt
 
@@ -27,7 +27,7 @@ Use this prompt as the stage instruction:
 - 전체 레이아웃
 - 포즈와 표정
 - 시트의 구성
-- 모든 비텍스트 이미지 슬롯의 개수와 내용
+- 모든 비텍스트 이미지 슬롯의 개수, 위치, 내용, 시점, 디테일 대상, 실사 사진 질감
 
 수정할 것:
 - 깨지거나 흐린 시트 주석 텍스트
@@ -48,6 +48,7 @@ Use this prompt as the stage instruction:
 - 시트 주석 텍스트만 개선하는 방향으로 최소 수정
 - 의상/소품/액세서리 안의 기존 타이포그래피를 바꾸거나 제거하지 않게
 - 이미지 슬롯을 합치거나 생략하거나 다른 의미의 표정, 방향, 디테일, 소품, 의상 영역으로 바꾸지 않게
+- 이미지 슬롯을 다시 그리거나, 새 이미지로 교체하거나, 일러스트/애니풍/라인아트/CGI/3D 렌더/반실사 그림체로 바꾸지 않게
 ```
 
 ## Execution Guidance
@@ -55,7 +56,8 @@ Use this prompt as the stage instruction:
 - Do not re-render the character unless sheet annotation text repair is impossible otherwise.
 - If possible, provide exact replacement sheet annotation text to the image tool instead of asking it to infer text.
 - Keep text boxes, labels, and alignment consistent with the existing layout.
-- Compare the repaired result against both the Stage 3 input and `final-photoreal-text-free-sheet.png`; reject it if non-text panel structure, slot count, slot meaning, character, pose, clothing, in-image costume/prop typography, prop, expression, or detail content changed.
+- Compare the repaired result against both the Stage 3 input and `final-photoreal-text-free-sheet.png`; reject it if non-text panel structure, slot count, slot meaning, character, pose, clothing, in-image costume/prop typography, prop, expression, detail content, or image-slot photoreal style changed.
+- Treat `final-photoreal-text-free-sheet.png` as the approved photoreal image-set source of truth. Text repair may improve only sheet annotation text, not image-slot content or visual style.
 - If sheet annotation text remains unreliable after image editing, recommend a deterministic layout pass outside generative image editing.
 
 ## Quality Check
@@ -64,6 +66,8 @@ Pass only when:
 
 - Character realism, pose, clothing, and layout remain stable.
 - Non-text image slots and in-image costume/prop typography remain present, separate, and semantically unchanged.
+- Every image slot still matches the approved text-free photoreal image set in location, count, role, content, view, crop target, detail target, and live-action photographic style.
+- No image slot was redrawn, replaced, or regressed into illustration, anime, line-art, CGI, 3D render, or semi-realistic painting.
 - Sheet annotation text is visibly clearer than before.
 - No new labels, incorrect words, or unintended design changes were introduced.
 

@@ -26,8 +26,8 @@ Use these sibling skills from the same `.agents/skills` skill root:
 
 1. `$create-photoreal-character-base` for a text-free live-action sheet that preserves the original canvas, panel layout, view positions, non-text graphics, and in-image costume/prop typography.
 2. `$intensify-photoreal-character` when the base still feels anime, 3D, CGI, plastic, or overly AI-smoothed.
-3. `$restore-photoreal-sheet-layout` to restore original sheet annotation text onto the self-approved `final-photoreal-text-free-sheet.png` without changing layout or character content.
-4. `$repair-photoreal-sheet-text` only when the final character is good but sheet annotation text or labels need cleanup.
+3. `$restore-photoreal-sheet-layout` to restore original sheet annotation text onto the self-approved `final-photoreal-text-free-sheet.png` without changing layout, character content, or the approved photoreal image set.
+4. `$repair-photoreal-sheet-text` only when the final character and approved photoreal image set are good but sheet annotation text or labels need cleanup.
 
 If explicit skill invocation is unavailable, open the matching sibling `SKILL.md` and follow it directly.
 
@@ -101,16 +101,16 @@ Autonomous decisions:
 - If Stage 2 passes the live-action threshold while preserving the text-free sheet layout/content inventory and adding no new sheet annotation text, self-approve it as `final-photoreal-text-free-sheet.png` and proceed to Stage 3.
 - If Stage 2 adds new sheet annotation/fake text, changes or removes original in-image costume/prop typography, changes layout, merges/omits slots, or changes slot meaning, retry Stage 2 until the attempt limit, then fall back to Stage 1 if allowed.
 - If Stage 2 still fails the live-action threshold after its limit, regenerate Stage 1 once if Stage 1 attempts remain; otherwise finish with a failure report.
-- If Stage 3 restores readable original sheet annotation text while preserving the text-free sheet's character, panels, layout, non-text graphics, in-image costume/prop typography, and image-slot content, self-approve it as `final-photoreal-character-sheet.png` and finish.
-- If Stage 3 preserves character realism and layout but sheet annotation text is broken, blurry, misaligned, fake, or unreadable, proceed to Stage 4.
-- If Stage 3 changes the character, pulls the character back toward illustration, changes the locked text-free layout, merges/omits slots, or changes image-slot content, retry Stage 3 if attempts remain; otherwise return to Stage 2 if attempts remain.
-- If Stage 4 improves sheet annotation text while preserving character, pose, outfit, lighting, layout, and image-slot content, finish.
-- If Stage 4 changes the character/structure/content or still cannot produce verifiable readable sheet annotation text after its limit, finish with `수동 보정 필요`.
+- If Stage 3 restores readable original sheet annotation text while preserving the text-free sheet's character, panels, layout, non-text graphics, in-image costume/prop typography, and the full approved photoreal image set, self-approve it as `final-photoreal-character-sheet.png` and finish.
+- If Stage 3 preserves the approved photoreal image set and layout but sheet annotation text is broken, blurry, misaligned, fake, or unreadable, proceed to Stage 4.
+- If Stage 3 changes the character, pulls any image slot back toward illustration, redraws or replaces any image slot, changes the locked text-free layout, merges/omits slots, changes slot meaning, or changes image-slot content versus the text-free base, retry Stage 3 if attempts remain; otherwise finish with `수동 텍스트 오버레이 필요`.
+- If Stage 4 improves sheet annotation text while preserving character, pose, outfit, lighting, layout, and the full approved photoreal image set, finish.
+- If Stage 4 changes the character/structure/content, redraws or replaces any image slot, weakens the photoreal quality of any image slot, or still cannot produce verifiable readable sheet annotation text after its limit, finish with `수동 텍스트 오버레이 필요`.
 
 Required final artifacts:
 
 - `final-photoreal-text-free-sheet.png`: the latest self-approved text-free live-action sheet from Stage 1 or Stage 2. It must preserve the original canvas ratio, panel structure, view positions, slot count, slot meaning, non-text graphics, and original in-image costume/prop typography while removing all sheet annotation text.
-- `final-photoreal-character-sheet.png`: the latest self-approved text-inclusive character sheet from Stage 3 or Stage 4. It must be built on top of `final-photoreal-text-free-sheet.png` by restoring original sheet annotation text without changing character, layout, non-text graphics, slot count, slot meaning, or in-image costume/prop typography. If no text-inclusive sheet passes, still save the best failed candidate and mark it as needing human text correction.
+- `final-photoreal-character-sheet.png`: the latest self-approved text-inclusive character sheet from Stage 3 or Stage 4. It must be built on top of `final-photoreal-text-free-sheet.png` by restoring original sheet annotation text without changing character, layout, non-text graphics, slot count, slot meaning, in-image costume/prop typography, or the approved photoreal image set. If no text-inclusive sheet passes, still save the best failed candidate and mark it as needing manual text overlay.
 
 ## Workflow
 
@@ -173,6 +173,7 @@ Goal:
 - Use `final-photoreal-text-free-sheet.png` as the locked visual base.
 - Restore the original 2D sheet's readable sheet annotation text, labels, section numbers, captions, UI logo text, and descriptions at the corresponding original positions.
 - Keep character, panels, view positions, image-slot content, in-image costume/prop typography, text boxes, callout lines, color chips, and other non-text graphics unchanged.
+- Treat the full image set inside `final-photoreal-text-free-sheet.png` as locked: every image slot must keep the same location, count, role, content, view, crop target, detail target, and photoreal live-action style.
 - Make text readable without pulling the character back into illustration.
 
 Report:
@@ -181,15 +182,15 @@ Report:
 - How text readability was handled.
 - Whether character realism stayed intact.
 - Whether the locked text-free layout stayed unchanged.
-- Whether every non-text slot and in-image costume/prop typography still matches the locked text-free sheet and source inventory.
+- Whether every non-text slot, image slot, and in-image costume/prop typography still matches the locked text-free sheet and source inventory.
+- Whether any image slot was redrawn, replaced, or shifted away from the approved photoreal image set.
 
 Self-verification gate:
 
-- Self-approve as `final-photoreal-character-sheet.png` and finish when character realism, locked layout/content, and restored text are all acceptable.
-- Proceed to Stage 4 when the character and non-text structure/content are good but sheet annotation text or labels are broken, blurry, misaligned, fake, or unreadable.
-- Retry Stage 3 if sheet annotation text restoration changed layout, changed the character, failed to restore text at corresponding positions, merged/omitted slots, changed slot meaning, changed in-image costume/prop typography, changed image-slot content versus the text-free base, or pulled the character back toward illustration and Stage 3 attempts remain.
-- Return to Stage 2 if character quality regressed and Stage 2 attempts remain.
-- Finish with a final report if no valid next action remains within the attempt limits.
+- Self-approve as `final-photoreal-character-sheet.png` and finish only when restored text is acceptable and the locked photoreal image set remains unchanged and still looks photographic.
+- Proceed to Stage 4 only when the approved photoreal image set and non-text structure/content are good but sheet annotation text or labels are broken, blurry, misaligned, fake, or unreadable.
+- Retry Stage 3 if sheet annotation text restoration changed layout, changed the character, failed to restore text at corresponding positions, merged/omitted slots, changed slot meaning, changed in-image costume/prop typography, changed image-slot content versus the text-free base, redrew or replaced any image slot, or pulled any image slot toward illustration, anime, line-art, CGI, 3D render, or semi-realistic painting and Stage 3 attempts remain.
+- Finish with `수동 텍스트 오버레이 필요` if no valid Stage 3 retry remains and the image set cannot stay locked during generative text restoration.
 
 ### Stage 4: Text Repair
 
@@ -200,19 +201,21 @@ Goal:
 - Preserve character, pose, outfit, lighting, and layout.
 - Fix only broken, blurry, misaligned, or unreadable sheet annotation text and labels.
 - Preserve every non-text image slot and in-image costume/prop typography from the Stage 3 input and `final-photoreal-text-free-sheet.png`.
+- Treat image-slot preservation as a hard gate, not a preference: text repair must not redraw, repaint, restyle, crop, replace, or otherwise modify the approved photoreal image set.
 
 Report:
 
 - Which sheet annotation text areas were repaired.
 - Whether any character or layout changes occurred.
-- Whether any non-text slot content or in-image costume/prop typography changed versus Stage 3 and the locked text-free base.
+- Whether any non-text slot content, image slot, or in-image costume/prop typography changed versus Stage 3 and the locked text-free base.
+- Whether every image slot still looks like the approved live-action photoreal base after text repair.
 - Remaining text risk, if any.
 
 Self-verification gate:
 
-- Finish only when repaired sheet annotation text can be verified and the character, layout, in-image costume/prop typography, and non-text slot content remained stable.
-- Retry Stage 4 if sheet annotation text repair changed the character, pose, outfit, in-image costume/prop typography, lighting, layout, slot count, or slot meaning and Stage 4 attempts remain.
-- Finish with `수동 보정 필요` if the model still cannot produce verifiable readable sheet annotation text after the Stage 4 attempt limit.
+- Finish only when repaired sheet annotation text can be verified and the character, layout, in-image costume/prop typography, non-text slot content, and approved photoreal image set remained stable.
+- Retry Stage 4 if sheet annotation text repair changed the character, pose, outfit, in-image costume/prop typography, lighting, layout, slot count, slot meaning, any image-slot content, or the photoreal quality of any image slot and Stage 4 attempts remain.
+- Finish with `수동 텍스트 오버레이 필요` if the model still cannot produce verifiable readable sheet annotation text without changing the approved photoreal image set after the Stage 4 attempt limit.
 
 ## Reporting Format
 
@@ -271,19 +274,21 @@ Photorealism check:
 
 - Pass only when skin, hair, clothing, lighting, and materials look like real photography.
 - Fail or intensify when the image shows anime proportions, illustration lines, 3D/CGI rendering, waxy skin, plastic skin, glossy AI smoothness, mannequin anatomy, or over-retouched symmetry.
+- For Stage 3 and Stage 4, apply the same photorealism check to every image slot in the text-inclusive result. A text-inclusive sheet fails even if the text improved when any image slot regresses from the approved text-free photoreal image set into illustration, anime, line-art, CGI, 3D render, or semi-realistic painting.
 
 Layout check:
 
 - Pass the text-free sheet only when it keeps the original canvas ratio, panel grid, major view groups, detail-panel positions, empty sheet annotation areas, callout lines, boxes, color chips, non-text graphic structure, and original in-image costume/prop typography.
-- Pass the text-inclusive sheet only when it preserves the self-approved text-free layout and adds sheet annotation text at corresponding original positions.
+- Pass the text-inclusive sheet only when it preserves the self-approved text-free layout, preserves the approved photoreal image set, and adds sheet annotation text at corresponding original positions.
 - Fail or regenerate when the layout loses the reference-sheet purpose, omits major view groups, crops core design details, changes non-text graphics, adds a new UI structure, or lets graphic elements overpower the character.
 
 Structure/content equivalence check:
 
-- Compare every generated candidate against `structure-inventory.md`; for Stage 3 and Stage 4, compare against both the original source inventory and `final-photoreal-text-free-sheet.png`.
+- Compare every generated candidate against `structure-inventory.md`; for Stage 3 and Stage 4, compare image slots against `final-photoreal-text-free-sheet.png` as the locked photoreal image-set source of truth, while using the original source only for sheet annotation text and placement.
 - Pass only when every original image slot remains present, separate, and semantically equivalent: the same role, view/crop type, expression or direction when applicable, prop/outfit/body-part target, and mandatory visible content.
-- Fail if any candidate merges multiple source slots into one image, omits a source slot, duplicates one slot to cover another, swaps the meaning of a slot, replaces a detail target with a different target, changes a required expression/direction/pose, removes original in-image costume/prop typography, or changes non-text content during a sheet annotation-only stage.
-- Record the mismatch in `verification-notes.md` by source section/panel/slot type without hard-coding recurring problem-item names into the skill.
+- For Stage 3 and Stage 4, pass only when every image slot also remains equivalent to the approved text-free photoreal base in location, count, role, content, view, crop target, detail target, and live-action photographic style.
+- Fail if any candidate merges multiple source slots into one image, omits a source slot, duplicates one slot to cover another, swaps the meaning of a slot, replaces a detail target with a different target, changes a required expression/direction/pose, removes original in-image costume/prop typography, changes non-text content during a sheet annotation-only stage, redraws or replaces an image slot, or weakens any image slot from the approved photoreal base into illustration, anime, line-art, CGI, 3D render, or semi-realistic painting.
+- Record the mismatch in `verification-notes.md` by source section/panel/slot type plus the observed symptom, such as changed content, changed view, changed crop, redrawn slot, lost photoreal style, or changed in-image typography. Do not hard-code recurring problem-item names into the skill.
 
 Text check:
 
@@ -291,7 +296,7 @@ Text check:
 - Do not fail a text-free sheet only because original typography inside a character image slot remains on clothing, props, accessories, patches, embroidery, or engravings; that is required costume/prop visual content.
 - Claim sheet annotation text is readable only for areas that were inspected and can actually be read.
 - Treat broken sheet annotation text, fake annotation typography, hallucinated labels, blurry labels, or misaligned text boxes as Stage 4 input only when structure/content equivalence still passes.
-- If sheet annotation text remains unreliable after Stage 4 limits, stop and report human text correction as required instead of continuing to regenerate.
+- If sheet annotation text remains unreliable after Stage 4 limits, or if readable text cannot be achieved without changing the approved photoreal image set, stop and report `수동 텍스트 오버레이 필요` instead of continuing to regenerate.
 
 ## Operating Rules
 

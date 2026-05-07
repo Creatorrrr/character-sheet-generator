@@ -28,7 +28,45 @@ Require at least one:
 - Approved face, full-body, or identity anchor asset.
 - User-provided character detail block sufficient to identify the character.
 
-Ask for missing inputs only when identity or source style cannot be inferred. If no clear face identity anchor exists, create `01_face_front.png` first and use it as the master identity anchor after approval, unless the user explicitly asks for autonomous continuation.
+Ask for missing inputs only when identity or source style cannot be inferred. Create `01_face_front.png` through the runner first and use it as the master identity anchor after `inspect-pass`, unless a resumed run already has an inspected anchor.
+
+## Resumable Runner Contract
+
+Use `scripts/character_closeup_pack_runner.py` for this workflow. The runner exists because Codex image generation may end the turn immediately after an `image_gen` call. Do not rely on the same turn continuing after image generation.
+
+Default policy:
+
+- Use Codex built-in `image_gen`; do not call an external image API.
+- Use `anchor_policy: "auto_if_pass"` in `state.json`.
+- If `01_face_front.png` is visually inspected and passes, continue to the rest of the pack without asking for another approval unless the user explicitly requested a gated workflow.
+- If the anchor fails inspection, run `rerun` for `01_face_front.png` and do not generate dependent items yet.
+- Do not treat crop-only or manually extracted source-sheet regions as completed pack outputs. Crops may be used only as source or anchor references when the user explicitly asks.
+
+Required command flow:
+
+```bash
+python3 scripts/character_closeup_pack_runner.py init --source <source-image> --preset core
+python3 scripts/character_closeup_pack_runner.py next --run-dir <run-dir>
+# Use the printed prompt with Codex built-in image_gen. The turn may end here.
+python3 scripts/character_closeup_pack_runner.py import-latest --run-dir <run-dir>
+# Inspect the imported output before marking pass.
+python3 scripts/character_closeup_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<short inspection note>"
+```
+
+If a generated image is wrong:
+
+```bash
+python3 scripts/character_closeup_pack_runner.py rerun --run-dir <run-dir> --item <filename> --note "<reason>"
+python3 scripts/character_closeup_pack_runner.py next --run-dir <run-dir>
+```
+
+State rules:
+
+- Before every `image_gen` call, run `next` so the target item is marked `generation_requested`.
+- After `image_gen`, do not create a new run folder. Resume the same run and run `import-latest`.
+- If the user provides no run folder, initialize by source image; the runner reuses an incomplete run with the same source image hash, preset, and style mode.
+- Only `inspect-pass` may mark an item `inspected_pass`. `import-latest` only copies the file into the run folder and marks it `imported`.
+- Treat the pack as complete only when every item is `inspected_pass` or `complete`.
 
 ## Core Rules
 
@@ -36,6 +74,7 @@ Ask for missing inputs only when identity or source style cannot be inferred. If
 - Treat the approved character sheet and orchestrator state as the source of truth. If they conflict, prefer the latest user-approved state or ask only when the conflict affects identity.
 - Preserve `identity_lock`: face shape, hair silhouette, eye design, outfit structure, palette, motifs, accessories, age appearance, and species/body type.
 - Generate a pack, not a beauty image. Each output must serve a specific reference purpose.
+- Every pack output must be a new `image_gen` result imported into the run folder and inspected. Crop-only outputs do not count as complete.
 - Avoid labels unless a labeled sheet is requested and text readability is important.
 - Do not copy template placeholders, mannequin construction lines, plus icons, empty boxes, or UI wireframe elements as character content.
 - Keep reporting factual. Do not claim identity consistency, correct left/right direction, or style preservation unless the output was inspected.
@@ -48,7 +87,10 @@ Ask for missing inputs only when identity or source style cannot be inferred. If
 2. Choose pack preset.
    Default to `core`. Use `full` when the user asks for a complete production reference pack. Read `references/pack-map.md` for output definitions and dependencies.
 
-3. Build a batch plan.
+3. Initialize or resume the runner and build a batch plan.
+   Use `scripts/character_closeup_pack_runner.py init --source <source-image> --preset core|full`. The runner writes `state.json`, `batch_plan.md`, and per-output prompts under the run folder.
+
+4. Review the batch plan.
    Use this format:
 
 ```text
@@ -60,17 +102,17 @@ Ask for missing inputs only when identity or source style cannot be inferred. If
 - notes: ...
 ```
 
-4. Resolve identity anchor.
-   If a clear face anchor exists, proceed to parallel groups. If not, generate `01_face_front.png` first and ask for approval before the rest.
+5. Resolve identity anchor.
+   Run `next`, generate `01_face_front.png` with Codex built-in `image_gen`, import the generated image, inspect it, and mark it with `inspect-pass` only if it preserves identity and source style. With `anchor_policy: "auto_if_pass"`, continue automatically after a passing inspection unless the user requested a gated workflow.
 
-5. Generate requested assets.
-   Use the style-preserving prompt templates in `references/prompt-templates.md`. If an image generation tool supports parallel or batch requests, group independent detail outputs together. If the tool is serial-only, still present the parallel plan.
+6. Generate requested assets.
+   For each output, run `next`, use the printed prompt with Codex built-in `image_gen`, then run `import-latest`. Use the style-preserving prompt templates in `references/prompt-templates.md`; the runner embeds those requirements in each prompt. If an image generation tool supports parallel or batch requests, group independent detail outputs together. If the tool is serial-only, still present the parallel plan.
 
-6. Review and route fixes.
-   Check source-style preservation, same-character consistency, left/right direction for paired views, outfit/detail fidelity, missing outputs, and text/template artifact leakage.
+7. Review and route fixes.
+   Check source-style preservation, same-character consistency, left/right direction for paired views, outfit/detail fidelity, missing outputs, and text/template artifact leakage. Mark passing outputs with `inspect-pass`; mark failures with `rerun`.
 
-7. Report completion.
-   Summarize generated assets, failed or questionable assets, rerun recommendations, and next decision.
+8. Report completion.
+   Summarize generated assets, imported-but-uninspected assets, failed or questionable assets, rerun recommendations, and next decision.
 
 ## Pair Rules
 
@@ -97,9 +139,12 @@ After each batch, report in Korean:
 - 기준 자료: ...
 - 스타일 모드: ...
 - 저장 폴더: ...
+- 상태 파일: ...
 - 생성 요청: ...
 - 병렬 그룹: ...
 - 좌우 묶음 처리: ...
+- 미검수 imported 항목: ...
+- rerun 필요 항목: ...
 - 검수 기준: ...
 - 다음 결정: ...
 ```

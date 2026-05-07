@@ -61,11 +61,11 @@ The `full` preset includes all `core` outputs unless the user asks to skip them.
 
 ## Dependency Rules
 
-- If no approved face anchor exists, generate and approve `01_face_front.png` before every other face or detail output.
-- If the approved character sheet already contains a reliable face closeup, `01_face_front.png` can be included in the first parallel group instead of blocking.
+- Generate `01_face_front.png` through the runner and mark it `inspected_pass` before every dependent face or detail output.
+- If a resumed run already has an inspected face anchor, continue from the next dependency-ready item instead of creating a new run.
 - Generate paired left/right outputs as a single two-panel request.
-- After identity anchor approval, eye, hair, outfit, props, shoes, hands, expression, and material details are independent enough for parallel generation.
-- Full-body side/back and face turnaround depend on either a clear full-body sheet or approved `17_full_body_front.png`.
+- After identity anchor inspection passes, eye, hair, outfit, props, shoes, hands, expression, and material details are independent enough for parallel generation.
+- Full-body side/back and face turnaround depend on either a clear source full-body sheet or `17_full_body_front.png` marked `inspected_pass`.
 - Use existing photoreal child skills only as prompt-pattern inspiration. Do not invoke them by default because they force photoreal output.
 
 ## Batch Plan Groups

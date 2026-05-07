@@ -4,12 +4,12 @@ Use these templates when the workflow needs image generation, image editing, or 
 
 ## Image Generation Tool Policy
 
-- Use built-in `image_gen` by default for anchor images, panel art, draft sheets, and visual regenerations.
+- Use built-in `image_gen` by default for anchor images, panel art, draft sheets, final text-included sheets, text repair, and visual regenerations.
 - Label image inputs before calling `image_gen`: template layout reference, primary character identity reference, supporting outfit/prop/detail reference, or approved anchor.
 - Save the selected `image_gen` output under the active run folder before reporting it or using it in later stages.
 - Inspect each generated image before approval. If review fails, regenerate with `image_gen` using the same approved spec/blueprint and only the concrete review issues.
 - Auto-regenerate at most 2 times. After that, stop and report the best result plus remaining blockers.
-- Keep final Korean/body text out of image generation whenever possible; use deterministic final composition for readable text.
+- Use built-in `image_gen` for final Korean/body text insertion. Do not use deterministic text overlay tools such as SVG, HTML/CSS, Canvas, Pillow, or Figma for final text placement.
 
 ## Anchor Image
 
@@ -96,7 +96,7 @@ Text policy:
 - This is a no-dense-body-copy draft, not a structural-label-free redesign.
 - Preserve structural labels such as the sheet title, section numbers, and short section headers.
 - Do not add dense body copy, long paragraphs, tiny unreadable filler text, watermark, credits, or logo marks.
-- Leave profile, concept, notes, checklist, creator, and other copy fields blank or as faint placeholder lines for later programmatic text overlay.
+- Leave profile, concept, notes, checklist, creator, and other copy fields blank or as faint placeholder lines for later `image_gen` final text insertion.
 
 Character content:
 - Fill the template with the approved character.
@@ -157,7 +157,7 @@ Visual style:
 - consistent character across all panels
 - professional layout
 - information-dense but organized
-- clear empty areas reserved for final text insertion
+- clear empty areas reserved for final `image_gen` text insertion
 
 Important:
 - Same face, hair, outfit, colors, and accessories across every panel.
@@ -204,7 +204,7 @@ Do not introduce:
 - character redesign
 ```
 
-For bundled-template geometry failures, prefer the Template-Locked Draft Sheet prompt for the first stricter regeneration. If template fidelity fails again for the same approved blueprint, switch to fallback composition: keep the fixed template background, generate needed panel art with built-in `image_gen`, and compose the sheet programmatically. Do not keep broad-regenerating the whole sheet after the automatic regeneration budget is exhausted.
+For bundled-template geometry failures, prefer the Template-Locked Draft Sheet prompt for the first stricter regeneration. If template fidelity fails again for the same approved blueprint, switch to visual fallback composition only: keep the fixed template background and generate needed panel art with built-in `image_gen`. Final text placement must still be performed with built-in `image_gen`; do not use local text overlay for the final text-included sheet. Do not keep broad-regenerating the whole sheet after the automatic regeneration budget is exhausted.
 
 ## Copywriting Constraints
 
@@ -240,20 +240,19 @@ Output shape:
 
 ## Final Composition
 
-Prefer deterministic rendering:
+Use built-in `image_gen` for final composition:
 
 - Use the approved no-dense-body-copy draft as the base image.
-- Place the approved copy into the blueprint text boxes.
-- If the bundled master-sheet template was used, align text with its intended zones while adapting labels to the user's language.
-- Use a font that supports the requested language.
-- Keep line lengths short and use explicit wrapping.
-- Leave enough padding around every text block.
-- Export a final PNG or equivalent image, plus the text JSON when useful.
+- Add the approved copy into the blueprint text boxes through `image_gen`.
+- If the bundled master-sheet template was used, place text in its intended zones while adapting labels to the user's language.
+- Keep line lengths short, text blocks compact, and every text item large enough for image-model rendering.
+- Export the selected final text-included image, plus the text JSON when useful.
+- Do not use SVG, HTML/CSS, Canvas, Pillow, Figma, or any other programmatic text overlay path for final text placement.
 
-If using image editing instead:
+Final image_gen text insertion prompt:
 
 ```text
-Add the approved final text to the approved no-dense-body-copy character sheet while preserving the character art and panel layout exactly.
+Add the approved final text to the approved no-dense-body-copy character sheet using image generation/editing while preserving the character art and panel layout as closely as possible.
 
 Text payload:
 [approved final_text_payload]
@@ -264,5 +263,5 @@ Rules:
 - Use clean labels and short profile text only.
 - Keep the template's panel structure readable, but remove or replace leftover wireframe placeholders.
 - Avoid tiny dense paragraphs.
-- If text cannot be rendered clearly, leave the art unchanged and report that programmatic overlay is required.
+- If text cannot be rendered clearly after the configured repair budget, report the remaining text issues. Do not switch to programmatic text overlay.
 ```

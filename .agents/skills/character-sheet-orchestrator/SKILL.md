@@ -27,12 +27,12 @@ If the user does not specify where to save files, create a new run folder under 
 - In `post_blueprint_autonomous` mode, do not pause after anchors, draft image, draft review, final copy, final composition, or QA. Generate the textless image sheet and the text-included final sheet, self-review each stage, auto-regenerate or repair within the configured budget, then show the completed artifacts and QA notes at the end.
 - Preserve the latest approved artifact as the source for the next stage.
 - Use `assets/master-sheet-template.png` as the default master-sheet layout reference unless the user requests another layout. Default template usage is `template_locked`: preserve the template geometry, top header, project metadata box, numbered section headers, profile/lower panels, footer boxes, and blue technical wireframe rhythm; replace only mannequin bodies, face placeholders, plus icons, and empty placeholder drawings with character content.
-- Use the built-in `image_gen` tool by default for raster character art generation: anchor images, panel art, no-dense-body-copy draft sheets, and visual regenerations. Use CLI/API image generation only when the user explicitly asks for that path or when a required capability is unavailable in built-in `image_gen` and the user approves the fallback.
-- Prefer no-dense-body-copy image generation for the art draft, then programmatic text overlay for the final sheet. In draft images, preserve structural labels, section numbers, and large template headers when template fidelity matters; avoid dense profile copy and small body text. Use image-model text insertion only as a fallback.
+- Use the built-in `image_gen` tool by default for raster character art generation and text-bearing visuals: anchor images, panel art, no-dense-body-copy draft sheets, final text-included sheets, text repair, and visual regenerations. Use CLI/API image generation only when the user explicitly asks for that path or when a required capability is unavailable in built-in `image_gen` and the user approves the fallback.
+- Prefer no-dense-body-copy image generation for the art draft, then use built-in `image_gen` again for the final text-included sheet. In draft images, preserve structural labels, section numbers, and large template headers when template fidelity matters; avoid dense profile copy and small body text. Do not use programmatic text overlay tools such as SVG, HTML/CSS, Canvas, Pillow, or Figma for final text placement unless the user explicitly changes this skill policy.
 - After each generated anchor or draft, inspect the result before using it or, in fully gated mode, showing it for approval. If the draft review recommends anything other than `approve`, regenerate with `image_gen` using only the approved spec/blueprint plus the concrete review issues. Auto-regenerate at most 2 times before reporting the best result and remaining blockers.
-- If a bundled-template draft fails template fidelity once, do not keep repeating broad image prompts. Route to either a stricter `template_locked` regeneration or the fallback path: fixed template background, separately generated panel art, and programmatic composition.
+- If a bundled-template draft fails template fidelity once, do not keep repeating broad image prompts. Route to either a stricter `template_locked` regeneration or the fallback path for visual layout only; final text must still be placed with built-in `image_gen`, not a local text overlay.
 - Report in Korean by default. Keep reports factual and do not claim readable text, identity consistency, or panel completeness unless the result was inspected.
-- If a generated sheet has broken text but the character art is good, repair or recompose only text instead of regenerating the character.
+- If a generated sheet has broken text but the character art is good, use `image_gen` text repair or rerun `image_gen` final text composition instead of regenerating the character art.
 
 ## Workflow
 
@@ -58,7 +58,7 @@ If the user does not specify where to save files, create a new run folder under 
    Produce short, box-sized text: title, subtitle, profile, keywords, motifs, section labels, and any concise concept notes in the user's requested language.
 
 8. Compose final text.
-   Prefer SVG, HTML/CSS, Canvas, Pillow, Figma, or equivalent programmatic overlay so Korean and small labels stay readable.
+   Use built-in `image_gen` to add the approved final copy to the approved draft or visual layout. Do not use SVG, HTML/CSS, Canvas, Pillow, Figma, or other programmatic text overlay paths.
 
 9. Run final QA.
    Inspect text clipping, typos, section coverage, profile coverage, character consistency, and layout balance. Report pass/fail with concrete notes.
@@ -70,7 +70,7 @@ For template guidance, read `references/template-layout.md`. For stage-level pro
 Default behavior after the user approves the character spec and blueprint:
 
 - Continue through anchor selection/generation, no-dense-body-copy draft generation, draft review, final copywriting, final text composition, and QA without asking for more feedback.
-- Run the existing self-review checks at each stage. If a check fails, route the failure internally: regenerate visual drafts for art/layout issues, switch to fallback composition for repeated template-fidelity failures, and repair/recompose only text for clipping, typo, or Korean-readability issues.
+- Run the existing self-review checks at each stage. If a check fails, route the failure internally: regenerate visual drafts for art/layout issues, switch to visual fallback composition for repeated template-fidelity failures when needed, and use `image_gen` text repair or final text regeneration for clipping, typo, or Korean-readability issues.
 - Keep the latest self-reviewed passing artifact as the source for the next stage. Do not discard a user-approved spec or blueprint during regeneration.
 - Stop early only when the next step would require a major new identity/layout decision, overwrite an explicitly approved image, exceed the configured regeneration budget with unresolved blockers, or use an unapproved CLI/API fallback.
 - At the end, show both the textless draft sheet and the final text-included sheet, plus concise QA notes and known remaining issues. The user's next message is treated as final-stage feedback and routed by the normal feedback prefixes.
@@ -81,10 +81,10 @@ Default behavior after the user approves the character spec and blueprint:
 - `수정: ...` or new character facts: return to spec normalization.
 - `배치수정: ...`: return to blueprint planning.
 - `재생성: ...` or art-quality feedback: rerun draft generation with accumulated fixes.
-- Bundled-template geometry, headers, numbered sections, profile/lower panels, or footer boxes missing: return to blueprint or `template_locked` regeneration. If this already failed once, switch to panel asset generation plus programmatic composition.
+- Bundled-template geometry, headers, numbered sections, profile/lower panels, or footer boxes missing: return to blueprint or `template_locked` regeneration. If this already failed once, switch to panel asset generation plus visual fallback composition, then use `image_gen` for the final text-included sheet.
 - `부분수정: ...`: isolate the named panel or detail if the tool supports editing; otherwise rerun draft with a narrow correction.
-- `문구수정: ...` or `톤변경: ...`: rerun copywriting and final composition only.
-- Text clipping, typo, or broken Korean: rerun final composition or text repair only.
+- `문구수정: ...` or `톤변경: ...`: rerun copywriting and `image_gen` final text composition only.
+- Text clipping, typo, or broken Korean: rerun `image_gen` final composition or `image_gen` text repair only.
 - In `post_blueprint_autonomous` mode, collect user feedback only after the final QA report unless an early-stop condition is reached.
 
 ## Report Format

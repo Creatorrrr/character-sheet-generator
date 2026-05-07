@@ -153,7 +153,7 @@ Generation tool:
 
 - Use built-in `image_gen` by default for draft sheet generation and visual regeneration.
 - Attach or reference the approved template, character references, and anchors according to the current tool's available image-input flow.
-- Do not replace `image_gen` with local collage/composition as the first draft path. Use fixed-template programmatic composition only as fallback after template fidelity failure or when the reviewer explicitly routes there.
+- Do not replace `image_gen` with local collage/composition as the first draft path. Use fixed-template visual fallback composition only after template fidelity failure or when the reviewer explicitly routes there; this fallback is for layout recovery, not final text overlay.
 - Record `generation_tool`, `attempt_index`, `max_auto_regenerations`, and `regeneration_reason` in state for each attempt.
 
 Rules:
@@ -166,7 +166,7 @@ Rules:
 - Prioritize same person, same face, same hair, same outfit, same palette, and same accessories across all panels.
 - Include all blueprint panels unless a tool limitation makes it impossible; report any omission.
 - Use no dense body text. Allow structural labels, large section titles, small placeholder lines, or numbered panel tags.
-- Leave clean text areas for final composition.
+- Leave clean text areas for final `image_gen` text insertion.
 - Keep the sheet high-resolution, organized, and useful as a production reference.
 - Do not change the approved spec, identity lock, blueprint, or panel plan during regeneration. Regeneration may only add the concrete failed-review issues as fixes.
 
@@ -231,8 +231,8 @@ Auto-regeneration policy:
 - If `recommended_action` is not `approve` and `attempt_index` is less than `max_auto_regenerations`, do not ask the user yet. Append the review to `review_history`, set `regeneration_reason` to the concrete `issues`, increment `attempt_index`, and run Draft Generator again with built-in `image_gen`.
 - Use only the approved spec, approved blueprint, and current review issues in the regeneration prompt. Do not invent new sections, redesign the character, or change the approved layout.
 - If a `template_locked` draft has good character art but fails template fidelity, do not approve it. First route to stricter `template_locked` `image_gen` regeneration.
-- If template fidelity fails again after a stricter regeneration, recommend `fallback_composition`: fixed template background, separately generated panel art with `image_gen`, and programmatic composition.
-- If the only issue is broken text, clipping, typo, or Korean readability, do not regenerate the character art. Route to final composition or text repair.
+- If template fidelity fails again after a stricter regeneration, recommend `fallback_composition` for the visual layout only: fixed template background and separately generated panel art with `image_gen`. Final text placement must still use built-in `image_gen`.
+- If the only issue is broken text, clipping, typo, or Korean readability, do not regenerate the character art. Route to `image_gen` final composition or `image_gen` text repair.
 - If `attempt_index` reaches `max_auto_regenerations` and the draft still fails, stop regeneration and report the best available draft, the review history, and remaining blockers.
 
 ## 7. Copywriter
@@ -267,13 +267,14 @@ Output:
 
 Combine the approved no-dense-body-copy draft with the approved copy. In `post_blueprint_autonomous`, the copy payload is self-reviewed and approved for composition when it satisfies the box-size and factual-consistency constraints.
 
-Preferred order:
+Required tool:
 
-1. Programmatic overlay with SVG, HTML/CSS, Canvas, Pillow, Figma, or another deterministic renderer.
-2. Image editing only for labels or graphic placeholders.
-3. Full image-model text insertion only when the user accepts the risk of broken small text.
+- Use built-in `image_gen` for the final text-included sheet.
+- Use the approved no-dense-body-copy draft or visual fallback composition as the image input.
+- Add the approved copy as image text through `image_gen`; keep text short and large enough for the model to render.
+- Do not use programmatic text overlay with SVG, HTML/CSS, Canvas, Pillow, Figma, or another deterministic renderer.
 
-Preserve the character and panel art. If only text is wrong, do not regenerate the character art.
+Preserve the character and panel art as much as the image tool allows. If only text is wrong, rerun `image_gen` text repair or final text composition from the approved draft; do not return to draft art generation unless identity or layout also drifted.
 
 When the bundled template is used, align final copy to its text zones: project metadata, profile card, concept notes, keywords, mood/tone, design motif, palette, checklist or remarks. Rename or omit lower-priority footer boxes if they do not help the user's final sheet.
 

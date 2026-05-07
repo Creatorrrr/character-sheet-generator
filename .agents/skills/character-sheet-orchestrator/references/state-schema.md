@@ -23,7 +23,7 @@ Use this schema in conversation. Persist it to a JSON file only when the user as
   "character_spec": {},
   "blueprint": {},
   "generation_mode": "template_locked | adapted | custom",
-  "generation_tool": "built-in image_gen | user_requested_cli_api | deterministic_composition",
+  "generation_tool": "built-in image_gen | user_requested_cli_api",
   "attempt_index": 0,
   "max_auto_regenerations": 2,
   "regeneration_reason": "",
@@ -98,22 +98,22 @@ template geometry, top header, numbered sections, profile/lower panels, or foote
 same template fidelity failure already recorded -> fallback_composition with fixed template background and image_gen panel art
 panel-specific visual issue -> draft_generator with partial-edit request when possible
 copy wording, tone, language, keyword changes -> copywriter
-broken text, clipping, typo, Korean readability -> final_composer
+broken text, clipping, typo, Korean readability -> final_composer with built-in image_gen text repair
 final minor visual artifact -> final_composer or partial edit
 major identity drift in final -> return to draft_generator using approved anchors
 ```
 
 ## Generation and Review Invariants
 
-- Default `generation_tool` for anchor assets, panel art, draft sheets, and visual regenerations is `built-in image_gen`.
+- Default `generation_tool` for anchor assets, panel art, draft sheets, final text-included sheets, text repair, and visual regenerations is `built-in image_gen`.
 - Use CLI/API image generation only when the user explicitly asks for it or approves that fallback.
 - After both `approvals.spec_approved` and `approvals.blueprint_approved` are true, set `mode` to `post_blueprint_autonomous` by default unless the user explicitly requests fully gated operation.
-- In `post_blueprint_autonomous`, do not pause for anchor, draft, text, composition, or QA approvals. Continue through final delivery using self-review, regeneration, fallback composition, and text repair rules.
+- In `post_blueprint_autonomous`, do not pause for anchor, draft, text, composition, or QA approvals. Continue through final delivery using self-review, regeneration, fallback composition, and `image_gen` text repair rules.
 - Treat `attempt_index` as zero-based: `0` is the first draft, `1` and `2` are the two allowed automatic regenerations. Keep `max_auto_regenerations` at `2` unless the user explicitly changes it.
 - Append every failed draft review to `review_history` before regenerating.
 - Set `regeneration_reason` to the concrete failed-review issues. Do not use regeneration to change the approved spec, identity lock, blueprint, or panel plan.
 - If `attempt_index` reaches `max_auto_regenerations` and review still does not recommend `approve`, stop automatic regeneration and report the best draft plus remaining blockers.
-- If only text is broken or clipped, route to final composition/text repair instead of regenerating character art.
+- If only text is broken or clipped, route to `image_gen` final composition/text repair instead of regenerating character art. Do not use programmatic text overlay.
 - Stop early in `post_blueprint_autonomous` only for major identity/layout decisions, unapproved CLI/API fallback, configured regeneration budget exhaustion with unresolved blockers, or actions that would discard a user-approved artifact.
 
 ## Approval Invariants

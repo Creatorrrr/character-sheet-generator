@@ -52,7 +52,7 @@ Footer:
 
 - In `template_locked` mode, do not redesign the sheet. Preserve the outer border, top title/header area, project metadata box, numbered section headers, panel positions, profile/lower panels, footer boxes, and blue technical-frame style.
 - In `template_locked` mode, replace only mannequin construction bodies, blank face placeholders, plus icons, empty placeholder drawings, and interior art placeholders.
-- In `template_locked` mode, keep structural labels such as `CHARACTER MASTER SHEET`, section numbers, and short section headers. Omit dense profile/body copy until final programmatic text composition.
+- In `template_locked` mode, keep structural labels such as `CHARACTER MASTER SHEET`, section numbers, and short section headers. Omit dense profile/body copy until final `image_gen` text insertion.
 - Keep the broad hierarchy: big identity panel left, structural views center, facial/eye details right, detail strips and profile lower down.
 - Use looser recoloring or panel reinterpretation only in `adapted` or `custom` mode. Do not recolor or restyle the default template in `template_locked` mode unless the user explicitly asks.
 - For mascot, chibi, animal, creature, robot, or non-human characters, reinterpret anatomy panels without forcing a human mannequin.
@@ -75,7 +75,7 @@ Pass when all are true:
 - Top `CHARACTER MASTER SHEET` header and right project metadata box remain.
 - Section numbers `01` through `10` remain in the original relative positions.
 - Left front-view, center turnaround, right expression/eye, middle detail, lower profile/concept/keyword/motif, and footer areas keep the template hierarchy.
-- Body text zones are blank, faint placeholder lines, or ready for programmatic overlay.
+- Body text zones are blank, faint placeholder lines, or ready for final `image_gen` text insertion.
 
 Fail when any are true:
 

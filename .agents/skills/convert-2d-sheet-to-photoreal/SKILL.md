@@ -17,7 +17,7 @@ If the user does not specify where to save files, create a new run folder under 
 - Build `<slug>` from the character name, then the input image filename stem, then `photoreal-sheet`. Normalize it to lowercase ASCII letters, numbers, and hyphens. If the normalized value is empty, use `photoreal-sheet`.
 - If the user is resuming from an existing run folder, keep using that folder instead of creating a new one.
 - Save Stage 1-4 outputs, self-approved intermediates, `final-photoreal-text-free-sheet.png`, `final-photoreal-character-sheet.png`, repair outputs, notes, and optional state or resume artifacts under the selected run folder.
-- Keep `structure-inventory.md`, `workflow-state.json`, and a short `verification-notes.md` in the run folder so the next resumed turn knows the original structure/content contract, current stage, attempt counts, latest accepted image, latest rejected image, and next intended action.
+- Keep `structure-inventory.md`, `workflow-state.json`, and a short `verification-notes.md` in the run folder so the next resumed turn knows the original structure/content contract, Character Appearance Lock, current stage, attempt counts, latest accepted image, latest rejected image, and next intended action.
 - When reporting artifacts, include the selected run folder and write output paths under that folder.
 
 ## Stage Skills
@@ -58,10 +58,12 @@ Inventory requirements:
 - For each image slot, record its relative location, role, expected view or crop type, direction or expression when applicable, and the mandatory visual content that must stay distinct.
 - For each image slot that contains costume, prop, accessory, or object typography, record it as mandatory visual content or costume/prop typography, not as a removable text slot.
 - For each text slot, record only sheet annotation text: its relative location, hierarchy, and whether it should be removed in the text-free stages or restored in the text-inclusive stages.
+- Add a `Character Appearance Lock` section derived only from visible source evidence. Record apparent age/maturity, height/stature impression, body type and body proportions, head-to-body ratio, silhouette, posture, face shape, cheek/jaw/chin softness, eye shape, brow shape, nose/mouth/lip traits, skin tone/visible marks, hair silhouette, expression intensity, and emotional/personality impression.
 - Treat slot count and slot meaning as locked. Two source slots must not be merged into one output slot, one source slot must not be omitted, and a slot must not change into a different expression, direction, detail target, prop, outfit area, or body part.
+- Treat the Character Appearance Lock as an identity contract, not a biological measurement. Do not infer exact biological age, exact height, race, or ethnicity; record only visible visual impressions needed to keep the same character after photoreal conversion.
 - Record any source text or tiny details that are not legible enough to verify exactly; do not later claim exact restoration for those areas.
 
-Use `structure-inventory.md` during prompt construction and self-verification. If it is missing on resume, rebuild it from the source image before approving any stage.
+Use `structure-inventory.md` during prompt construction and self-verification. If it is missing or lacks the Character Appearance Lock on resume, rebuild it from the source image before approving any stage.
 
 ## Turn Protocol for Image Generation
 
@@ -81,8 +83,8 @@ Always use autonomous continuation. Keep stage reports factual, but treat them a
 
 Required state:
 
-- `workflow-state.json`: `stage`, `attemptsByStage`, `sourceImage`, `structureInventory`, `latestAcceptedImage`, `latestRejectedImage`, `nextAction`, and `terminalReason`.
-- `structure-inventory.md`: original section/panel/slot contract and any source details that cannot be verified exactly.
+- `workflow-state.json`: `stage`, `attemptsByStage`, `sourceImage`, `structureInventory`, `appearanceLock`, `latestAcceptedImage`, `latestRejectedImage`, `nextAction`, and `terminalReason`. `appearanceLock` should point to the `Character Appearance Lock` section in `structure-inventory.md`, not to a separate file.
+- `structure-inventory.md`: original section/panel/slot contract, Character Appearance Lock, and any source details that cannot be verified exactly.
 - `verification-notes.md`: chronological notes with each generated artifact, pass/fail decision, visible defects, and why the next stage or retry was chosen.
 
 Attempt limits:
@@ -95,22 +97,22 @@ Attempt limits:
 
 Autonomous decisions:
 
-- If Stage 1 is convincingly live-action, preserves the original sheet structure/content inventory, removes all sheet annotation text, and preserves any original in-image costume/prop typography, self-approve it as `final-photoreal-text-free-sheet.png` and proceed to Stage 3.
-- If Stage 1 preserves the structure/content inventory, removes sheet annotation text, preserves in-image costume/prop typography, but still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits, proceed to Stage 2.
-- If Stage 1 changes the original layout, omits major panels/views, merges image slots, changes a slot's meaning, replaces a detail/expression/direction with another, leaves readable/fake sheet annotation text, or removes original in-image costume/prop typography, retry Stage 1 if attempts remain.
-- If Stage 2 passes the live-action threshold while preserving the text-free sheet layout/content inventory and adding no new sheet annotation text, self-approve it as `final-photoreal-text-free-sheet.png` and proceed to Stage 3.
-- If Stage 2 adds new sheet annotation/fake text, changes or removes original in-image costume/prop typography, changes layout, merges/omits slots, or changes slot meaning, retry Stage 2 until the attempt limit, then fall back to Stage 1 if allowed.
+- If Stage 1 is convincingly live-action, preserves the original sheet structure/content inventory, preserves the Character Appearance Lock, removes all sheet annotation text, and preserves any original in-image costume/prop typography, self-approve it as `final-photoreal-text-free-sheet.png` and proceed to Stage 3.
+- If Stage 1 preserves the structure/content inventory and Character Appearance Lock, removes sheet annotation text, preserves in-image costume/prop typography, but still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits, proceed to Stage 2.
+- If Stage 1 changes the original layout, omits major panels/views, merges image slots, changes a slot's meaning, replaces a detail/expression/direction with another, changes the Character Appearance Lock, leaves readable/fake sheet annotation text, or removes original in-image costume/prop typography, retry Stage 1 if attempts remain.
+- If Stage 2 passes the live-action threshold while preserving the text-free sheet layout/content inventory, Character Appearance Lock, and adding no new sheet annotation text, self-approve it as `final-photoreal-text-free-sheet.png` and proceed to Stage 3.
+- If Stage 2 adds new sheet annotation/fake text, changes or removes original in-image costume/prop typography, changes layout, merges/omits slots, changes slot meaning, or changes the Character Appearance Lock, retry Stage 2 until the attempt limit, then fall back to Stage 1 if allowed.
 - If Stage 2 still fails the live-action threshold after its limit, regenerate Stage 1 once if Stage 1 attempts remain; otherwise finish with a failure report.
-- If Stage 3 restores readable original sheet annotation text while preserving the text-free sheet's character, panels, layout, non-text graphics, in-image costume/prop typography, and the full approved photoreal image set, self-approve it as `final-photoreal-character-sheet.png` and finish.
-- If Stage 3 preserves the approved photoreal image set and layout but sheet annotation text is broken, blurry, misaligned, fake, or unreadable, proceed to Stage 4.
-- If Stage 3 changes the character, pulls any image slot back toward illustration, redraws or replaces any image slot, changes the locked text-free layout, merges/omits slots, changes slot meaning, or changes image-slot content versus the text-free base, retry Stage 3 if attempts remain; otherwise finish with `수동 텍스트 오버레이 필요`.
-- If Stage 4 improves sheet annotation text while preserving character, pose, outfit, lighting, layout, and the full approved photoreal image set, finish.
-- If Stage 4 changes the character/structure/content, redraws or replaces any image slot, weakens the photoreal quality of any image slot, or still cannot produce verifiable readable sheet annotation text after its limit, finish with `수동 텍스트 오버레이 필요`.
+- If Stage 3 restores readable original sheet annotation text while preserving the text-free sheet's character, Character Appearance Lock, panels, layout, non-text graphics, in-image costume/prop typography, and the full approved photoreal image set, self-approve it as `final-photoreal-character-sheet.png` and finish.
+- If Stage 3 preserves the approved photoreal image set, Character Appearance Lock, and layout but sheet annotation text is broken, blurry, misaligned, fake, or unreadable, proceed to Stage 4.
+- If Stage 3 changes the character or Character Appearance Lock, pulls any image slot back toward illustration, redraws or replaces any image slot, changes the locked text-free layout, merges/omits slots, changes slot meaning, or changes image-slot content versus the text-free base, retry Stage 3 if attempts remain; otherwise finish with `수동 텍스트 오버레이 필요`.
+- If Stage 4 improves sheet annotation text while preserving character, Character Appearance Lock, pose, outfit, lighting, layout, and the full approved photoreal image set, finish.
+- If Stage 4 changes the character, Character Appearance Lock, structure/content, redraws or replaces any image slot, weakens the photoreal quality of any image slot, or still cannot produce verifiable readable sheet annotation text after its limit, finish with `수동 텍스트 오버레이 필요`.
 
 Required final artifacts:
 
-- `final-photoreal-text-free-sheet.png`: the latest self-approved text-free live-action sheet from Stage 1 or Stage 2. It must preserve the original canvas ratio, panel structure, view positions, slot count, slot meaning, non-text graphics, and original in-image costume/prop typography while removing all sheet annotation text.
-- `final-photoreal-character-sheet.png`: the latest self-approved text-inclusive character sheet from Stage 3 or Stage 4. It must be built on top of `final-photoreal-text-free-sheet.png` by restoring original sheet annotation text without changing character, layout, non-text graphics, slot count, slot meaning, in-image costume/prop typography, or the approved photoreal image set. If no text-inclusive sheet passes, still save the best failed candidate and mark it as needing manual text overlay.
+- `final-photoreal-text-free-sheet.png`: the latest self-approved text-free live-action sheet from Stage 1 or Stage 2. It must preserve the original canvas ratio, panel structure, view positions, slot count, slot meaning, Character Appearance Lock, non-text graphics, and original in-image costume/prop typography while removing all sheet annotation text.
+- `final-photoreal-character-sheet.png`: the latest self-approved text-inclusive character sheet from Stage 3 or Stage 4. It must be built on top of `final-photoreal-text-free-sheet.png` by restoring original sheet annotation text without changing character, Character Appearance Lock, layout, non-text graphics, slot count, slot meaning, in-image costume/prop typography, or the approved photoreal image set. If no text-inclusive sheet passes, still save the best failed candidate and mark it as needing manual text overlay.
 
 ## Workflow
 
@@ -121,7 +123,7 @@ Use `$create-photoreal-character-base`.
 Goal:
 
 - Remove all sheet annotation text while preserving text boxes, panels, callout lines, color chips, and other non-text structure.
-- Preserve character identity, hair, outfit, in-image costume/prop typography, pose, expression, original canvas ratio, panel layout, and view positions.
+- Preserve character identity, Character Appearance Lock, hair, outfit, in-image costume/prop typography, pose, expression, original canvas ratio, panel layout, and view positions.
 - Preserve every image slot from `structure-inventory.md` as a distinct 1:1 slot with the same role, view, expression, crop target, prop, outfit area, and body part.
 - Produce a text-free sheet that looks like real live-action reference photography, not illustration, 3D render, or cosplay poster.
 
@@ -129,6 +131,7 @@ Report:
 
 - What source image was used.
 - What identity and costume details were preserved.
+- What 외형 동등성 details were preserved from the Character Appearance Lock and what risk remains.
 - Whether all sheet annotation text was removed and any original in-image costume/prop typography was preserved.
 - Whether the original layout and panel structure stayed aligned.
 - Whether all inventory slots stayed distinct and semantically matched the source.
@@ -136,9 +139,9 @@ Report:
 
 Self-verification gate:
 
-- Self-approve as `final-photoreal-text-free-sheet.png` and proceed to Stage 3 only if the base is convincingly photoreal, matches the original structure, contains no readable or fake sheet annotation text, and preserves original in-image costume/prop typography.
-- Proceed to Stage 2 if the image matches the original structure, contains no sheet annotation text, preserves in-image costume/prop typography, but still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits.
-- Retry Stage 1 if the base changes the original layout, omits major panels/views, merges slots, changes slot meaning, replaces a source detail/expression/direction with another, leaves readable or fake sheet annotation text, removes original in-image costume/prop typography, or is structurally unusable.
+- Self-approve as `final-photoreal-text-free-sheet.png` and proceed to Stage 3 only if the base is convincingly photoreal, matches the original structure, preserves the Character Appearance Lock, contains no readable or fake sheet annotation text, and preserves original in-image costume/prop typography.
+- Proceed to Stage 2 if the image matches the original structure, preserves the Character Appearance Lock, contains no sheet annotation text, preserves in-image costume/prop typography, but still has anime, 3D, CGI, waxy skin, plastic skin, or overly clean AI traits.
+- Retry Stage 1 if the base changes the original layout, omits major panels/views, merges slots, changes slot meaning, replaces a source detail/expression/direction with another, changes the Character Appearance Lock, leaves readable or fake sheet annotation text, removes original in-image costume/prop typography, or is structurally unusable.
 - Finish with a final report if no valid next action remains within the attempt limits.
 
 ### Stage 2: Photoreal Intensification
@@ -148,19 +151,20 @@ Use `$intensify-photoreal-character` when needed.
 Goal:
 
 - Remove remaining 2D, 3D, CGI, game-render, plastic, or over-retouched qualities.
-- Keep expression, emotion, pose, clothing, original in-image costume/prop typography, original text-free layout, empty sheet annotation areas, non-text graphics, and every inventory image slot stable.
+- Keep expression, emotion, pose, clothing, Character Appearance Lock, original in-image costume/prop typography, original text-free layout, empty sheet annotation areas, non-text graphics, and every inventory image slot stable.
 
 Report:
 
 - Which artifacts were targeted.
 - What should remain unchanged.
+- Whether 외형 동등성 stayed aligned with the Character Appearance Lock while realism improved.
 - Whether the result now passes the live-action photo threshold.
 - Whether the result still matches the source inventory and previous text-free input.
 
 Self-verification gate:
 
-- Self-approve as `final-photoreal-text-free-sheet.png` and proceed to Stage 3 only if the result passes the live-action photo threshold while preserving original structure/content inventory and adding no sheet annotation text.
-- Retry Stage 2 if it still fails the threshold, changes layout, merges/omits slots, changes slot meaning, changes/removes original in-image costume/prop typography, or adds readable/fake sheet annotation text and Stage 2 attempts remain.
+- Self-approve as `final-photoreal-text-free-sheet.png` and proceed to Stage 3 only if the result passes the live-action photo threshold while preserving original structure/content inventory, Character Appearance Lock, and adding no sheet annotation text.
+- Retry Stage 2 if it still fails the threshold, changes layout, merges/omits slots, changes slot meaning, changes the Character Appearance Lock, changes/removes original in-image costume/prop typography, or adds readable/fake sheet annotation text and Stage 2 attempts remain.
 - Fall back to Stage 1 if Stage 2 fails after its limit and Stage 1 attempts remain.
 - Finish with a final report if no valid next action remains within the attempt limits.
 
@@ -172,7 +176,7 @@ Goal:
 
 - Use `final-photoreal-text-free-sheet.png` as the locked visual base.
 - Restore the original 2D sheet's readable sheet annotation text, labels, section numbers, captions, UI logo text, and descriptions at the corresponding original positions.
-- Keep character, panels, view positions, image-slot content, in-image costume/prop typography, text boxes, callout lines, color chips, and other non-text graphics unchanged.
+- Keep character, Character Appearance Lock, panels, view positions, image-slot content, in-image costume/prop typography, text boxes, callout lines, color chips, and other non-text graphics unchanged.
 - Treat the full image set inside `final-photoreal-text-free-sheet.png` as locked: every image slot must keep the same location, count, role, content, view, crop target, detail target, and photoreal live-action style.
 - Make text readable without pulling the character back into illustration.
 
@@ -181,15 +185,16 @@ Report:
 - Which sheet annotation text areas, labels, section numbers, captions, or descriptions were restored.
 - How text readability was handled.
 - Whether character realism stayed intact.
+- Whether 외형 동등성 and the Character Appearance Lock stayed intact.
 - Whether the locked text-free layout stayed unchanged.
 - Whether every non-text slot, image slot, and in-image costume/prop typography still matches the locked text-free sheet and source inventory.
 - Whether any image slot was redrawn, replaced, or shifted away from the approved photoreal image set.
 
 Self-verification gate:
 
-- Self-approve as `final-photoreal-character-sheet.png` and finish only when restored text is acceptable and the locked photoreal image set remains unchanged and still looks photographic.
+- Self-approve as `final-photoreal-character-sheet.png` and finish only when restored text is acceptable and the locked photoreal image set and Character Appearance Lock remain unchanged and still look photographic.
 - Proceed to Stage 4 only when the approved photoreal image set and non-text structure/content are good but sheet annotation text or labels are broken, blurry, misaligned, fake, or unreadable.
-- Retry Stage 3 if sheet annotation text restoration changed layout, changed the character, failed to restore text at corresponding positions, merged/omitted slots, changed slot meaning, changed in-image costume/prop typography, changed image-slot content versus the text-free base, redrew or replaced any image slot, or pulled any image slot toward illustration, anime, line-art, CGI, 3D render, or semi-realistic painting and Stage 3 attempts remain.
+- Retry Stage 3 if sheet annotation text restoration changed layout, changed the character or Character Appearance Lock, failed to restore text at corresponding positions, merged/omitted slots, changed slot meaning, changed in-image costume/prop typography, changed image-slot content versus the text-free base, redrew or replaced any image slot, or pulled any image slot toward illustration, anime, line-art, CGI, 3D render, or semi-realistic painting and Stage 3 attempts remain.
 - Finish with `수동 텍스트 오버레이 필요` if no valid Stage 3 retry remains and the image set cannot stay locked during generative text restoration.
 
 ### Stage 4: Text Repair
@@ -198,7 +203,7 @@ Use `$repair-photoreal-sheet-text` only for text and labels.
 
 Goal:
 
-- Preserve character, pose, outfit, lighting, and layout.
+- Preserve character, Character Appearance Lock, pose, outfit, lighting, and layout.
 - Fix only broken, blurry, misaligned, or unreadable sheet annotation text and labels.
 - Preserve every non-text image slot and in-image costume/prop typography from the Stage 3 input and `final-photoreal-text-free-sheet.png`.
 - Treat image-slot preservation as a hard gate, not a preference: text repair must not redraw, repaint, restyle, crop, replace, or otherwise modify the approved photoreal image set.
@@ -207,14 +212,15 @@ Report:
 
 - Which sheet annotation text areas were repaired.
 - Whether any character or layout changes occurred.
+- Whether 외형 동등성 and the Character Appearance Lock stayed intact.
 - Whether any non-text slot content, image slot, or in-image costume/prop typography changed versus Stage 3 and the locked text-free base.
 - Whether every image slot still looks like the approved live-action photoreal base after text repair.
 - Remaining text risk, if any.
 
 Self-verification gate:
 
-- Finish only when repaired sheet annotation text can be verified and the character, layout, in-image costume/prop typography, non-text slot content, and approved photoreal image set remained stable.
-- Retry Stage 4 if sheet annotation text repair changed the character, pose, outfit, in-image costume/prop typography, lighting, layout, slot count, slot meaning, any image-slot content, or the photoreal quality of any image slot and Stage 4 attempts remain.
+- Finish only when repaired sheet annotation text can be verified and the character, Character Appearance Lock, layout, in-image costume/prop typography, non-text slot content, and approved photoreal image set remained stable.
+- Retry Stage 4 if sheet annotation text repair changed the character, Character Appearance Lock, pose, outfit, in-image costume/prop typography, lighting, layout, slot count, slot meaning, any image-slot content, or the photoreal quality of any image slot and Stage 4 attempts remain.
 - Finish with `수동 텍스트 오버레이 필요` if the model still cannot produce verifiable readable sheet annotation text without changing the approved photoreal image set after the Stage 4 attempt limit.
 
 ## Reporting Format
@@ -239,6 +245,7 @@ After each stage, send a concise Korean status report:
 - 산출물: ...
 - 유지한 요소: ...
 - 수정/강화한 요소: ...
+- 외형 동등성: ...
 - 검수 결과: ...
 - 다음 결정: ...
 ```
@@ -257,6 +264,7 @@ Final report:
 - 자체 재시도 이력: ...
 - 통과/실패 기준: ...
 - 구조/내용 동등성: ...
+- 외형 동등성: ...
 - 남은 리스크: ...
 - 다음 선택:
   1. 완료
@@ -289,6 +297,15 @@ Structure/content equivalence check:
 - For Stage 3 and Stage 4, pass only when every image slot also remains equivalent to the approved text-free photoreal base in location, count, role, content, view, crop target, detail target, and live-action photographic style.
 - Fail if any candidate merges multiple source slots into one image, omits a source slot, duplicates one slot to cover another, swaps the meaning of a slot, replaces a detail target with a different target, changes a required expression/direction/pose, removes original in-image costume/prop typography, changes non-text content during a sheet annotation-only stage, redraws or replaces an image slot, or weakens any image slot from the approved photoreal base into illustration, anime, line-art, CGI, 3D render, or semi-realistic painting.
 - Record the mismatch in `verification-notes.md` by source section/panel/slot type plus the observed symptom, such as changed content, changed view, changed crop, redrawn slot, lost photoreal style, or changed in-image typography. Do not hard-code recurring problem-item names into the skill.
+
+Appearance/Likeness equivalence check:
+
+- Compare every generated candidate against the `Character Appearance Lock` in `structure-inventory.md`. Treat 외형 동등성 as a hard gate alongside layout and slot meaning.
+- Pass only when the photoreal person still reads like the same character after realistic human translation: same apparent age/maturity impression, height/stature impression, body type and body proportions, head-to-body ratio, silhouette, posture, face shape, cheek/jaw/chin softness, eye shape, brow shape, nose/mouth/lip traits, skin tone/visible marks, hair silhouette, expression intensity, and emotional/personality impression.
+- Fail Stage 1 or Stage 2 if realism improvement looks like recasting the character: for example, a cute teenage-girl impression becomes a confident adult woman, a soft cute face becomes a strong mature face, a slight smile becomes neutral, a small delicate body becomes a tall adult-model body, or face shape/apparent age becomes inconsistent between closeup and full-body panels.
+- Fail Stage 3 or Stage 4 even when sheet annotation text improves if text editing changes face, apparent age, expression intensity, body proportions, silhouette, posture, or the approved same-character impression from `final-photoreal-text-free-sheet.png`.
+- Do not fail only because anime anatomy was translated into plausible human anatomy. Fail when that translation changes the source character's visible age impression, facial impression, body impression, expression tone, or personality impression into a different person.
+- Record each mismatch in `verification-notes.md` as an appearance drift, naming the source panel or slot and the observed drift such as changed apparent age, changed body proportions, changed face shape, changed expression intensity, changed smile, changed silhouette, or inconsistent identity across panels.
 
 Text check:
 

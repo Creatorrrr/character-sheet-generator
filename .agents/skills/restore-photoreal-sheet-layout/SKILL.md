@@ -7,7 +7,7 @@ description: Restore original sheet annotation text onto a self-approved text-fr
 
 ## Overview
 
-Use this stage after the text-free photoreal character sheet is self-approved. Add the original 2D sheet's sheet annotation text and labels onto the text-free sheet while keeping the character, panels, view positions, non-text graphics, and in-image costume/prop typography fully locked.
+Use this stage after the text-free photoreal character sheet is self-approved. Add the original 2D sheet's sheet annotation text and labels onto the text-free sheet while keeping the character, Character Appearance Lock, panels, view positions, non-text graphics, and in-image costume/prop typography fully locked.
 
 ## Inputs
 
@@ -15,7 +15,7 @@ Require:
 
 - `final-photoreal-text-free-sheet.png` or the latest self-approved text-free photoreal sheet from Stage 1 or Stage 2.
 - Original 2D character sheet for layout and text reference.
-- `structure-inventory.md` for the original section/panel/image-slot/text-slot contract.
+- `structure-inventory.md` for the original section/panel/image-slot/text-slot contract and Character Appearance Lock.
 
 Inspect the original first and note any unreadable source sheet annotation text before generation. The text-free photoreal sheet is the visual base and the locked photoreal image-set source of truth; the original 2D sheet is only the sheet annotation text source of truth and placement reference. Any typography already present inside the character image, costume, props, accessories, patches, embroidery, or engravings is locked visual content, not text to restore.
 
@@ -28,6 +28,7 @@ Use this prompt as the stage instruction:
 
 목표:
 - 캐릭터와 의상은 이미 완성된 무텍스트 실사 시트 그대로 유지
+- Character Appearance Lock과 외형 동등성은 그대로 유지: apparent age/maturity, body proportions, face shape, expression intensity, silhouette, posture, hair silhouette, emotional/personality impression을 바꾸지 않음
 - 캔버스 비율, 패널 그리드, 뷰 배치, 디테일 컷 위치, 콜아웃 선, 박스, 컬러칩, 비문자 그래픽은 변경하지 않음
 - 무텍스트 실사 시트의 모든 이미지 슬롯을 그대로 유지: 슬롯 개수, 위치, 개별 이미지 내용, 시점, 표정/감정, 디테일 대상, 소품/의상/신체 부위, 실사 사진 질감은 절대 바꾸지 않음
 - 원본 2D 시트는 텍스트와 위치 참조로만 사용하고, 이미지 슬롯의 시각적 기준은 무텍스트 실사 시트로 고정
@@ -41,6 +42,7 @@ Use this prompt as the stage instruction:
 - 의상/소품/액세서리/이미지 슬롯 내부의 기존 타이포그래피와 로고형 디자인
 - 자연스러운 표정과 감정
 - 캐릭터 정체성
+- 동일한 나이대 인상, 얼굴형, 눈매, 체형/키감, 실루엣, 표정 강도, 성격/분위기
 - 포즈 및 전반적인 시트 구성
 - 무텍스트 최종본의 패널 배치와 비문자 그래픽
 
@@ -66,6 +68,8 @@ Use this prompt as the stage instruction:
 - 텍스트 복원 과정에서 둘 이상의 이미지 슬롯을 하나로 합치거나, 이미지 슬롯을 생략하거나, 슬롯의 의미를 다른 표정/방향/디테일/소품으로 바꾸지 말 것
 - 텍스트 복원 과정에서 의상/소품/액세서리 안의 기존 타이포그래피를 바꾸거나 제거하지 말 것
 - 무텍스트 실사 시트에 있던 이미지 내용을 새로 생성한 다른 내용으로 대체하지 말 것
+- 텍스트 복원 중 얼굴, 나이대 인상, 체형/키감, 표정, 실루엣, 분위기를 바꾸지 말 것
+- 텍스트가 좋아져도 캐릭터가 다른 인물처럼 보이거나 패널 간 얼굴형/나이대가 불일치하면 실패
 - 캐릭터만 다시 2D처럼 보이지 않게 할 것
 - 어떤 이미지 슬롯도 일러스트, 애니풍, 라인아트, CGI, 3D 렌더, 반실사 그림체로 바꾸지 말 것
 - 텍스트와 그래픽 요소를 추가하더라도 캐릭터 본체는 끝까지 완전 실사 느낌 유지
@@ -91,12 +95,14 @@ Use this prompt as the stage instruction:
 ## Execution Guidance
 
 - Treat character realism as locked. Do not restyle the face, skin, hair, or outfit to match graphic elements.
+- Treat the Character Appearance Lock as locked. Do not change apparent age, face shape, expression intensity, body proportions, silhouette, posture, hair silhouette, or emotional/personality impression while restoring text.
 - Treat the text-free photoreal sheet and `structure-inventory.md` as locked. Do not change panel layout, view grouping, image-slot count, slot meanings, detail crop positions, non-text graphics, empty structural elements, or the approved photoreal image set.
 - Use the original 2D sheet only for sheet annotation text and placement. Do not use it as the visual style source for any image slot during Stage 3.
 - Treat every image slot in the text-free photoreal sheet as locked visual content: it must keep the same location, count, role, content, view, crop target, detail target, and live-action photographic style.
 - Use the original sheet as the sheet annotation text source of truth and placement reference.
 - If source sheet annotation text is unreadable, report that before claiming exact restoration.
 - If sheet annotation text generation degrades the character, rerun with less sheet annotation text or reserve text cleanup for Stage 4.
+- If sheet annotation text generation changes 외형 동등성 or the Character Appearance Lock, fail this stage even when text is more readable.
 - If sheet annotation text generation changes layout, character content, in-image costume/prop typography, any non-text image-slot content, or the photoreal style of any image slot, fail this stage and retry with stronger "sheet annotation text-only edit; do not redraw non-text slots" language.
 
 ## Quality Check
@@ -106,8 +112,9 @@ Pass only when:
 - The character still looks photographic and live-action.
 - Layout, panel positions, view groups, image-slot count, slot meanings, non-text graphics, in-image costume/prop typography, and character content match the self-approved text-free sheet and original inventory.
 - Every image slot matches the approved text-free photoreal image set in location, count, role, content, view, crop target, detail target, and live-action photographic style.
+- 외형 동등성 still matches the approved text-free sheet and Character Appearance Lock: apparent age, body proportions, face shape, expression intensity, silhouette, posture, and same-character impression are unchanged.
 - No image slot was redrawn, replaced, or regressed into illustration, anime, line-art, CGI, 3D render, or semi-realistic painting.
 - Sheet annotation text and labels are readable enough for the user's target.
 - Graphic elements support the sheet without overpowering the character.
 
-If text is the only remaining problem and the approved photoreal image set is unchanged, hand the image to Stage 4 instead of regenerating the whole sheet. If layout, character, slot count, slot content, or image-slot photoreal style changed, retry Stage 3 as a stricter text-only pass.
+If text is the only remaining problem and the approved photoreal image set plus Character Appearance Lock are unchanged, hand the image to Stage 4 instead of regenerating the whole sheet. If layout, character, 외형 동등성, slot count, slot content, or image-slot photoreal style changed, retry Stage 3 as a stricter text-only pass.

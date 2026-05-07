@@ -7,11 +7,11 @@ description: Refine a stage 1 text-free character sheet that still looks too ani
 
 ## Overview
 
-Use this stage after a text-free, layout-locked base exists but still carries 2D, CGI, 3D render, game asset, plastic skin, or overly polished AI traits. The goal is stronger real-camera realism without weakening the original expression, design identity, sheet-annotation-free state, in-image costume/prop typography, or source-sheet structure.
+Use this stage after a text-free, layout-locked base exists but still carries 2D, CGI, 3D render, game asset, plastic skin, or overly polished AI traits. The goal is stronger real-camera realism without weakening the original expression, Character Appearance Lock, design identity, sheet-annotation-free state, in-image costume/prop typography, or source-sheet structure.
 
 ## Inputs
 
-Use the latest stage 1 image as input. Include `structure-inventory.md` when available, and include the original 2D sheet only if it helps preserve identity or costume details.
+Use the latest stage 1 image as input. Include `structure-inventory.md` and its Character Appearance Lock when available, and include the original 2D sheet only if it helps preserve identity or costume details.
 
 ## Prompt
 
@@ -49,6 +49,11 @@ Use this prompt as the stage instruction:
 - 원본의 표정과 감정 전달력은 유지할 것
 - 감정 표현이 약해지지 않게 할 것
 
+외형 락은 유지:
+- Character Appearance Lock의 apparent age/maturity, height/stature impression, body type and body proportions, head-to-body ratio, silhouette, posture, face shape, eye shape, brow shape, nose/mouth/lip traits, hair silhouette, expression intensity, emotional/personality impression은 그대로 유지
+- 실사감을 높이더라도 나이대가 성숙해지거나, 얼굴형이 바뀌거나, 체형/키감이 달라지거나, 부드러운 인상이 강한 배우/모델 인상으로 바뀌면 안 됨
+- 과한 뷰티 보정, 성숙화, 강한 모델/배우화는 외형 동등성 실패로 간주
+
 중요:
 - 원본 시트 기반 레이아웃은 절대 변경하지 말 것
 - 패널 배치, 뷰 개수, 디테일 컷 위치, 빈 시트 주석 영역, 콜아웃 선, 컬러칩, 비문자 그래픽 장식은 그대로 유지할 것
@@ -56,7 +61,7 @@ Use this prompt as the stage instruction:
 - 둘 이상의 슬롯을 하나로 합치거나, 슬롯을 생략하거나, 같은 이미지를 반복해 다른 슬롯을 대체하지 말 것
 - 새 시트 주석 텍스트, 가짜 주석 문자, 임의 라벨, 번호, 캡션을 만들지 말 것
 - 입력 이미지에 이미 남아 있는 의상/소품/액세서리/패치/자수/각인 타이포그래피는 새 라벨로 취급하지 말고 실사화된 디자인 디테일로 유지할 것
-- 시각적으로 더 “실제 배우 사진 시트”처럼 보이게 조정하되 실사감만 강화할 것
+- 시각적으로 더 “실제 배우 사진 시트”처럼 보이게 조정하되 실사감만 강화할 것. 새로운 배우로 재캐스팅한 것처럼 보이면 실패
 - 디지털 렌더링 느낌보다 다큐멘터리한 라이브액션 참고사진 느낌을 우선
 
 결과물:
@@ -75,10 +80,11 @@ Use this prompt as the stage instruction:
 ## Execution Guidance
 
 - Diagnose the dominant artifact before running: anime proportions, CGI lighting, plastic skin, mannequin body, game-render material, or over-sharpening.
-- Keep layout, panel placement, view count, image-slot count, slot meanings, detail crop positions, empty sheet annotation areas, pose, expression, hair, costume, in-image costume/prop typography, and color relationships stable.
+- Keep layout, panel placement, view count, image-slot count, slot meanings, detail crop positions, empty sheet annotation areas, pose, expression, hair, costume, in-image costume/prop typography, color relationships, and Character Appearance Lock stable.
 - Do not restore sheet annotation text in this stage.
 - Do not add new sheet annotation text, pseudo annotation text, labels, section numbers, or captions.
 - If a candidate improves photorealism but merges, omits, duplicates, or changes the meaning of a source image slot, reject it instead of self-approving.
+- If a candidate improves photorealism but changes apparent age, face shape, expression intensity, body proportions, silhouette, posture, or same-character impression, reject it instead of self-approving.
 - If only one area fails, ask the image tool for localized correction when possible.
 
 ## Quality Check
@@ -89,6 +95,7 @@ Pass only when:
 - Skin and hair include believable natural irregularity.
 - Clothing materials look sewn, worn, folded, and physically lit.
 - The original text-free sheet layout, panel structure, view positions, image-slot count, slot meanings, empty sheet annotation areas, in-image costume/prop typography, and non-text graphics remain stable.
+- 외형 동등성 still passes against the Character Appearance Lock, including apparent age, body proportions, face shape, expression intensity, silhouette, posture, and emotional/personality impression.
 - No readable sheet annotation text, labels, section numbers, captions, or fake annotation typography were added.
 - The face is not overly symmetrical, waxy, doll-like, or plastic.
 

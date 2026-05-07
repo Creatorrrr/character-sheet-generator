@@ -109,10 +109,10 @@ major identity drift in final -> return to draft_generator using approved anchor
 - Use CLI/API image generation only when the user explicitly asks for it or approves that fallback.
 - After both `approvals.spec_approved` and `approvals.blueprint_approved` are true, set `mode` to `post_blueprint_autonomous` by default unless the user explicitly requests fully gated operation.
 - In `post_blueprint_autonomous`, do not pause for anchor, draft, text, composition, or QA approvals. Continue through final delivery using self-review, regeneration, fallback composition, and `image_gen` text repair rules.
-- Treat `attempt_index` as zero-based: `0` is the first draft, `1` and `2` are the two allowed automatic regenerations. Keep `max_auto_regenerations` at `2` unless the user explicitly changes it.
+- Treat `attempt_index` as zero-based: `0` is the initial draft, `1` and `2` are the two allowed automatic regenerations, for 3 total attempts. Keep `max_auto_regenerations` at `2` unless the user explicitly changes it.
 - Append every failed draft review to `review_history` before regenerating.
 - Set `regeneration_reason` to the concrete failed-review issues. Do not use regeneration to change the approved spec, identity lock, blueprint, or panel plan.
-- If `attempt_index` reaches `max_auto_regenerations` and review still does not recommend `approve`, stop automatic regeneration and report the best draft plus remaining blockers.
+- After reviewing `attempt_index: 2`, if the review still does not recommend `approve`, stop automatic regeneration and report the best draft plus remaining blockers.
 - If only text is broken or clipped, route to `image_gen` final composition/text repair instead of regenerating character art. Do not use programmatic text overlay.
 - Stop early in `post_blueprint_autonomous` only for major identity/layout decisions, unapproved CLI/API fallback, configured regeneration budget exhaustion with unresolved blockers, or actions that would discard a user-approved artifact.
 

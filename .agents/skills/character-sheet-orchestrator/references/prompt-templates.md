@@ -8,7 +8,7 @@ Use these templates when the workflow needs image generation, image editing, or 
 - Label image inputs before calling `image_gen`: template layout reference, primary character identity reference, supporting outfit/prop/detail reference, or approved anchor.
 - Save the selected `image_gen` output under the active run folder before reporting it or using it in later stages.
 - Inspect each generated image before approval. If review fails, regenerate with `image_gen` using the same approved spec/blueprint and only the concrete review issues.
-- Auto-regenerate at most 2 times. After that, stop and report the best result plus remaining blockers.
+- Auto-regenerate at most 2 additional times after the initial attempt, for 3 total attempts. After that, stop and report the best result plus remaining blockers.
 - Use built-in `image_gen` for final Korean/body text insertion. Do not use deterministic text overlay tools such as SVG, HTML/CSS, Canvas, Pillow, or Figma for final text placement.
 
 ## Anchor Image
@@ -176,7 +176,7 @@ Regenerate the no-dense-body-copy character sheet using the same approved charac
 
 Attempt:
 - Current attempt index: [attempt_index]
-- Max automatic regenerations: 2
+- Max automatic regenerations: 2 additional regenerations after the initial attempt, for 3 total attempts
 - Regeneration reason: [draft_review.issues or user feedback]
 
 Keep:

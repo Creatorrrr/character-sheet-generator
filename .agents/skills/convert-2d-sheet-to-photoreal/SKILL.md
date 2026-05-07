@@ -83,16 +83,16 @@ Always use autonomous continuation. Keep stage reports factual, but treat them a
 
 Required state:
 
-- `workflow-state.json`: `stage`, `attemptsByStage`, `sourceImage`, `structureInventory`, `appearanceLock`, `latestAcceptedImage`, `latestRejectedImage`, `nextAction`, and `terminalReason`. `appearanceLock` should point to the `Character Appearance Lock` section in `structure-inventory.md`, not to a separate file.
+- `workflow-state.json`: `stage`, `attemptsByStage`, `sourceImage`, `structureInventory`, `appearanceLock`, `latestAcceptedImage`, `latestRejectedImage`, `nextAction`, and `terminalReason`. `attemptsByStage` records the total attempt count per stage, including the initial attempt and retries. `appearanceLock` should point to the `Character Appearance Lock` section in `structure-inventory.md`, not to a separate file.
 - `structure-inventory.md`: original section/panel/slot contract, Character Appearance Lock, and any source details that cannot be verified exactly.
 - `verification-notes.md`: chronological notes with each generated artifact, pass/fail decision, visible defects, and why the next stage or retry was chosen.
 
 Attempt limits:
 
-- Stage 1: maximum 2 attempts.
-- Stage 2: maximum 2 attempts.
-- Stage 3: maximum 2 attempts.
-- Stage 4: maximum 2 attempts.
+- Stage 1: maximum 3 total attempts: initial attempt + up to 2 retries.
+- Stage 2: maximum 3 total attempts: initial attempt + up to 2 retries.
+- Stage 3: maximum 3 total attempts: initial attempt + up to 2 retries.
+- Stage 4: maximum 3 total attempts: initial attempt + up to 2 retries.
 - If a stage still fails after its limit, do not keep regenerating. Finish with a final report that names the failed stage and the human follow-up needed.
 
 Autonomous decisions:
@@ -252,7 +252,7 @@ After each stage, send a concise Korean status report:
 
 Keep reports factual. Do not claim sheet annotation text is readable unless it was inspected. Do not claim a stage passed if obvious visual artifacts remain.
 
-Use the same report shape but label mid-stage checks as `[N단계 자체 검수]` when the next action is decided without user input. Include the chosen next action and the attempt count. Only the final report includes feedback options.
+Use the same report shape but label mid-stage checks as `[N단계 자체 검수]` when the next action is decided without user input. Include the chosen next action and the total stage attempt count. Only the final report includes feedback options.
 
 Final report:
 

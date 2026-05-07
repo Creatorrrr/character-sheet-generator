@@ -154,7 +154,7 @@ Generation tool:
 - Use built-in `image_gen` by default for draft sheet generation and visual regeneration.
 - Attach or reference the approved template, character references, and anchors according to the current tool's available image-input flow.
 - Do not replace `image_gen` with local collage/composition as the first draft path. Use fixed-template visual fallback composition only after template fidelity failure or when the reviewer explicitly routes there; this fallback is for layout recovery, not final text overlay.
-- Record `generation_tool`, `attempt_index`, `max_auto_regenerations`, and `regeneration_reason` in state for each attempt.
+- Record `generation_tool`, `attempt_index`, `max_auto_regenerations`, and `regeneration_reason` in state for each attempt. `max_auto_regenerations: 2` means two additional regenerations after the initial attempt, for 3 total attempts.
 
 Rules:
 
@@ -227,13 +227,13 @@ Output:
 Auto-regeneration policy:
 
 - If `recommended_action` is `approve`, ask the user to approve the draft and advance only in fully gated mode. In `post_blueprint_autonomous`, mark the draft as self-reviewed and continue to copywriting.
-- Treat `attempt_index` as zero-based: `0` is the first draft, `1` and `2` are the two allowed automatic regenerations.
+- Treat `attempt_index` as zero-based: `0` is the initial draft, `1` and `2` are the two allowed automatic regenerations, for 3 total attempts.
 - If `recommended_action` is not `approve` and `attempt_index` is less than `max_auto_regenerations`, do not ask the user yet. Append the review to `review_history`, set `regeneration_reason` to the concrete `issues`, increment `attempt_index`, and run Draft Generator again with built-in `image_gen`.
 - Use only the approved spec, approved blueprint, and current review issues in the regeneration prompt. Do not invent new sections, redesign the character, or change the approved layout.
 - If a `template_locked` draft has good character art but fails template fidelity, do not approve it. First route to stricter `template_locked` `image_gen` regeneration.
 - If template fidelity fails again after a stricter regeneration, recommend `fallback_composition` for the visual layout only: fixed template background and separately generated panel art with `image_gen`. Final text placement must still use built-in `image_gen`.
 - If the only issue is broken text, clipping, typo, or Korean readability, do not regenerate the character art. Route to `image_gen` final composition or `image_gen` text repair.
-- If `attempt_index` reaches `max_auto_regenerations` and the draft still fails, stop regeneration and report the best available draft, the review history, and remaining blockers.
+- After reviewing `attempt_index: 2`, if the draft still fails, stop regeneration and report the best available draft, the review history, and remaining blockers.
 
 ## 7. Copywriter
 

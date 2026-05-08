@@ -18,6 +18,22 @@ DEFAULT_OUTPUT_ROOT = Path("/Users/chasoik/Projects/character-sheet-generator/ou
 CURRENT_STATUSES = {"generation_requested", "imported"}
 PASS_STATUSES = {"inspected_pass", "complete"}
 CHARACTER_CATEGORIES = {"character", "action_pose", "performance_pose", "player_action"}
+NO_CHARACTER_ARTIFACT_LOCK = (
+    "No-character artifact lock: reject people, pedestrians, players, performers, body parts, hands, faces, "
+    "silhouettes, crowds, vehicle silhouettes, poster/window figures, human-like reflections, tiny human-like "
+    "marks, and background street activity anywhere in the frame, including the far background."
+)
+SPATIAL_CONTINUITY_LOCK = (
+    "Spatial continuity lock: preserve fixed landmarks and their relative positions from fixed_layout_notes, "
+    "must_match, continuity anchors, and parent-inspected references. Reject moved landmarks, swapped building "
+    "positions, wrong hoop side, wrong entrance side, wrong bench/wall/gate relationship, and fixed landmark "
+    "relative-position drift."
+)
+PROP_ENVIRONMENT_STATE_LOCK = (
+    "Prop/environment state lock: preserve approved prop shape/material/scale, damage state, time of day, "
+    "weather, set dressing, and camera-critical insert details. Reject changed prop shape/material/scale, wrong "
+    "damage state, wrong time of day/weather, unapproved set dressing drift, unrelated props, and cropped key subject."
+)
 
 
 def now_iso() -> str:
@@ -124,16 +140,28 @@ def strict_empty_environment_negative(contains_character: bool) -> str:
         "unreadable text, accidental subtitles, distorted anatomy, extra fingers, duplicated limbs, "
         "broken reflections, over-smoothed AI texture, waxy skin, plastic objects, "
         "inconsistent location layout, moved landmarks, swapped building positions, wrong hoop side, "
-        "wrong entrance side, wrong time of day, wrong weather, unrelated props, cropped key subject"
+        "wrong entrance side, fixed landmark relative-position drift, wrong time of day/weather, "
+        "wrong damage state, changed prop shape/material/scale, unapproved set dressing drift, "
+        "unrelated props, cropped key subject"
     )
     if contains_character:
         return base
     strict = (
         "people, person, pedestrian, player, performer, character, body, hands, face, silhouette, "
         "crowd, cars, vehicles, bicycles, scooters, posters, signs, window figures, reflections, "
-        "human-shaped marks, tiny vertical marks shaped like people, background street activity"
+        "human-shaped marks, tiny vertical marks shaped like people, tiny human-like marks, "
+        "human-like reflections, poster/window figures, vehicle silhouettes, background street activity"
     )
     return f"{strict}, {base}"
+
+
+def production_source_verification_lock(contains_character: bool) -> str:
+    lines = ["Production source verification lock:"]
+    if not contains_character:
+        lines.append(NO_CHARACTER_ARTIFACT_LOCK)
+    lines.append(SPATIAL_CONTINUITY_LOCK)
+    lines.append(PROP_ENVIRONMENT_STATE_LOCK)
+    return "\n".join(lines)
 
 
 def item_prompt_path(run_dir: Path, item: dict[str, Any]) -> Path:
@@ -201,6 +229,8 @@ def prompt_text(item: dict[str, Any], state: dict[str, Any], run_dir: Path) -> s
             "Known anchor facts from parent inspection:",
             "\n".join(f"- {fact}" for fact in anchor_facts) or "- none",
             "",
+            production_source_verification_lock(contains_character),
+            "",
             "Must match across related shots:",
             "\n".join(f"- {entry}" for entry in must_match) or "- none",
             "",
@@ -247,9 +277,11 @@ def subagent_prompt_text(item: dict[str, Any], state: dict[str, Any], run_dir: P
             f"Continuity anchor: {item.get('continuity_anchor') or 'none'}",
             f"Fixed layout notes: {item.get('fixed_layout_notes') or 'none'}",
             "",
+            production_source_verification_lock(as_bool(item.get("contains_character"))),
+            "",
             "Use image_gen with the assigned prompt and any provided visual references. If character policy is no_character, do not include people, players, performers, body parts, hands, faces, silhouettes, cars, bicycles, scooters, posters, signs, window figures, reflections, or tiny human-like background marks anywhere.",
             "Preserve spatial layout facts from the continuity anchor: fixed landmarks must stay in the same relative positions across shots.",
-            "After generation, inspect the output for scenario fit, prompt fit, spatial continuity, technical quality, text policy, and obvious defects.",
+            "After generation, inspect the output for scenario fit, prompt fit, no-character artifact lock when active, spatial continuity lock, prop/environment state lock, technical quality, text policy, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- worker_status: pass or needs_rerun",

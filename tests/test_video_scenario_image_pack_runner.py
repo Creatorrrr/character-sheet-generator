@@ -270,6 +270,83 @@ class VideoScenarioImagePackRunnerTest(unittest.TestCase):
             self.assertIn("You are generating exactly one image", subagent_prompt)
             self.assertIn("Do not edit state.json", subagent_prompt)
 
+    def test_production_source_verification_lock_is_in_non_character_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+            plan = sample_plan()
+            plan["items"][0]["negative_prompt"] = "avoid muddy court texture"
+            plan["items"][0]["must_match"] = [
+                "사람처럼 읽히는 작은 세로 형상 금지",
+                "고정 랜드마크 상대 위치 유지",
+                "소품 형태/재질/손상 상태 유지",
+            ]
+            plan_file = run_dir / "plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4")
+            state = json.loads((run_dir / "state.json").read_text())
+            anchor = next(item for item in state["items"] if item["id"] == "001-court-master")
+            prompt = Path(anchor["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(anchor["artifact_paths"]["subagent_prompt"]).read_text(encoding="utf-8")
+
+            for text in (prompt, subagent_prompt):
+                self.assertIn("Production source verification lock:", text)
+                self.assertIn("No-character artifact lock:", text)
+                self.assertIn("tiny human-like marks", text)
+                self.assertIn("human-like reflections", text)
+                self.assertIn("poster/window figures", text)
+                self.assertIn("vehicle silhouettes", text)
+                self.assertIn("background street activity", text)
+                self.assertIn("Spatial continuity lock:", text)
+                self.assertIn("moved landmarks", text)
+                self.assertIn("swapped building positions", text)
+                self.assertIn("fixed landmark relative-position drift", text)
+                self.assertIn("Prop/environment state lock:", text)
+                self.assertIn("changed prop shape/material/scale", text)
+                self.assertIn("wrong damage state", text)
+                self.assertIn("wrong time of day/weather", text)
+                self.assertIn("unapproved set dressing drift", text)
+
+            self.assertIn("Hoop far/right, gate and bench left", prompt)
+            self.assertIn("사람처럼 읽히는 작은 세로 형상 금지", prompt)
+            self.assertIn("avoid muddy court texture", prompt)
+            self.assertIn("people, person, pedestrian", prompt)
+            self.assertIn("tiny human-like marks", prompt)
+
+    def test_character_allowed_items_keep_spatial_and_prop_verification_without_no_character_ban(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+            plan = {
+                "scenario_title": "Character Allowed Insert",
+                "items": [
+                    {
+                        **base_item("001-actor-mark", "001-actor-mark.png", category="character"),
+                        "contains_character": True,
+                        "purpose": "Approved character blocking reference.",
+                        "prompt": "Approved performer standing on the marked court position.",
+                    }
+                ],
+            }
+            plan_file = run_dir / "plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4")
+            state = json.loads((run_dir / "state.json").read_text())
+            item = state["items"][0]
+            prompt = Path(item["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(item["artifact_paths"]["subagent_prompt"]).read_text(encoding="utf-8")
+
+            for text in (prompt, subagent_prompt):
+                self.assertIn("Character policy: explicit_character_allowed", text)
+                self.assertIn("Production source verification lock:", text)
+                self.assertIn("Spatial continuity lock:", text)
+                self.assertIn("Prop/environment state lock:", text)
+                self.assertIn("changed prop shape/material/scale", text)
+                self.assertNotIn("Do not include people, pedestrians", text)
+                self.assertNotIn("No-character artifact lock:", text)
+
     def test_report_summarizes_completion_and_reruns_in_korean(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = self.init_run(Path(tmp))

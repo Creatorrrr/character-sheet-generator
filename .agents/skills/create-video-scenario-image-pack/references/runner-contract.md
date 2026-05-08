@@ -28,7 +28,11 @@ Approved plans use this shape:
       "continuity_anchor": "",
       "fixed_layout_notes": "Hoop far/right; gate and bench camera-left; blank masonry wall behind hoop.",
       "camera_view": "wide establishing view",
-      "must_match": ["no people, cars, silhouettes, or readable text"],
+      "must_match": [
+        "no tiny human-like marks, cars, silhouettes, or readable text",
+        "fixed landmark relative positions stay consistent",
+        "approved prop shape/material/damage state stays consistent"
+      ],
       "prompt": "Photoreal cinematic production reference of an empty sunset basketball court...",
       "negative_prompt": "",
       "dependencies": [],
@@ -102,14 +106,24 @@ Run:
 python3 "$RUNNER" inspect-batch-pass --manifest <manifest.json>
 ```
 
-Use `rerun` instead of passing if any strict no-character or spatial-continuity rule fails.
+Use `rerun` instead of passing if any strict no-character, spatial-continuity, or prop/environment state rule fails. These checks are independent reject criteria, not just technical quality notes.
+
+## Production Source Verification Lock
+
+The runner injects this verification contract into prompt and subagent prompt files:
+
+- No-character artifact lock: for `contains_character=false`, reject tiny human-like marks, human-like reflections, poster/window figures, vehicle silhouettes, background street activity, and any person/body/face/hand/silhouette/crowd-like artifact anywhere in the frame.
+- Spatial continuity lock: preserve fixed landmarks from `fixed_layout_notes`, `must_match`, `continuity_anchor`, and parent-inspected references. Reject moved landmarks, swapped building positions, wrong hoop side, wrong entrance side, wrong bench/wall/gate relationship, and fixed landmark relative-position drift.
+- Prop/environment state lock: preserve approved prop shape/material/scale, damage state, time of day, weather, set dressing, and camera-critical insert details. Reject changed prop shape/material/scale, wrong damage state, wrong time of day/weather, unapproved set dressing drift, unrelated props, and cropped key subject.
+
+If `contains_character=true`, the no-character artifact lock is not enforced, but spatial continuity and prop/environment state locks still apply.
 
 ## Strict Negative Prompt
 
 For non-character outputs, the runner adds:
 
 ```text
-people, person, pedestrian, player, performer, character, body, hands, face, silhouette, crowd, cars, vehicles, bicycles, scooters, posters, signs, window figures, reflections, human-shaped marks, tiny vertical marks shaped like people, background street activity, low resolution, watermark, random logo, caption text, storyboard panel labels, unreadable text, accidental subtitles, distorted anatomy, extra fingers, duplicated limbs, broken reflections, over-smoothed AI texture, waxy skin, plastic objects, inconsistent location layout, moved landmarks, swapped building positions, wrong hoop side, wrong entrance side, wrong time of day, wrong weather, unrelated props, cropped key subject
+people, person, pedestrian, player, performer, character, body, hands, face, silhouette, crowd, cars, vehicles, bicycles, scooters, posters, signs, window figures, reflections, human-shaped marks, tiny vertical marks shaped like people, tiny human-like marks, human-like reflections, poster/window figures, vehicle silhouettes, background street activity, low resolution, watermark, random logo, caption text, storyboard panel labels, unreadable text, accidental subtitles, distorted anatomy, extra fingers, duplicated limbs, broken reflections, over-smoothed AI texture, waxy skin, plastic objects, inconsistent location layout, moved landmarks, swapped building positions, wrong hoop side, wrong entrance side, fixed landmark relative-position drift, wrong time of day/weather, wrong damage state, changed prop shape/material/scale, unapproved set dressing drift, unrelated props, cropped key subject
 ```
 
 ## Rerun Hints

@@ -64,6 +64,7 @@ Do not use the video closeup pack runner; that runner belongs to a different wor
 - Prefer categories: `location_master`, `location_view`, `set_detail`, `prop`, `vehicle`, `insert`, `vfx_plate`, `mood_key`, `spatial_layout`, `continuity_reference`.
 - Create one `location_master` or `spatial_layout` continuity anchor per major place before dependent details.
 - Use `spatial_group`, `continuity_anchor`, `fixed_layout_notes`, `camera_view`, `must_match`, and `dependencies` for spatial continuity.
+- Write `must_match` and `fixed_layout_notes` as verification locks: no tiny human-like marks for non-character outputs, fixed landmark relative positions, approved prop shape/material/scale, damage state, time of day, weather, and set dressing.
 
 ## Strict No-Character Policy
 
@@ -72,6 +73,16 @@ Unless the user explicitly approves character-bearing outputs, reject people and
 Fail and rerun if the image includes pedestrians, players, body parts, hands, faces, silhouettes, crowds, cars, vehicles, bicycles, scooters, posters, signage, window figures, reflections, or tiny vertical marks that read as human figures.
 
 For empty locations, prefer closed-off or simplified backgrounds: blank masonry walls, fence mesh, empty pavement, sky, and stable landmarks. This avoids repeated background silhouette failures.
+
+## Production Source Verification
+
+Treat these as independent rerun criteria, not just technical quality notes:
+
+- No-character artifact lock: for `contains_character=false`, reject tiny human-like marks, human-like reflections, poster/window figures, vehicle silhouettes, background street activity, and any person/body/face/hand/silhouette/crowd-like artifact anywhere in the frame.
+- Spatial continuity lock: preserve fixed landmarks from `fixed_layout_notes`, `must_match`, `continuity_anchor`, and parent-inspected references. Reject moved landmarks, swapped building positions, wrong hoop side, wrong entrance side, wrong bench/wall/gate relationship, and fixed landmark relative-position drift.
+- Prop/environment state lock: preserve approved prop shape/material/scale, damage state, time of day, weather, set dressing, and camera-critical insert details. Reject changed prop shape/material/scale, wrong damage state, wrong time of day/weather, unapproved set dressing drift, unrelated props, and cropped key subject.
+
+If `contains_character=true`, only the people/character ban is relaxed. Spatial continuity and prop/environment state verification still apply.
 
 ## Approval Format
 
@@ -94,6 +105,11 @@ Before generation, present:
 - 공간 그룹: ...
 - 기준 레이아웃/앵커: ...
 - 고정 랜드마크: ...
+
+비캐릭터/공간/소품 검수 기준:
+- 사람처럼 읽히는 작은 세로 형상, 반사 인물, 포스터/창문 속 인물, 차량 실루엣, 배경 활동 금지
+- 고정 랜드마크 상대 위치 유지
+- 소품 형태/재질/크기, 손상 상태, 시간대/날씨, 세트드레싱 유지
 
 승인 후 진행 방식:
 - 최대 4개씩 서브에이전트 병렬 생성

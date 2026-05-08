@@ -33,7 +33,7 @@ Ask for missing inputs only when identity cannot be inferred. If the user reques
 
 ## Resumable Runner Contract
 
-Use `[스킬 경로]/scripts/video_pack_runner.py` for this workflow. `[스킬 경로]` means the directory that contains this `SKILL.md`, not the checkout root. The root `scripts/video_pack_runner.py` path remains a compatibility shim. The runner exists because Codex image generation may end the turn immediately after an `image_gen` call. Do not rely on the same turn continuing after image generation.
+Use `[스킬 경로]/scripts/video_pack_runner.py` for this workflow. `[스킬 경로]` means the directory that contains this `SKILL.md`, not the checkout root. The runner exists because Codex image generation may end the turn immediately after an `image_gen` call. Do not rely on the same turn continuing after image generation.
 
 Set the skill directory before running examples:
 

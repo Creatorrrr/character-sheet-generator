@@ -15,7 +15,6 @@ RUNNER = (
     / "scripts"
     / "video_pack_runner.py"
 )
-ROOT_SHIM = REPO_ROOT / "scripts" / "video_pack_runner.py"
 
 
 def run_cli(*args, cwd):
@@ -39,17 +38,6 @@ def run_cli_raw(*args, cwd):
 
 
 class VideoPackRunnerTest(unittest.TestCase):
-    def test_root_shim_help_dispatches_to_skill_runner(self):
-        result = subprocess.run(
-            [sys.executable, str(ROOT_SHIM), "--help"],
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-
-        self.assertIn("usage:", result.stdout)
-        self.assertIn("init", result.stdout)
-
     def test_init_creates_full_queue_and_reuses_incomplete_run_for_same_source(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

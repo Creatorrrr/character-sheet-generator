@@ -15,7 +15,6 @@ RUNNER = (
     / "scripts"
     / "character_closeup_pack_runner.py"
 )
-ROOT_SHIM = REPO_ROOT / "scripts" / "character_closeup_pack_runner.py"
 
 
 def run_cli(*args, cwd):
@@ -39,17 +38,6 @@ def run_cli_raw(*args, cwd):
 
 
 class CharacterCloseupPackRunnerTest(unittest.TestCase):
-    def test_root_shim_help_dispatches_to_skill_runner(self):
-        result = subprocess.run(
-            [sys.executable, str(ROOT_SHIM), "--help"],
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-
-        self.assertIn("usage:", result.stdout)
-        self.assertIn("init", result.stdout)
-
     def test_init_creates_core_queue_and_reuses_same_source_preset_and_style(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

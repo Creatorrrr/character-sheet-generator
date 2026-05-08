@@ -13,7 +13,7 @@ Do not generate images before the user approves the exact source list.
 
 ## Runner
 
-Use `[스킬 경로]/scripts/video_scenario_image_pack_runner.py` for this workflow. `[스킬 경로]` means the directory that contains this `SKILL.md`, not the checkout root. The root `scripts/video_scenario_image_pack_runner.py` path remains a compatibility shim.
+Use `[스킬 경로]/scripts/video_scenario_image_pack_runner.py` for this workflow. `[스킬 경로]` means the directory that contains this `SKILL.md`, not the checkout root.
 
 ```bash
 SKILL_DIR=".agents/skills/create-video-scenario-image-pack"
@@ -21,7 +21,7 @@ RUNNER="$SKILL_DIR/scripts/video_scenario_image_pack_runner.py"
 python3 "$RUNNER" <command>
 ```
 
-Do not use `scripts/video_pack_runner.py`; that runner belongs to a different video closeup workflow.
+Do not use the video closeup pack runner; that runner belongs to a different workflow.
 
 ## Workflow
 

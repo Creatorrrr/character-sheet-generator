@@ -1,13 +1,13 @@
 ---
 name: create-comic-storyboard-pack
-description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through three verified stages: page storyboard/layout, sketch/ink line art, and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with multi-panel page layouts, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, and parent inspection."
+description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with multi-panel page layouts, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, and parent inspection."
 ---
 
 # Create Comic Storyboard Pack
 
 ## Overview
 
-Convert a story outline, plot, or scenario into a resumable Korean comic-book page pack. First extract and report a page plan in Korean for user approval. After approval, generate complete pages in three ordered image stages: `storyboard`, `sketch_ink`, then `finish`.
+Convert a story outline, plot, or scenario into a resumable Korean comic-book page pack. First extract and report a page plan in Korean for user approval. After approval, generate complete pages in two ordered image stages: `storyboard_sketch_ink`, then `finish`.
 
 Use Codex built-in `image_gen`; do not call external image APIs. Do not generate any image before the user approves the exact page plan.
 
@@ -100,12 +100,13 @@ Use this approval format:
 - 사용 대사: 만화 타이밍과 분위기에 맞게 각색하여 기록
 
 승인 후 진행 방식:
-- 1단계: 페이지 콘티 storyboard
-- 2단계: 스케치/펜선 sketch_ink
-- 3단계: 톤/채색/마무리 finish
+- 1단계: 콘티/스케치/펜선 storyboard_sketch_ink
+- 2단계: 톤/채색/마무리 finish
 - 각 단계 최대 4페이지씩 서브에이전트 병렬 생성
 - 각 서브에이전트 1차 검수
 - 부모 세션 최종 검수
+- 모든 페이지의 1단계 부모 검수 통과 전에는 2단계를 시작하지 않음
+- 2단계는 1단계 생성 이미지를 필수 입력/구조 참조로 사용
 - 실패 페이지 rerun 후 다음 배치 진행
 ```
 
@@ -204,42 +205,41 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 Import each worker result:
 
 ```bash
-python3 "$RUNNER" import --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
+python3 "$RUNNER" import --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard_sketch_ink --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
 ```
 
 Parent inspection:
 
 ```bash
-python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --note "<parent inspection note>"
-python3 "$RUNNER" rerun --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --note "<reason>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard_sketch_ink --note "<parent inspection note>"
+python3 "$RUNNER" rerun --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard_sketch_ink --note "<reason>"
 python3 "$RUNNER" batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
 
-Use the same commands with `--stage sketch_ink` and `--stage finish` as the workflow advances.
+Use the same commands with `--stage finish` after every `storyboard_sketch_ink` page passes parent inspection.
 
 State rules:
 
 - `approve-plan` is the only transition from approval-gated planning into generation-ready state.
 - `approve-plan` rejects `references` and `reference_paths` under `output/`.
-- Stages must run in order: `storyboard`, then `sketch_ink`, then `finish`.
+- Stages must run in order: `storyboard_sketch_ink`, then `finish`.
 - `next-batch --limit 4` reserves at most four eligible pages from the current stage and writes one prompt file per page under `prompts/<stage>/`.
 - Do not reserve a new batch while any page stage is still `generation_requested` or `imported`.
 - A later stage is eligible only after every page in the previous stage is parent-inspected as `inspected_pass` or marked `complete`.
+- Stage pipelining is not allowed: do not start `finish` for any page until every page has passed `storyboard_sketch_ink`.
+- `finish` requires the parent-inspected `storyboard_sketch_ink` image as visual input and structure reference.
 - Page dependencies, when present, must pass in the current stage before the dependent page can be reserved.
 - Subagent inspection is advisory. Store it through `import`, but only the parent session may run `inspect-pass`.
 - If a generated page fails parent inspection, run `rerun`; the rerun is prioritized before new pending pages in that same stage.
-- Treat the pack as complete only when every page is `inspected_pass` or `complete` in all three stages.
+- Treat the pack as complete only when every page is `inspected_pass` or `complete` in both stages.
 
-## Three Stage Rules
+## Two Stage Rules
 
-1. `storyboard`
-   Generate a rough but readable full comic page. Prioritize page layout, panel count, gutters, reading flow, speech/SFX placement, beat clarity, action blocking, and spatial logic.
+1. `storyboard_sketch_ink`
+   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize page layout, panel count, gutters, reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, and ink line clarity.
 
-2. `sketch_ink`
-   Use the parent-inspected storyboard page as the structure reference. Generate clean sketch and ink line art while preserving page layout, panel count, text placement, character blocking, props, movement direction, and continuity.
-
-3. `finish`
-   Use the parent-inspected sketch/ink page as the structure reference. Add tone, color if requested, lighting, shadows, final lettering, SFX, captions, and cleanup without changing page layout or action logic.
+2. `finish`
+   Use the parent-inspected `storyboard_sketch_ink` page as the required visual input and structure reference. Add tone, color if requested, lighting, shadows, final lettering, SFX, captions, and cleanup without changing page layout, panel count, text placement, character/object blocking, movement direction, or action logic.
 
 ## Parallel Generation Rules
 
@@ -267,7 +267,7 @@ Run folder: <run-dir>
 Story/scenario file: <run-dir>/scenario.md
 Approved plan: <run-dir>/approved_storyboard_plan.json
 Assigned page: <filename-or-id>
-Stage: <storyboard|sketch_ink|finish>
+Stage: <storyboard_sketch_ink|finish>
 Prompt file: <prompt-file>
 Batch id: <batch-id>
 Default source folder: /Users/chasoik/Projects/character-sheet-generator/sources/
@@ -297,8 +297,8 @@ Inspect every imported page before marking it passed. Check:
 - Source/reference data came from user-provided paths or `sources/`, not from `output/` generated artifacts.
 - Composition, character blocking, props, setting, and continuity match the plan.
 - Character/object positions, motion direction, ball/projectile paths, gaze direction, and cause-effect movement are plausible.
-- `sketch_ink` preserves the inspected storyboard page structure.
-- `finish` preserves the inspected sketch/ink page structure.
+- `storyboard_sketch_ink` contains the approved page layout, cut structure, lettering placement, sketch structure, and ink lines.
+- `finish` uses and preserves the inspected `storyboard_sketch_ink` page structure.
 - Watermarks, random logos, unrelated captions, garbled lettering, and random typography are absent.
 - Characters, hands, faces, props, perspective, and key action do not contain obvious defects.
 - The generated output is mapped to the correct page filename and stage.
@@ -316,7 +316,7 @@ After each batch, report in Korean:
 - 기본 참고 폴더: ...
 - 참고 제외 폴더: output/
 - 상태 파일: ...
-- 현재 단계: storyboard | sketch_ink | finish
+- 현재 단계: storyboard_sketch_ink | finish
 - 승인된 페이지 수: ...
 - 이번 병렬 그룹: ...
 - worker 검수 결과: ...

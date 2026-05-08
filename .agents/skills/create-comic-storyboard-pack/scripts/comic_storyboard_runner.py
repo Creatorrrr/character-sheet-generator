@@ -15,23 +15,19 @@ WORKFLOW = "create-comic-storyboard-pack"
 REPO_ROOT = Path("/Users/chasoik/Projects/character-sheet-generator")
 DEFAULT_SOURCE_ROOT = REPO_ROOT / "sources"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output"
+STORYBOARD_SKETCH_INK_STAGE = "storyboard_sketch_ink"
+FINISH_STAGE = "finish"
 STAGES = [
     {
-        "id": "storyboard",
-        "label": "storyboard",
-        "dir": "01_storyboard",
-        "purpose": "comic page storyboard, panel layout, dialogue/SFX placement pass",
+        "id": STORYBOARD_SKETCH_INK_STAGE,
+        "label": "storyboard/sketch/ink",
+        "dir": "01_storyboard_sketch_ink",
+        "purpose": "comic page storyboard, panel layout, dialogue/SFX placement, sketch, and ink line pass",
     },
     {
-        "id": "sketch_ink",
-        "label": "sketch/ink",
-        "dir": "02_sketch_ink",
-        "purpose": "clean sketch and ink line pass for the approved page layout",
-    },
-    {
-        "id": "finish",
+        "id": FINISH_STAGE,
         "label": "tone/color/finish",
-        "dir": "03_finish",
+        "dir": "02_finish",
         "purpose": "tone, color, lettering, and final polish pass",
     },
 ]
@@ -110,22 +106,46 @@ def stage_meta(stage_id: str) -> dict[str, str]:
     raise SystemExit(f"Unknown stage: {stage_id}")
 
 
-def build_stage_states() -> dict[str, dict[str, Any]]:
+def blank_stage_state() -> dict[str, Any]:
     return {
-        stage_id: {
-            "status": "pending",
-            "attempts": 0,
-            "rerun_pending": False,
-            "batch_id": "",
-            "prompt_file": "",
-            "output_path": "",
-            "generated_source": "",
-            "worker_status": "",
-            "worker_note": "",
-            "parent_note": "",
-        }
-        for stage_id in STAGE_IDS
+        "status": "pending",
+        "attempts": 0,
+        "rerun_pending": False,
+        "batch_id": "",
+        "prompt_file": "",
+        "output_path": "",
+        "generated_source": "",
+        "worker_status": "",
+        "worker_note": "",
+        "parent_note": "",
     }
+
+
+def build_stage_states() -> dict[str, dict[str, Any]]:
+    return {stage_id: blank_stage_state() for stage_id in STAGE_IDS}
+
+
+def normalize_stage_record(stage: dict[str, Any], page_id: str, stage_id: str) -> None:
+    for key, value in blank_stage_state().items():
+        stage.setdefault(key, value)
+    if stage["status"] not in VALID_STATUSES:
+        raise SystemExit(f"Invalid stage status for {page_id}:{stage_id}: {stage['status']}")
+
+
+def migrate_legacy_stage_records(stages: dict[str, Any]) -> None:
+    if STORYBOARD_SKETCH_INK_STAGE not in stages:
+        legacy_sketch = stages.get("sketch_ink")
+        if isinstance(legacy_sketch, dict) and legacy_sketch.get("status") in PASS_STATUSES:
+            stages[STORYBOARD_SKETCH_INK_STAGE] = dict(legacy_sketch)
+        else:
+            stages[STORYBOARD_SKETCH_INK_STAGE] = blank_stage_state()
+
+    if FINISH_STAGE not in stages:
+        stages[FINISH_STAGE] = blank_stage_state()
+
+    for stage_id in list(stages.keys()):
+        if stage_id not in STAGE_IDS:
+            del stages[stage_id]
 
 
 def normalize_state(state: dict[str, Any]) -> None:
@@ -133,6 +153,7 @@ def normalize_state(state: dict[str, Any]) -> None:
         state["pages"] = legacy_panels_to_pages({"panels": state.get("panels", [])})
     state.setdefault("source_root", str(DEFAULT_SOURCE_ROOT))
     state.setdefault("excluded_source_roots", [str(DEFAULT_OUTPUT_ROOT)])
+    state["stage_order"] = STAGE_IDS
     state["source_references"] = validate_reference_paths(state.get("source_references", []))
     state.setdefault("pages", [])
     for page in state.get("pages", []):
@@ -144,20 +165,10 @@ def normalize_state(state: dict[str, Any]) -> None:
         page.setdefault("motion_checks", [])
         page.setdefault("must_match", [])
         stages = page.setdefault("stages", {})
+        migrate_legacy_stage_records(stages)
         for stage_id in STAGE_IDS:
             stage = stages.setdefault(stage_id, {})
-            stage.setdefault("status", "pending")
-            stage.setdefault("attempts", 0)
-            stage.setdefault("rerun_pending", False)
-            stage.setdefault("batch_id", "")
-            stage.setdefault("prompt_file", "")
-            stage.setdefault("output_path", "")
-            stage.setdefault("generated_source", "")
-            stage.setdefault("worker_status", "")
-            stage.setdefault("worker_note", "")
-            stage.setdefault("parent_note", "")
-            if stage["status"] not in VALID_STATUSES:
-                raise SystemExit(f"Invalid stage status for {page.get('id')}:{stage_id}: {stage['status']}")
+            normalize_stage_record(stage, page.get("id"), stage_id)
 
 
 def load_state(run_dir: Path) -> dict[str, Any]:
@@ -244,7 +255,26 @@ def prior_stage_reference(run_dir: Path, page: dict[str, Any], stage_id: str) ->
     if not prior:
         return "none"
     path = stage_output_path(run_dir, page, prior)
+    if stage_id == FINISH_STAGE:
+        marker = "required visual input / structure reference from storyboard_sketch_ink"
+        return f"{path} ({marker})" if path.exists() else f"{path} ({marker}; not found yet)"
     return str(path) if path.exists() else f"{path} (not found yet)"
+
+
+def assert_required_prior_stage_outputs_exist(run_dir: Path, pages: list[dict[str, Any]], stage_id: str) -> None:
+    if stage_id != FINISH_STAGE:
+        return
+    missing = []
+    for page in pages:
+        path = stage_output_path(run_dir, page, STORYBOARD_SKETCH_INK_STAGE)
+        if not path.exists():
+            missing.append(f"{page['filename']} requires {path}")
+    if missing:
+        details = "; ".join(missing)
+        raise SystemExit(
+            "Finish stage requires the parent-inspected storyboard_sketch_ink image as input before reservation: "
+            f"{details}"
+        )
 
 
 def current_blockers(state: dict[str, Any]) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
@@ -274,23 +304,19 @@ def page_sort_key(page: dict[str, Any], stage_id: str) -> tuple[int, int, str]:
 
 
 def stage_instruction(stage_id: str) -> str:
-    if stage_id == "storyboard":
+    if stage_id == STORYBOARD_SKETCH_INK_STAGE:
         return (
-            "Create a rough but readable Korean comic-book page storyboard. Show a full page with "
-            "multiple panels, gutters, panel size variation, reading order, speech balloon placement, "
-            "SFX placement, captions where useful, and clear action blocking."
+            "Create the combined Korean comic-book page storyboard, sketch, and ink pass. Show a full "
+            "page with multiple panels, gutters, varied panel sizes, reading order, speech balloon "
+            "placement, SFX placement, captions where useful, clear action blocking, and clean ink lines."
         )
-    if stage_id == "sketch_ink":
+    if stage_id == FINISH_STAGE:
         return (
-            "Create the clean sketch and ink line pass for the approved comic page. Preserve the page "
-            "layout, panel count, reading order, speech/SFX placement, character blocking, props, "
-            "motion direction, and spatial continuity."
-        )
-    if stage_id == "finish":
-        return (
-            "Create the final Korean comic-book page using the approved sketch/ink image as structure. "
-            "Add tones, color if requested, lighting, shadows, final lettering, speech balloons, SFX, "
-            "short captions, and cleanup without changing page layout or action logic."
+            "Create the final Korean comic-book page using the required parent-inspected "
+            "storyboard_sketch_ink image as the visual input and structure reference. Add tones, color "
+            "if requested, lighting, shadows, final lettering, speech balloons, SFX, short captions, "
+            "and cleanup without changing page layout, panel count, text placement, character/object "
+            "blocking, motion direction, or action logic."
         )
     raise SystemExit(f"Unknown stage: {stage_id}")
 
@@ -332,6 +358,12 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     spatial_logic_notes = page.get("spatial_logic_notes") or "Keep character, object, prop, and environment positions physically plausible."
     motion_checks = "\n".join(f"- {entry}" for entry in as_list(page.get("motion_checks"))) or "- no impossible motion: thrown, kicked, or shot objects move in the direction implied by body pose and panel action"
     must_match = "\n".join(f"- {entry}" for entry in as_list(page.get("must_match"))) or "- preserve approved page layout, panel count, action direction, and character/object continuity"
+    prior_stage_use_requirement = (
+        "Use the prior-stage image above as the required visual input / structure reference. "
+        "Do not redraw the page from scratch or change the approved panel layout."
+        if stage_id == FINISH_STAGE
+        else "No prior-stage image is used for storyboard_sketch_ink; generate the approved page structure, sketch, and ink pass from the approved plan and allowed source references."
+    )
     negative = page.get("negative_prompt") or (
         "low resolution, watermark, random logo, unrelated captions, garbled lettering, unreadable "
         "speech balloons, duplicated limbs, broken perspective, impossible object motion, ball moving "
@@ -352,6 +384,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Stage instruction:",
             stage_instruction(stage_id),
+            "",
+            "Prior-stage use requirement:",
+            prior_stage_use_requirement,
             "",
             "Page format:",
             "Generate one complete Korean comic-book page image with multiple panels on the same page. Use panel gutters, varied panel sizes, clear reading flow, speech balloons, SFX lettering, and short captions where approved.",
@@ -393,7 +428,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Uses adapted dialogue/SFX/captions from the approved plan, not raw source dialogue by default",
             "- Speech balloons, SFX, and captions are legible and do not cover key art",
             "- Preserves story beat, reading order, composition, and continuity",
-            "- Keeps prior-stage structure unchanged when a prior-stage reference exists",
+            "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
             "- Character/object positions, action direction, object trajectory, and cause-effect motion are physically plausible",
             "- No examples of impossible staging such as a basketball shot where the ball travels behind the shooter",
             "- Has no obvious anatomy, perspective, crop, object, or continuity defects",
@@ -419,7 +454,9 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Do not reserve images before approve-plan.",
         f"- Use {state.get('source_root') or DEFAULT_SOURCE_ROOT} as the default source data folder when the user did not specify source/reference paths.",
         f"- Do not use {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])} or any output/ subtree as source/reference data.",
-        "- Generate stages in order: storyboard, sketch_ink, finish.",
+        "- Generate stages in order: storyboard_sketch_ink, finish.",
+        "- Do not reserve finish until every page has passed storyboard_sketch_ink parent inspection.",
+        "- Finish must use the parent-inspected storyboard_sketch_ink image as the required visual input / structure reference.",
         "- Reserve at most four pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",
         "- Approved adapted dialogue, SFX, and short captions are included in the page image.",
@@ -729,6 +766,7 @@ def command_next_batch(args: argparse.Namespace) -> None:
 
     limit = min(max(args.limit, 1), 4)
     selected = candidates[:limit]
+    assert_required_prior_stage_outputs_exist(run_dir, selected, stage_id)
     batch_id = f"batch-{len(state.get('batches', [])) + 1:03d}"
     for page in selected:
         stage = stage_state(page, stage_id)

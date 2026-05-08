@@ -87,6 +87,27 @@ def sample_plan():
     }
 
 
+def web_reference(run_dir, item_id="001-court-master", ref_id="court-ref"):
+    ref_dir = run_dir / "web_references" / item_id
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    ref_path = ref_dir / f"{ref_id}.jpg"
+    ref_path.write_bytes(b"web reference image")
+    return {
+        "id": ref_id,
+        "local_path": str(ref_path),
+        "source_url": "https://example.com/images/court-ref.jpg",
+        "page_url": "https://example.com/court-reference",
+        "source_title": "Empty court reference",
+        "reference_purpose": "Court surface, fence, and wall material reference",
+        "observed_facts": [
+            "weathered asphalt texture",
+            "chain-link fence behind the court",
+            "blank masonry wall behind the hoop",
+        ],
+        "usage_note": "Use only factual material and layout cues; do not copy composition, watermark, logo, or style.",
+    }
+
+
 class VideoScenarioImagePackRunnerTest(unittest.TestCase):
     def init_run(self, root):
         scenario = root / "scenario.md"
@@ -346,6 +367,105 @@ class VideoScenarioImagePackRunnerTest(unittest.TestCase):
                 self.assertIn("changed prop shape/material/scale", text)
                 self.assertNotIn("Do not include people, pedestrians", text)
                 self.assertNotIn("No-character artifact lock:", text)
+
+    def test_web_references_are_preserved_and_included_in_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+            plan = sample_plan()
+            reference = web_reference(run_dir)
+            plan["items"][0]["web_references"] = [reference]
+            plan_file = run_dir / "plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+            state = json.loads((run_dir / "state.json").read_text())
+            anchor = next(item for item in state["items"] if item["id"] == "001-court-master")
+            self.assertEqual(anchor["web_references"][0]["id"], "court-ref")
+            self.assertEqual(anchor["web_references"][0]["source_url"], "https://example.com/images/court-ref.jpg")
+            manifest = json.loads((run_dir / "web_reference_manifest.json").read_text())
+            self.assertEqual(manifest["items"][0]["web_references"][0]["id"], "court-ref")
+
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4")
+            state = json.loads((run_dir / "state.json").read_text())
+            anchor = next(item for item in state["items"] if item["id"] == "001-court-master")
+            prompt = Path(anchor["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(anchor["artifact_paths"]["subagent_prompt"]).read_text(encoding="utf-8")
+
+            for text in (prompt, subagent_prompt):
+                self.assertIn("Web reference policy:", text)
+                self.assertIn(str(Path(reference["local_path"])), text)
+                self.assertIn("https://example.com/images/court-ref.jpg", text)
+                self.assertIn("https://example.com/court-reference", text)
+                self.assertIn("weathered asphalt texture", text)
+                self.assertIn("Use only factual material and layout cues", text)
+                self.assertIn("do not copy composition, watermark, logo, or style", text)
+
+    def test_dependency_output_and_web_reference_are_both_reference_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+            plan = sample_plan()
+            reference = web_reference(run_dir, item_id="002-hoop-detail", ref_id="hoop-ref")
+            plan["items"][1]["web_references"] = [reference]
+            plan_file = run_dir / "plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4")
+            self.import_item(run_dir, "001-court-master.png")
+            self.inspect_pass(run_dir, "001-court-master.png", "anchor pass")
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "1")
+            state = json.loads((run_dir / "state.json").read_text())
+            hoop = next(item for item in state["items"] if item["id"] == "002-hoop-detail")
+            prompt = Path(hoop["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(hoop["artifact_paths"]["subagent_prompt"]).read_text(encoding="utf-8")
+
+            self.assertIn(str(run_dir / "001-court-master.png"), prompt)
+            self.assertIn(str(Path(reference["local_path"])), prompt)
+            self.assertIn(str(run_dir / "001-court-master.png"), subagent_prompt)
+            self.assertIn(str(Path(reference["local_path"])), subagent_prompt)
+
+    def test_approve_plan_rejects_missing_or_out_of_run_web_references(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+            plan = sample_plan()
+            plan["items"][0]["web_references"] = [
+                {
+                    **web_reference(run_dir),
+                    "id": "missing-ref",
+                    "local_path": str(run_dir / "web_references" / "001-court-master" / "missing.jpg"),
+                }
+            ]
+            plan_file = run_dir / "missing-reference-plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            missing = run_cli_raw("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("Web reference file not found", missing.stderr)
+
+            outside = Path(tmp) / "outside-reference.jpg"
+            outside.write_bytes(b"outside")
+            plan["items"][0]["web_references"] = [{**web_reference(run_dir), "id": "outside-ref", "local_path": str(outside)}]
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            outside_result = run_cli_raw("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+
+            self.assertNotEqual(outside_result.returncode, 0)
+            self.assertIn("must be under the current run web_references folder", outside_result.stderr)
+
+    def test_write_plan_template_includes_web_reference_example(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+
+            run_cli("write-plan-template", "--run-dir", str(run_dir))
+            template = json.loads((run_dir / "approved_image_plan.template.json").read_text())
+
+            self.assertIn("web_references", template["items"][0])
+            reference = template["items"][0]["web_references"][0]
+            self.assertIn("local_path", reference)
+            self.assertIn("source_url", reference)
+            self.assertIn("observed_facts", reference)
+            self.assertIn("usage_note", reference)
 
     def test_report_summarizes_completion_and_reruns_in_korean(self):
         with tempfile.TemporaryDirectory() as tmp:

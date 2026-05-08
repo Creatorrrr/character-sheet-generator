@@ -34,6 +34,11 @@ PROP_ENVIRONMENT_STATE_LOCK = (
     "weather, set dressing, and camera-critical insert details. Reject changed prop shape/material/scale, wrong "
     "damage state, wrong time of day/weather, unapproved set dressing drift, unrelated props, and cropped key subject."
 )
+WEB_REFERENCE_POLICY = (
+    "Web reference policy: use only web_references explicitly registered for this current run. Treat them as factual "
+    "references for shape, spatial layout, material, landmarks, mood, prop state, weather, and time of day. Do not copy "
+    "the source image composition, watermark, logo, people, artist-specific style, brand styling, or copyrighted visual expression."
+)
 
 
 def now_iso() -> str:
@@ -60,6 +65,14 @@ def as_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return [str(value)]
+
+
+def path_is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -109,6 +122,7 @@ def normalize_state(state: dict[str, Any]) -> None:
         item.setdefault("artifact_paths", {})
         item.setdefault("batch_id", "")
         item.setdefault("prompt_file", "")
+        item.setdefault("web_references", [])
         item.setdefault("worker_status", item.get("worker_result", {}).get("status", ""))
         item.setdefault("worker_note", item.get("worker_result", {}).get("note", ""))
         item.setdefault("parent_note", item.get("parent_inspection", {}).get("note", ""))
@@ -164,6 +178,83 @@ def production_source_verification_lock(contains_character: bool) -> str:
     return "\n".join(lines)
 
 
+def normalize_web_references(raw_refs: Any, run_dir: Path, item_id: str) -> list[dict[str, Any]]:
+    if raw_refs in (None, ""):
+        return []
+    if not isinstance(raw_refs, list):
+        raise SystemExit(f"Item {item_id} web_references must be a list.")
+    normalized = []
+    allowed_root = run_dir / "web_references"
+    for index, raw in enumerate(raw_refs, start=1):
+        if not isinstance(raw, dict):
+            raise SystemExit(f"Item {item_id} web reference {index} is not an object.")
+        ref_id = str(raw.get("id") or f"web-reference-{index}").strip()
+        local_path = str(raw.get("local_path") or "").strip()
+        if not local_path:
+            raise SystemExit(f"Item {item_id} web reference {ref_id} needs local_path.")
+        ref_path = Path(local_path).expanduser()
+        if not ref_path.is_absolute():
+            ref_path = run_dir / ref_path
+        if not path_is_under(ref_path, allowed_root):
+            raise SystemExit(
+                f"Web reference {ref_id} for item {item_id} must be under the current run web_references folder: {ref_path}"
+            )
+        if not ref_path.exists():
+            raise SystemExit(f"Web reference file not found for item {item_id}: {ref_path}")
+        normalized.append(
+            {
+                "id": ref_id,
+                "local_path": str(ref_path),
+                "source_url": str(raw.get("source_url") or ""),
+                "page_url": str(raw.get("page_url") or ""),
+                "source_title": str(raw.get("source_title") or ""),
+                "reference_purpose": str(raw.get("reference_purpose") or ""),
+                "observed_facts": as_list(raw.get("observed_facts")),
+                "usage_note": str(raw.get("usage_note") or ""),
+            }
+        )
+    return normalized
+
+
+def web_reference_prompt_lines(item: dict[str, Any]) -> str:
+    lines = [WEB_REFERENCE_POLICY]
+    refs = item.get("web_references") or []
+    if not refs:
+        lines.append("- none registered")
+        return "\n".join(lines)
+    for ref in refs:
+        facts = "; ".join(as_list(ref.get("observed_facts"))) or "none"
+        lines.append(
+            "- "
+            f"id={ref.get('id', '')}; "
+            f"local_path={ref.get('local_path', '')}; "
+            f"source_url={ref.get('source_url', '')}; "
+            f"page_url={ref.get('page_url', '')}; "
+            f"source_title={ref.get('source_title', '')}; "
+            f"reference_purpose={ref.get('reference_purpose', '')}; "
+            f"observed_facts={facts}; "
+            f"usage_note={ref.get('usage_note', '')}"
+        )
+    return "\n".join(lines)
+
+
+def write_web_reference_manifest(run_dir: Path, state: dict[str, Any]) -> None:
+    write_json_atomic(
+        run_dir / "web_reference_manifest.json",
+        {
+            "scenario_title": state.get("title", ""),
+            "items": [
+                {
+                    "id": item.get("id", ""),
+                    "filename": item.get("filename", ""),
+                    "web_references": item.get("web_references", []),
+                }
+                for item in state.get("items", [])
+            ],
+        },
+    )
+
+
 def item_prompt_path(run_dir: Path, item: dict[str, Any]) -> Path:
     return run_dir / "prompts" / f"{Path(item['filename']).stem}.prompt.txt"
 
@@ -190,6 +281,14 @@ def matching_reference_paths(run_dir: Path, item: dict[str, Any], state: dict[st
         output = run_dir / dep_item["filename"]
         if output.exists():
             refs.append(str(output))
+    for ref in item.get("web_references", []):
+        local_path = ref.get("local_path")
+        if not local_path:
+            continue
+        path = Path(local_path)
+        if not path.exists():
+            raise SystemExit(f"Web reference file not found for item {item.get('id', '')}: {path}")
+        refs.append(str(path))
     return refs
 
 
@@ -230,6 +329,9 @@ def prompt_text(item: dict[str, Any], state: dict[str, Any], run_dir: Path) -> s
             "\n".join(f"- {fact}" for fact in anchor_facts) or "- none",
             "",
             production_source_verification_lock(contains_character),
+            "",
+            "Web references:",
+            web_reference_prompt_lines(item),
             "",
             "Must match across related shots:",
             "\n".join(f"- {entry}" for entry in must_match) or "- none",
@@ -279,6 +381,9 @@ def subagent_prompt_text(item: dict[str, Any], state: dict[str, Any], run_dir: P
             "",
             production_source_verification_lock(as_bool(item.get("contains_character"))),
             "",
+            "Web references:",
+            web_reference_prompt_lines(item),
+            "",
             "Use image_gen with the assigned prompt and any provided visual references. If character policy is no_character, do not include people, players, performers, body parts, hands, faces, silhouettes, cars, bicycles, scooters, posters, signs, window figures, reflections, or tiny human-like background marks anywhere.",
             "Preserve spatial layout facts from the continuity anchor: fixed landmarks must stay in the same relative positions across shots.",
             "After generation, inspect the output for scenario fit, prompt fit, no-character artifact lock when active, spatial continuity lock, prop/environment state lock, technical quality, text policy, and obvious defects.",
@@ -319,6 +424,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  continuity_anchor: {item.get('continuity_anchor') or 'none'}",
                 f"  camera_view: {item.get('camera_view') or 'unspecified'}",
                 f"  must_match: {must_match}",
+                f"  web_references: {len(item.get('web_references', []))}",
                 f"  purpose: {item.get('purpose', '')}",
                 f"  dependencies: {deps}",
                 f"  status: {item.get('status', 'pending')}",
@@ -336,7 +442,7 @@ def command_init(args: argparse.Namespace) -> None:
     output_root = Path(args.output_root) if args.output_root else DEFAULT_OUTPUT_ROOT
     run_dir = Path(args.run_dir) if args.run_dir else output_root / f"{slug}-video-scenario-image-pack-{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
-    for child in ("prompts", "subagent_prompts", "worker_notes", "parent_notes"):
+    for child in ("prompts", "subagent_prompts", "worker_notes", "parent_notes", "web_references"):
         (run_dir / child).mkdir()
 
     scenario_path = run_dir / "scenario.md"
@@ -363,13 +469,14 @@ def command_init(args: argparse.Namespace) -> None:
         "notes": ["Generation is blocked until approve-plan is run after user approval."],
     }
     save_state(run_dir, state)
+    write_web_reference_manifest(run_dir, state)
     print(f"RUN_DIR: {run_dir}")
     print(f"STATE: {run_dir / 'state.json'}")
     print(f"SCENARIO: {scenario_path}")
     print("NEXT: Ask the user to approve the extracted image-source list, then run approve-plan.")
 
 
-def normalize_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
+def normalize_plan(plan: dict[str, Any], run_dir: Path) -> list[dict[str, Any]]:
     raw_items = plan.get("items")
     if not isinstance(raw_items, list) or not raw_items:
         raise SystemExit("Plan must contain a non-empty items list.")
@@ -420,6 +527,7 @@ def normalize_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
                 "fixed_layout_notes": str(raw.get("fixed_layout_notes") or ""),
                 "camera_view": str(raw.get("camera_view") or ""),
                 "must_match": as_list(raw.get("must_match")),
+                "web_references": normalize_web_references(raw.get("web_references"), run_dir, item_id),
                 "prompt": prompt,
                 "negative_prompt": str(raw.get("negative_prompt") or ""),
                 "dependencies": as_list(raw.get("dependencies")),
@@ -477,7 +585,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     else:
         raise SystemExit("Use --plan-file or --plan-json.")
 
-    items = normalize_plan(plan)
+    items = normalize_plan(plan, run_dir)
     valid_ids = {item["id"] for item in items}
     for item in items:
         missing = [dep for dep in item.get("dependencies", []) if dep not in valid_ids]
@@ -492,6 +600,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     state["anchor_facts"] = {}
     state.setdefault("notes", []).append(f"Approved {len(items)} image sources at {state['approved_at']}.")
     write_json_atomic(run_dir / "approved_image_plan.json", {"scenario_title": state["title"], "items": items})
+    write_web_reference_manifest(run_dir, state)
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
     print(f"APPROVED_ITEMS: {len(items)}")
@@ -753,6 +862,13 @@ def command_report(args: argparse.Namespace) -> None:
     rerun_count = sum(1 for item in state.get("items", []) if item.get("rerun_pending") or item.get("rerun_history"))
     blockers = current_blockers(state)
     spatial_groups = sorted({item.get("spatial_group") for item in state.get("items", []) if item.get("spatial_group")})
+    web_reference_count = sum(len(item.get("web_references", [])) for item in state.get("items", []))
+    missing_web_references = [
+        ref.get("local_path", "")
+        for item in state.get("items", [])
+        for ref in item.get("web_references", [])
+        if ref.get("local_path") and not Path(ref.get("local_path")).exists()
+    ]
     batches = state.get("batches", [])
     current_batch = batches[-1]["id"] if batches else "없음"
     print("[영상 시나리오 이미지 팩 진행 결과]")
@@ -762,6 +878,8 @@ def command_report(args: argparse.Namespace) -> None:
     print(f"- 승인된 이미지 수: {total}")
     print("- 캐릭터 포함 정책: 기본값 캐릭터/인물 미포함")
     print(f"- 공간 일관성 기준: {', '.join(spatial_groups) if spatial_groups else '없음'}")
+    print(f"- 웹 참고 자료: {web_reference_count}개")
+    print(f"- 웹 참고 자료 누락: {', '.join(missing_web_references) if missing_web_references else '없음'}")
     print(f"- 이번 병렬 그룹: {current_batch}")
     print(f"- worker 검수 결과: 상태 파일의 worker_result 참조")
     print(f"- 부모 검수 결과: {inspected}/{total} inspected_pass")
@@ -789,6 +907,18 @@ def command_write_plan_template(args: argparse.Namespace) -> None:
                 "fixed_layout_notes": "Record stable landmark positions here.",
                 "camera_view": "wide establishing view",
                 "must_match": ["no people, cars, silhouettes, or readable text"],
+                "web_references": [
+                    {
+                        "id": "location-material-reference",
+                        "local_path": "web_references/001-location-master/location-material-reference.jpg",
+                        "source_url": "https://example.com/reference-image.jpg",
+                        "page_url": "https://example.com/reference-page",
+                        "source_title": "Reference page title",
+                        "reference_purpose": "Factual reference for material, spatial layout, landmarks, mood, or prop state.",
+                        "observed_facts": ["weathered wall material", "empty pavement texture"],
+                        "usage_note": "Use only factual cues; do not copy composition, watermark, logo, people, brand styling, or artist-specific style.",
+                    }
+                ],
                 "prompt": "Photoreal cinematic production reference of an empty location...",
                 "negative_prompt": "",
                 "dependencies": [],

@@ -33,6 +33,18 @@ Approved plans use this shape:
         "fixed landmark relative positions stay consistent",
         "approved prop shape/material/damage state stays consistent"
       ],
+      "web_references": [
+        {
+          "id": "court-surface-reference",
+          "local_path": "web_references/001-sunset-street-court-master/court-surface-reference.jpg",
+          "source_url": "https://example.com/images/court-surface-reference.jpg",
+          "page_url": "https://example.com/court-reference",
+          "source_title": "Reference page title",
+          "reference_purpose": "Factual reference for surface material, fence layout, landmark placement, or mood.",
+          "observed_facts": ["weathered asphalt texture", "chain-link fence behind court"],
+          "usage_note": "Use only factual cues; do not copy composition, watermark, logo, people, brand styling, or artist-specific style."
+        }
+      ],
       "prompt": "Photoreal cinematic production reference of an empty sunset basketball court...",
       "negative_prompt": "",
       "dependencies": [],
@@ -42,7 +54,19 @@ Approved plans use this shape:
 }
 ```
 
-The runner normalizes `continuity_anchor` into `dependencies`, validates dependency ids, and stores prompt, worker, parent, rerun, and artifact metadata in `state.json`.
+The runner normalizes `continuity_anchor` into `dependencies`, validates dependency ids, validates `web_references`, and stores prompt, worker, parent, rerun, and artifact metadata in `state.json`.
+
+## Web Reference Collection
+
+The parent session performs web search and download before `approve-plan`; the runner does not call a search engine. Downloaded reference files must live under:
+
+```text
+<run-dir>/web_references/<item-id>/<reference-id>.<ext>
+```
+
+Each plan item may include `web_references`. The runner requires each `local_path` to exist under the current run `web_references/` folder, preserves source/provenance fields, writes `web_reference_manifest.json`, and injects web reference paths plus observed facts into prompt and subagent prompt files.
+
+Web references are factual references only. Use them for shape, spatial layout, material, landmarks, mood, prop state, weather, and time of day. Do not copy source image composition, watermark, logo, people, brand styling, artist-specific style, or copyrighted visual expression.
 
 ## Batch Commands
 
@@ -58,7 +82,7 @@ Each reserved item writes:
 - `prompts/<item>.prompt.txt`
 - `subagent_prompts/<item>.subagent.txt`
 
-Use the subagent prompt as the spawn task text. Do not ask subagents to edit `state.json`.
+Use the subagent prompt as the spawn task text. Do not ask subagents to edit `state.json`. Reference paths include parent-inspected dependency outputs plus registered item `web_references`.
 
 If spawning with `fork_context=true`, omit subagent role fields such as `agent_type` or `role`. Do not pass `worker`, `default`, or `explorer` as a role/type field. Treat `worker_status` and `worker_note` only as import-result labels, and describe generation plus first-pass inspection behavior in the prompt text.
 

@@ -38,6 +38,18 @@ VALID_STATUSES = {"pending", "generation_requested", "imported", "inspected_pass
 WORKER_STATUS_VALUES = {"pass", "needs_rerun"}
 REVIEW_STATUSES = {"pending", "passed", "needs_rerun"}
 REVIEW_CLI_STATUSES = {"pass", "needs_rerun"}
+DEFAULT_PACING_NOTES = (
+    "Use 2-4 panels by default with spacious cinematic pacing. Split pages instead of "
+    "compressing emotional turns, action setup/result, gaze shifts, or quiet pauses into one crowded page."
+)
+DEFAULT_PANEL_SHAPE_NOTES = (
+    "Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, "
+    "open or borderless panels, inset panels, partial overlaps, and wide negative space are allowed when "
+    "reading order and continuity stay clear."
+)
+DEFAULT_NEGATIVE_SPACE_NOTES = (
+    "Leave breathing room around faces, hands, key action, speech balloons, SFX, and quiet mood beats."
+)
 
 
 def now_iso() -> str:
@@ -191,6 +203,9 @@ def normalize_state(state: dict[str, Any]) -> None:
         page["references"] = validate_reference_paths(page.get("references", []))
         page.setdefault("panels", [])
         page.setdefault("page_dialogue_notes", "")
+        page.setdefault("pacing_notes", DEFAULT_PACING_NOTES)
+        page.setdefault("panel_shape_notes", DEFAULT_PANEL_SHAPE_NOTES)
+        page.setdefault("negative_space_notes", DEFAULT_NEGATIVE_SPACE_NOTES)
         page.setdefault("spatial_logic_notes", "")
         page.setdefault("motion_checks", [])
         page.setdefault("must_match", [])
@@ -374,7 +389,8 @@ def stage_instruction(stage_id: str) -> str:
     if stage_id == STORYBOARD_SKETCH_INK_STAGE:
         return (
             "Create the combined Korean comic-book page storyboard, sketch, and ink pass. Show a full "
-            "page with multiple panels, gutters, varied panel sizes, reading order, speech balloon "
+            "page with 2-4 panels by default, spacious cinematic pacing, experimental freeform panel "
+            "design, gutters or open borders where appropriate, clear reading order, speech balloon "
             "placement, SFX placement, captions where useful, clear action blocking, and clean ink lines."
         )
     if stage_id == FINISH_STAGE:
@@ -382,8 +398,8 @@ def stage_instruction(stage_id: str) -> str:
             "Create the final Korean comic-book page using the required parent-inspected "
             "storyboard_sketch_ink image as the visual input and structure reference. Add tones, color "
             "if requested, lighting, shadows, final lettering, speech balloons, SFX, short captions, "
-            "and cleanup without changing page layout, panel count, text placement, character/object "
-            "blocking, motion direction, or action logic."
+            "and cleanup without changing page layout, panel count, freeform panel shapes, negative "
+            "space, text placement, character/object blocking, motion direction, or action logic."
         )
     raise SystemExit(f"Unknown stage: {stage_id}")
 
@@ -422,6 +438,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
         "Adapt source dialogue to fit comic timing, mood, panel rhythm, and balloon space. "
         "Do not copy source dialogue verbatim unless the approved plan explicitly says to preserve it."
     )
+    pacing_notes = page.get("pacing_notes") or DEFAULT_PACING_NOTES
+    panel_shape_notes = page.get("panel_shape_notes") or DEFAULT_PANEL_SHAPE_NOTES
+    negative_space_notes = page.get("negative_space_notes") or DEFAULT_NEGATIVE_SPACE_NOTES
     spatial_logic_notes = page.get("spatial_logic_notes") or "Keep character, object, prop, and environment positions physically plausible."
     motion_checks = "\n".join(f"- {entry}" for entry in as_list(page.get("motion_checks"))) or "- no impossible motion: thrown, kicked, or shot objects move in the direction implied by body pose and panel action"
     must_match = "\n".join(f"- {entry}" for entry in as_list(page.get("must_match"))) or "- preserve approved page layout, panel count, action direction, and character/object continuity"
@@ -456,10 +475,15 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             prior_stage_use_requirement,
             "",
             "Page format:",
-            "Generate one complete Korean comic-book page image with multiple panels on the same page. Use panel gutters, varied panel sizes, clear reading flow, speech balloons, SFX lettering, and short captions where approved.",
+            "Generate one complete Korean comic-book page image with 2-4 panels by default and spacious cinematic pacing. Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, open or borderless panels, inset panels, partial overlaps, and wide negative space are allowed when reading order and continuity stay clear. Avoid a uniform rectangular grid unless the user requested it or the scene clearly benefits from it.",
             "",
             "Page layout brief:",
             page.get("layout_brief") or page.get("visual_brief") or page.get("prompt") or "",
+            "",
+            "Page pacing and panel shape policy:",
+            pacing_notes,
+            panel_shape_notes,
+            negative_space_notes,
             "",
             "Page dialogue and lettering policy:",
             page_dialogue_notes,
@@ -499,7 +523,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Worker inspection checklist:",
             "- Matches this exact page and stage",
-            "- Contains multiple panels on one page with clear Korean comic-book layout",
+            "- Uses 2-4 panels by default with spacious cinematic pacing unless the approved plan explicitly justifies five or more panels",
+            "- Uses experimental freeform panel design; do not reject diagonal, asymmetric, open, borderless, inset, overlapping, or negative-space layouts when reading order and continuity are clear",
+            "- Rejects overcrowded pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room",
             "- Uses adapted dialogue/SFX/captions from the approved plan, not raw source dialogue by default",
             "- Speech balloons, SFX, and captions are legible and do not cover key art",
             "- Preserves story beat, reading order, composition, and continuity",
@@ -534,6 +560,8 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Generate stages in order: storyboard_sketch_ink, finish.",
         "- Do not reserve finish until every page has passed storyboard_sketch_ink parent inspection.",
         "- Finish must use the parent-inspected storyboard_sketch_ink image as the required visual input / structure reference.",
+        "- Use 2-4 panels by default with spacious cinematic pacing; five or more panels need clear story justification.",
+        "- Use experimental freeform panel design by default and avoid unintentional uniform rectangular grids.",
         "- Reserve at most four pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
@@ -570,6 +598,9 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  layout: {page.get('layout_brief') or ''}",
                 f"  reading_order: {page.get('reading_order') or state.get('reading_order') or 'unspecified'}",
                 f"  panel_count: {len(page.get('panels', []))}",
+                f"  pacing: {page.get('pacing_notes') or DEFAULT_PACING_NOTES}",
+                f"  panel_shapes: {page.get('panel_shape_notes') or DEFAULT_PANEL_SHAPE_NOTES}",
+                f"  negative_space: {page.get('negative_space_notes') or DEFAULT_NEGATIVE_SPACE_NOTES}",
                 f"  dialogue_notes: {page.get('page_dialogue_notes') or ''}",
                 f"  spatial_logic: {page.get('spatial_logic_notes') or ''}",
                 f"  dependencies: {', '.join(page.get('dependencies', [])) or 'none'}",
@@ -705,6 +736,9 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "layout_brief": str(raw.get("layout_brief") or raw.get("visual_brief") or ""),
         "reading_order": str(raw.get("reading_order") or ""),
         "page_dialogue_notes": str(raw.get("page_dialogue_notes") or ""),
+        "pacing_notes": str(raw.get("pacing_notes") or DEFAULT_PACING_NOTES),
+        "panel_shape_notes": str(raw.get("panel_shape_notes") or DEFAULT_PANEL_SHAPE_NOTES),
+        "negative_space_notes": str(raw.get("negative_space_notes") or DEFAULT_NEGATIVE_SPACE_NOTES),
         "spatial_logic_notes": str(raw.get("spatial_logic_notes") or ""),
         "motion_checks": as_list(raw.get("motion_checks")),
         "must_match": as_list(raw.get("must_match")),

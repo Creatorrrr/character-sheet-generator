@@ -1,6 +1,6 @@
 ---
 name: create-comic-storyboard-pack
-description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with multi-panel page layouts, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
+description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with spacious 2-4 panel page layouts, experimental freeform panel shapes, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
 ---
 
 # Create Comic Storyboard Pack
@@ -47,9 +47,12 @@ Ask for missing inputs only when the story outline or scenario cannot define pag
 
 Extract comic-book pages that serve the story outline or scenario, not every moment or minor beat.
 
-- Default output is one complete page image containing multiple panels, gutters, varied panel sizes, speech balloons, SFX lettering, and short captions when useful.
-- Follow a general Korean comic-book page composition: multiple panels per page, clear reading flow, cinematic framing, readable balloon placement, and balanced black/white or tone/color finish.
-- Merge repeated beats when one page or panel can clearly cover the action.
+- Default output is one complete page image containing 2-4 panels by default, gutters or open borders, varied panel sizes, speech balloons, SFX lettering, and short captions when useful.
+- Follow a spacious cinematic Korean comic-book composition: clear reading flow, readable balloon placement, meaningful pauses, and balanced black/white or tone/color finish.
+- Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, half/full-page panels, borderless or open panels, inset panels, partial overlaps, and wide negative space are allowed when reading order and continuity stay clear.
+- Avoid a generic uniform rectangular grid unless the user asks for it or the scene clearly benefits from a restrained regular layout.
+- Use five or more panels only for montage, comedy timing, quick action chains, or another clear story reason, and state that reason in the approval report.
+- Merge repeated beats when one page or panel can clearly cover the action, but do not over-compress pages; split pages when emotional turns, action setup/result, gaze shifts, or quiet pauses need breathing room.
 - Split pages when the reader needs a new location, time shift, major action sequence, emotional turn, reveal, or scene boundary.
 - Split panels within a page when the reader needs a new beat, reaction, reveal, action change, object insert, or timing pause.
 - Preserve scene references such as `S01`, `S02-S04`, or the user's own scene names.
@@ -91,8 +94,11 @@ Use this approval format:
 - 참고 제외 폴더: /Users/chasoik/Projects/character-sheet-generator/output/
 - 총 페이지 수: ...
 - 페이지당 컷 구성 기준: ...
+- 페이지 호흡/컷 밀도: 기본 2-4컷, 영화적 여백 우선
+- 컷 형태/레이아웃 자유도: 실험적 자유형 컷 구성 허용
+- 5컷 이상 사용 사유: 해당 페이지가 있으면 명시
 
-| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 주요 대사/SFX 각색 | 공간/동선 검수 포인트 |
+| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 주요 대사/SFX 각색 | 공간/동선 검수 포인트 |
 | ... |
 
 텍스트 정책:
@@ -132,8 +138,11 @@ After approval, write an approved plan and import it with the runner:
       "filename": "001-gym-arrival.png",
       "page_no": 1,
       "scene_refs": ["S01"],
-      "layout_brief": "Four-panel page: wide establishing panel, two medium action panels, one close reaction panel.",
+      "layout_brief": "Three-panel cinematic page: one wide borderless establishing panel, one diagonal action panel, one quiet close reaction panel with breathing room.",
       "reading_order": "top-to-bottom, left-to-right within each row",
+      "pacing_notes": "2-4 panels by default; keep this page spacious and cinematic rather than dense.",
+      "panel_shape_notes": "Use experimental freeform composition: borderless wide opening panel, diagonal action panel, and asymmetrical closeup panel.",
+      "negative_space_notes": "Leave quiet negative space around the protagonist's entrance and the final reaction.",
       "page_dialogue_notes": "Rewrite dialogue to sound tense and concise; do not copy source lines verbatim.",
       "spatial_logic_notes": "Hoop remains on the far wall; protagonist enters from foreground-left; basketball moves toward the hoop when shot.",
       "motion_checks": [
@@ -141,7 +150,8 @@ After approval, write an approved plan and import it with the runner:
         "character gaze and body direction point toward the action target"
       ],
       "must_match": [
-        "four panels on one page",
+        "three spacious panels on one page",
+        "experimental freeform panel design remains readable",
         "speech balloons and SFX remain readable",
         "no impossible ball direction"
       ],
@@ -251,11 +261,11 @@ State rules:
 ## Two Stage Rules
 
 1. `storyboard_sketch_ink`
-   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize page layout, panel count, gutters, reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, and ink line clarity.
+   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize 2-4 panel spacious cinematic pacing, experimental freeform panel shapes, clear reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, and ink line clarity. Reject over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room.
    Stage finish review must compare every panel against approved source data and allowed `sources/` references for character, prop, profile, setting, and page-layout consistency, then check same-page and adjacent-page continuity.
 
 2. `finish`
-   Use the parent-inspected `storyboard_sketch_ink` page as the required visual input and structure reference. Add tone, color if requested, lighting, shadows, final lettering, SFX, captions, and cleanup without changing page layout, panel count, text placement, character/object blocking, movement direction, or action logic.
+   Use the parent-inspected `storyboard_sketch_ink` page as the required visual input and structure reference. Add tone, color if requested, lighting, shadows, final lettering, SFX, captions, and cleanup without changing page layout, panel count, freeform panel shapes, negative space, text placement, character/object blocking, movement direction, or action logic.
    Stage finish review must verify that tone/color/final polish did not introduce source-data drift or break continuity from the inspected `storyboard_sketch_ink` images.
 
 ## Parallel Generation Rules
@@ -292,6 +302,8 @@ Excluded source folder: /Users/chasoik/Projects/character-sheet-generator/output
 Prior-stage reference: <path or none>
 Relevant references: <paths or "none">
 Page text policy: include approved adapted dialogue, SFX, and short captions inside speech balloons/caption areas/SFX lettering.
+Page pacing policy: use 2-4 panels by default with spacious cinematic pacing; five or more panels need explicit story justification.
+Panel shape policy: experimental freeform panel shapes are allowed and should not be rejected when reading order and continuity are clear.
 Spatial logic policy: reject impossible positions, object trajectories, or motion direction.
 Source consistency policy: reject drift in character face/body/hair/outfit, props, profile details, setting, landmarks, or page-layout references compared with the approved plan and allowed sources/.
 Panel continuity policy: reject discontinuity across panels or adjacent pages in positions, gaze, action direction, object movement, time flow, speech balloons, SFX, captions, and cause-effect motion.
@@ -311,6 +323,9 @@ Inspect every imported page before marking it passed. Check:
 
 - The image is one complete comic-book page, not a single isolated panel unless the approved page has one panel.
 - The page matches the approved page id, panel count, reading order, layout brief, and current stage.
+- The page uses 2-4 panels by default with spacious cinematic pacing unless the approved plan explicitly justifies five or more panels.
+- Experimental freeform panels are acceptable when reading order and continuity are clear.
+- Over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room must be rejected.
 - Speech balloons, SFX, and captions use approved adapted text and are legible.
 - Source dialogue was adapted for comic timing unless exact preservation was explicitly approved.
 - Source/reference data came from user-provided paths or `sources/`, not from `output/` generated artifacts.

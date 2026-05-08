@@ -173,39 +173,46 @@ Legacy flat `panels` plans are accepted only for compatibility. The runner conve
 
 ## Resumable Runner Contract
 
-Use `scripts/comic_storyboard_runner.py`. The runner keeps state because `image_gen` may end a turn and because subagent results must be mapped back to exact page and stage outputs.
+Use `[스킬 경로]/scripts/comic_storyboard_runner.py`. `[스킬 경로]` means the directory that contains this `SKILL.md`, not the checkout root. The runner keeps state because `image_gen` may end a turn and because subagent results must be mapped back to exact page and stage outputs.
+
+Set the skill directory before running examples:
+
+```bash
+SKILL_DIR=".agents/skills/create-comic-storyboard-pack"
+RUNNER="$SKILL_DIR/scripts/comic_storyboard_runner.py"
+```
 
 Initialize or resume:
 
 ```bash
-python3 scripts/comic_storyboard_runner.py init --title "<story/scenario title>" --scenario <story-or-scenario-file>
-python3 scripts/comic_storyboard_runner.py status --run-dir <run-dir>
+python3 "$RUNNER" init --title "<story/scenario title>" --scenario <story-or-scenario-file>
+python3 "$RUNNER" status --run-dir <run-dir>
 ```
 
 Approve the user-approved page plan:
 
 ```bash
-python3 scripts/comic_storyboard_runner.py approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
+python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
 ```
 
 Reserve the next batch:
 
 ```bash
-python3 scripts/comic_storyboard_runner.py next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 ```
 
 Import each worker result:
 
 ```bash
-python3 scripts/comic_storyboard_runner.py import --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
+python3 "$RUNNER" import --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
 ```
 
 Parent inspection:
 
 ```bash
-python3 scripts/comic_storyboard_runner.py inspect-pass --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --note "<parent inspection note>"
-python3 scripts/comic_storyboard_runner.py rerun --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --note "<reason>"
-python3 scripts/comic_storyboard_runner.py batch-status --run-dir <run-dir> --batch-id <batch-id>
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --note "<parent inspection note>"
+python3 "$RUNNER" rerun --run-dir <run-dir> --item <page-filename-or-id> --stage storyboard --note "<reason>"
+python3 "$RUNNER" batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
 
 Use the same commands with `--stage sketch_ink` and `--stage finish` as the workflow advances.

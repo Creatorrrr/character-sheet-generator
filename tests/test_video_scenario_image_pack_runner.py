@@ -95,17 +95,21 @@ def web_reference(run_dir, item_id="001-court-master", ref_id="court-ref"):
     return {
         "id": ref_id,
         "local_path": str(ref_path),
-        "source_url": "https://example.com/images/court-ref.jpg",
-        "page_url": "https://example.com/court-reference",
-        "source_title": "Empty court reference",
+        "source_url": f"https://example.com/images/{ref_id}.jpg",
+        "page_url": "https://example.com/court-reference" if ref_id == "court-ref" else f"https://example.com/{ref_id}-reference",
+        "source_title": f"Empty court reference {ref_id}",
         "reference_purpose": "Court surface, fence, and wall material reference",
         "observed_facts": [
-            "weathered asphalt texture",
+            f"weathered asphalt texture {ref_id}",
             "chain-link fence behind the court",
             "blank masonry wall behind the hoop",
         ],
         "usage_note": "Use only factual material and layout cues; do not copy composition, watermark, logo, or style.",
     }
+
+
+def web_references(run_dir, item_id="001-court-master", count=3):
+    return [web_reference(run_dir, item_id=item_id, ref_id=f"{item_id}-ref-{index}") for index in range(1, count + 1)]
 
 
 class VideoScenarioImagePackRunnerTest(unittest.TestCase):
@@ -393,12 +397,67 @@ class VideoScenarioImagePackRunnerTest(unittest.TestCase):
 
             for text in (prompt, subagent_prompt):
                 self.assertIn("Web reference policy:", text)
+                self.assertIn("Web reference count: 1", text)
                 self.assertIn(str(Path(reference["local_path"])), text)
                 self.assertIn("https://example.com/images/court-ref.jpg", text)
                 self.assertIn("https://example.com/court-reference", text)
-                self.assertIn("weathered asphalt texture", text)
+                self.assertIn("weathered asphalt texture court-ref", text)
                 self.assertIn("Use only factual material and layout cues", text)
                 self.assertIn("do not copy composition, watermark, logo, or style", text)
+
+    def test_web_reference_search_note_is_preserved_in_state_manifest_and_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+            plan = sample_plan()
+            plan["items"][0]["web_references"] = []
+            plan["items"][0]["web_reference_search_note"] = "검색 실패: 적합한 빈 코트 참고 이미지를 찾지 못함"
+            plan_file = run_dir / "plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+            state = json.loads((run_dir / "state.json").read_text())
+            anchor = next(item for item in state["items"] if item["id"] == "001-court-master")
+            self.assertEqual(anchor["web_reference_search_note"], "검색 실패: 적합한 빈 코트 참고 이미지를 찾지 못함")
+            manifest = json.loads((run_dir / "web_reference_manifest.json").read_text())
+            manifest_item = next(item for item in manifest["items"] if item["id"] == "001-court-master")
+            self.assertEqual(
+                manifest_item["web_reference_search_note"],
+                "검색 실패: 적합한 빈 코트 참고 이미지를 찾지 못함",
+            )
+
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4")
+            state = json.loads((run_dir / "state.json").read_text())
+            anchor = next(item for item in state["items"] if item["id"] == "001-court-master")
+            prompt = Path(anchor["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(anchor["artifact_paths"]["subagent_prompt"]).read_text(encoding="utf-8")
+
+            for text in (prompt, subagent_prompt):
+                self.assertIn("Web reference count: 0", text)
+                self.assertIn("Web reference search note: 검색 실패: 적합한 빈 코트 참고 이미지를 찾지 못함", text)
+                self.assertIn("- none registered", text)
+
+    def test_three_registered_web_references_are_all_included_in_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+            plan = sample_plan()
+            references = web_references(run_dir, count=3)
+            plan["items"][0]["web_references"] = references
+            plan_file = run_dir / "plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4")
+            state = json.loads((run_dir / "state.json").read_text())
+            anchor = next(item for item in state["items"] if item["id"] == "001-court-master")
+            prompt = Path(anchor["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(anchor["artifact_paths"]["subagent_prompt"]).read_text(encoding="utf-8")
+
+            for text in (prompt, subagent_prompt):
+                self.assertIn("Web reference count: 3", text)
+                for reference in references:
+                    self.assertIn(str(Path(reference["local_path"])), text)
+                    self.assertIn(reference["source_url"], text)
+                    self.assertIn(reference["observed_facts"][0], text)
 
     def test_dependency_output_and_web_reference_are_both_reference_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -460,12 +519,37 @@ class VideoScenarioImagePackRunnerTest(unittest.TestCase):
             run_cli("write-plan-template", "--run-dir", str(run_dir))
             template = json.loads((run_dir / "approved_image_plan.template.json").read_text())
 
+            self.assertIn("web_reference_search_note", template["items"][0])
             self.assertIn("web_references", template["items"][0])
-            reference = template["items"][0]["web_references"][0]
-            self.assertIn("local_path", reference)
-            self.assertIn("source_url", reference)
-            self.assertIn("observed_facts", reference)
-            self.assertIn("usage_note", reference)
+            self.assertEqual(len(template["items"][0]["web_references"]), 3)
+            for reference in template["items"][0]["web_references"]:
+                self.assertIn("local_path", reference)
+                self.assertIn("source_url", reference)
+                self.assertIn("observed_facts", reference)
+                self.assertIn("usage_note", reference)
+
+    def test_report_flags_zero_and_below_recommended_web_reference_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = self.init_run(Path(tmp))
+            plan = sample_plan()
+            plan["items"][0]["web_references"] = []
+            plan["items"][0]["web_reference_search_note"] = "검색 실패: 적합한 빈 코트 사진 없음"
+            plan["items"][1]["web_references"] = web_references(run_dir, item_id="002-hoop-detail", count=1)
+            plan["items"][1]["web_reference_search_note"] = "추가 후보는 사람이 포함되어 제외"
+            plan["items"][2]["web_references"] = web_references(run_dir, item_id="003-ball-prop", count=3)
+            plan_file = run_dir / "plan.json"
+            plan_file.write_text(json.dumps(plan), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_file))
+
+            report = run_cli("report", "--run-dir", str(run_dir))
+
+            self.assertIn("웹 참고 자료: 4개", report.stdout)
+            self.assertIn("웹 참고 자료 0개 항목: 001-court-master.png - 검색 실패: 적합한 빈 코트 사진 없음", report.stdout)
+            self.assertIn(
+                "웹 참고 자료 권장 미만(3개 미만): 001-court-master.png (0개), 002-hoop-detail.png (1개)",
+                report.stdout,
+            )
 
     def test_report_summarizes_completion_and_reruns_in_korean(self):
         with tempfile.TemporaryDirectory() as tmp:

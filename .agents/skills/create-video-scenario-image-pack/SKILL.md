@@ -30,7 +30,7 @@ Do not use the video closeup pack runner; that runner belongs to a different wor
    python3 "$RUNNER" init --title "<scenario title>" --scenario <scenario-file>
    ```
 2. Extract and deduplicate useful image sources.
-3. Search the web for real-world references when useful, download approved candidates under `<run-dir>/web_references/<item-id>/`, and record source/provenance plus observed facts.
+3. Search the web for real-world references for every source item on a best-effort basis, download approved candidates under `<run-dir>/web_references/<item-id>/`, and record source/provenance plus observed facts.
 4. Ask for approval in Korean with the source list and web reference collection summary.
 5. After approval, write `approved_image_plan.json` and approve it:
    ```bash
@@ -70,11 +70,13 @@ Do not use the video closeup pack runner; that runner belongs to a different wor
 
 ## Web Reference Collection
 
-When real-world visual grounding would help, the parent session may search the web before approval. Search broadly across public sources for actual places, facilities, props, vehicles, architecture, weather, time of day, surface materials, streets, shops, courts, fields, and environmental details.
+Before approval, the parent session should search the web for every source item on a best-effort basis. Search broadly across public sources for actual places, facilities, props, vehicles, architecture, weather, time of day, surface materials, streets, shops, courts, fields, and environmental details.
+
+Target at least one usable reference image per item; prefer three to five. If no suitable image is found, zero references are allowed, but record the search terms, search intent, rejected candidates, and failure or exclusion reason in `web_reference_search_note`. If fewer than three are usable, also record why the set is below the recommended count. Prefer diverse factual cues over volume: overall spatial layout, surface/material detail, prop/landmark detail, and time-of-day/weather/mood.
 
 Save downloaded reference images under `<run-dir>/web_references/<item-id>/<reference-id>.<ext>` and record them in each plan item as `web_references`. Each entry must include `id`, `local_path`, `source_url`, `page_url`, `source_title`, `reference_purpose`, `observed_facts`, and `usage_note`.
 
-Web references are factual references only. Use them for shape, spatial layout, material, landmarks, mood, prop state, weather, and time of day. Do not copy source image composition, watermark, logo, people, artist-specific style, brand styling, or copyrighted visual expression. The runner validates that registered files exist under the current run's `web_references/` folder and writes `web_reference_manifest.json`.
+Web references are factual references only. Use them for shape, spatial layout, material, landmarks, mood, prop state, weather, and time of day. Do not copy source image composition, watermark, logo, people, artist-specific style, brand styling, or copyrighted visual expression. The runner validates that registered files exist under the current run's `web_references/` folder, preserves `web_reference_search_note`, and writes `web_reference_manifest.json`.
 
 ## Strict No-Character Policy
 
@@ -117,9 +119,11 @@ Before generation, present:
 - 고정 랜드마크: ...
 
 웹 참고 이미지 수집 결과:
+- 항목별 목표: 최소 1개 이상, 권장 3~5개, 검색 실패 시 0개 허용
+- 항목별 수집 수/목표 충족 여부: ...
 - 검색어/검색 의도: ...
-- 수집 이미지 수: ...
 - 선택한 출처 URL: ...
+- 0개 또는 3개 미만 항목과 사유: ...
 - 제외한 후보와 이유: ...
 - 생성에 반영할 관찰 포인트: ...
 

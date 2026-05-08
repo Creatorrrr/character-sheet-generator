@@ -18,6 +18,7 @@ DEFAULT_OUTPUT_ROOT = Path("/Users/chasoik/Projects/character-sheet-generator/ou
 CURRENT_STATUSES = {"generation_requested", "imported"}
 PASS_STATUSES = {"inspected_pass", "complete"}
 CHARACTER_CATEGORIES = {"character", "action_pose", "performance_pose", "player_action"}
+WEB_REFERENCE_RECOMMENDED_MIN = 3
 NO_CHARACTER_ARTIFACT_LOCK = (
     "No-character artifact lock: reject people, pedestrians, players, performers, body parts, hands, faces, "
     "silhouettes, crowds, vehicle silhouettes, poster/window figures, human-like reflections, tiny human-like "
@@ -123,6 +124,7 @@ def normalize_state(state: dict[str, Any]) -> None:
         item.setdefault("batch_id", "")
         item.setdefault("prompt_file", "")
         item.setdefault("web_references", [])
+        item.setdefault("web_reference_search_note", "")
         item.setdefault("worker_status", item.get("worker_result", {}).get("status", ""))
         item.setdefault("worker_note", item.get("worker_result", {}).get("note", ""))
         item.setdefault("parent_note", item.get("parent_inspection", {}).get("note", ""))
@@ -219,6 +221,9 @@ def normalize_web_references(raw_refs: Any, run_dir: Path, item_id: str) -> list
 def web_reference_prompt_lines(item: dict[str, Any]) -> str:
     lines = [WEB_REFERENCE_POLICY]
     refs = item.get("web_references") or []
+    search_note = str(item.get("web_reference_search_note") or "").strip()
+    lines.append(f"Web reference count: {len(refs)}")
+    lines.append(f"Web reference search note: {search_note or 'none'}")
     if not refs:
         lines.append("- none registered")
         return "\n".join(lines)
@@ -247,6 +252,8 @@ def write_web_reference_manifest(run_dir: Path, state: dict[str, Any]) -> None:
                 {
                     "id": item.get("id", ""),
                     "filename": item.get("filename", ""),
+                    "web_reference_count": len(item.get("web_references", [])),
+                    "web_reference_search_note": item.get("web_reference_search_note", ""),
                     "web_references": item.get("web_references", []),
                 }
                 for item in state.get("items", [])
@@ -425,6 +432,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  camera_view: {item.get('camera_view') or 'unspecified'}",
                 f"  must_match: {must_match}",
                 f"  web_references: {len(item.get('web_references', []))}",
+                f"  web_reference_search_note: {item.get('web_reference_search_note') or 'none'}",
                 f"  purpose: {item.get('purpose', '')}",
                 f"  dependencies: {deps}",
                 f"  status: {item.get('status', 'pending')}",
@@ -528,6 +536,7 @@ def normalize_plan(plan: dict[str, Any], run_dir: Path) -> list[dict[str, Any]]:
                 "camera_view": str(raw.get("camera_view") or ""),
                 "must_match": as_list(raw.get("must_match")),
                 "web_references": normalize_web_references(raw.get("web_references"), run_dir, item_id),
+                "web_reference_search_note": str(raw.get("web_reference_search_note") or ""),
                 "prompt": prompt,
                 "negative_prompt": str(raw.get("negative_prompt") or ""),
                 "dependencies": as_list(raw.get("dependencies")),
@@ -863,6 +872,16 @@ def command_report(args: argparse.Namespace) -> None:
     blockers = current_blockers(state)
     spatial_groups = sorted({item.get("spatial_group") for item in state.get("items", []) if item.get("spatial_group")})
     web_reference_count = sum(len(item.get("web_references", [])) for item in state.get("items", []))
+    zero_web_reference_items = [
+        f"{item.get('filename', '')} - {item.get('web_reference_search_note') or '사유 미기록'}"
+        for item in state.get("items", [])
+        if len(item.get("web_references", [])) == 0
+    ]
+    below_recommended_web_reference_items = [
+        f"{item.get('filename', '')} ({len(item.get('web_references', []))}개)"
+        for item in state.get("items", [])
+        if len(item.get("web_references", [])) < WEB_REFERENCE_RECOMMENDED_MIN
+    ]
     missing_web_references = [
         ref.get("local_path", "")
         for item in state.get("items", [])
@@ -879,6 +898,11 @@ def command_report(args: argparse.Namespace) -> None:
     print("- 캐릭터 포함 정책: 기본값 캐릭터/인물 미포함")
     print(f"- 공간 일관성 기준: {', '.join(spatial_groups) if spatial_groups else '없음'}")
     print(f"- 웹 참고 자료: {web_reference_count}개")
+    print(f"- 웹 참고 자료 0개 항목: {', '.join(zero_web_reference_items) if zero_web_reference_items else '없음'}")
+    print(
+        f"- 웹 참고 자료 권장 미만(3개 미만): "
+        f"{', '.join(below_recommended_web_reference_items) if below_recommended_web_reference_items else '없음'}"
+    )
     print(f"- 웹 참고 자료 누락: {', '.join(missing_web_references) if missing_web_references else '없음'}")
     print(f"- 이번 병렬 그룹: {current_batch}")
     print(f"- worker 검수 결과: 상태 파일의 worker_result 참조")
@@ -907,17 +931,38 @@ def command_write_plan_template(args: argparse.Namespace) -> None:
                 "fixed_layout_notes": "Record stable landmark positions here.",
                 "camera_view": "wide establishing view",
                 "must_match": ["no people, cars, silhouettes, or readable text"],
+                "web_reference_search_note": "Search every source item before approval. Target at least 1 web reference; prefer 3-5. If 0 or fewer than 3 are usable, record search terms and exclusion/failure reasons here.",
                 "web_references": [
+                    {
+                        "id": "location-layout-reference",
+                        "local_path": "web_references/001-location-master/location-layout-reference.jpg",
+                        "source_url": "https://example.com/location-layout-reference.jpg",
+                        "page_url": "https://example.com/location-layout-reference",
+                        "source_title": "Location layout reference page",
+                        "reference_purpose": "Factual reference for material, spatial layout, landmarks, mood, or prop state.",
+                        "observed_facts": ["wide empty layout", "stable landmark relationship"],
+                        "usage_note": "Use only factual cues; do not copy composition, watermark, logo, people, brand styling, or artist-specific style.",
+                    },
                     {
                         "id": "location-material-reference",
                         "local_path": "web_references/001-location-master/location-material-reference.jpg",
-                        "source_url": "https://example.com/reference-image.jpg",
-                        "page_url": "https://example.com/reference-page",
-                        "source_title": "Reference page title",
-                        "reference_purpose": "Factual reference for material, spatial layout, landmarks, mood, or prop state.",
+                        "source_url": "https://example.com/location-material-reference.jpg",
+                        "page_url": "https://example.com/location-material-reference",
+                        "source_title": "Location material reference page",
+                        "reference_purpose": "Factual reference for surface and wall material.",
                         "observed_facts": ["weathered wall material", "empty pavement texture"],
                         "usage_note": "Use only factual cues; do not copy composition, watermark, logo, people, brand styling, or artist-specific style.",
-                    }
+                    },
+                    {
+                        "id": "location-mood-reference",
+                        "local_path": "web_references/001-location-master/location-mood-reference.jpg",
+                        "source_url": "https://example.com/location-mood-reference.jpg",
+                        "page_url": "https://example.com/location-mood-reference",
+                        "source_title": "Location mood reference page",
+                        "reference_purpose": "Factual reference for time of day, weather, and mood.",
+                        "observed_facts": ["late afternoon light", "dry clear weather"],
+                        "usage_note": "Use only factual cues; do not copy composition, watermark, logo, people, brand styling, or artist-specific style.",
+                    },
                 ],
                 "prompt": "Photoreal cinematic production reference of an empty location...",
                 "negative_prompt": "",

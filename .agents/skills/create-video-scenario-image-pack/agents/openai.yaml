@@ -1,4 +1,4 @@
 interface:
   display_name: "Video Scenario Image Pack"
   short_description: "Create approved non-character video source packs"
-  default_prompt: "Use $create-video-scenario-image-pack to extract non-character image sources from this video scenario, optionally collect approved web reference images with source/provenance notes, request approval, then generate and verify them with the root scenario runner, strict no-background-people policy, spatial continuity locks, and prop/environment state verification."
+  default_prompt: "Use $create-video-scenario-image-pack to extract non-character image sources from this video scenario, search every source item for web references on a best-effort basis, target at least 1 and prefer 3-5 approved factual references per item, record search notes when 0 or below 3 are usable, request approval, then generate and verify them with the root scenario runner, strict no-background-people policy, spatial continuity locks, and prop/environment state verification."

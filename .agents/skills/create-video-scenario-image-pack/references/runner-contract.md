@@ -33,6 +33,7 @@ Approved plans use this shape:
         "fixed landmark relative positions stay consistent",
         "approved prop shape/material/damage state stays consistent"
       ],
+      "web_reference_search_note": "Search terms: sunset empty outdoor basketball court, weathered asphalt court, chain-link court fence. Target met with 3 factual references; excluded images with visible people, logos, or heavy watermark.",
       "web_references": [
         {
           "id": "court-surface-reference",
@@ -42,6 +43,26 @@ Approved plans use this shape:
           "source_title": "Reference page title",
           "reference_purpose": "Factual reference for surface material, fence layout, landmark placement, or mood.",
           "observed_facts": ["weathered asphalt texture", "chain-link fence behind court"],
+          "usage_note": "Use only factual cues; do not copy composition, watermark, logo, people, brand styling, or artist-specific style."
+        },
+        {
+          "id": "court-landmark-reference",
+          "local_path": "web_references/001-sunset-street-court-master/court-landmark-reference.jpg",
+          "source_url": "https://example.com/images/court-landmark-reference.jpg",
+          "page_url": "https://example.com/court-landmark-reference",
+          "source_title": "Reference page title",
+          "reference_purpose": "Factual reference for hoop, wall, bench, and gate relative positions.",
+          "observed_facts": ["hoop near far side", "bench and gate grouped on one side"],
+          "usage_note": "Use only factual cues; do not copy composition, watermark, logo, people, brand styling, or artist-specific style."
+        },
+        {
+          "id": "court-mood-reference",
+          "local_path": "web_references/001-sunset-street-court-master/court-mood-reference.jpg",
+          "source_url": "https://example.com/images/court-mood-reference.jpg",
+          "page_url": "https://example.com/court-mood-reference",
+          "source_title": "Reference page title",
+          "reference_purpose": "Factual reference for sunset light and dry clear weather.",
+          "observed_facts": ["warm low-angle light", "dry pavement"],
           "usage_note": "Use only factual cues; do not copy composition, watermark, logo, people, brand styling, or artist-specific style."
         }
       ],
@@ -54,17 +75,19 @@ Approved plans use this shape:
 }
 ```
 
-The runner normalizes `continuity_anchor` into `dependencies`, validates dependency ids, validates `web_references`, and stores prompt, worker, parent, rerun, and artifact metadata in `state.json`.
+The runner normalizes `continuity_anchor` into `dependencies`, validates dependency ids, validates `web_references`, and stores prompt, worker, parent, rerun, web reference search notes, and artifact metadata in `state.json`.
 
 ## Web Reference Collection
 
-The parent session performs web search and download before `approve-plan`; the runner does not call a search engine. Downloaded reference files must live under:
+The parent session performs web search and download before `approve-plan`; the runner does not call a search engine. Search every source item on a best-effort basis. Target at least one usable reference image per item and prefer three to five. Zero references are allowed when search fails or all candidates are unsuitable, but the plan should record the search terms, search intent, rejected candidates, and failure/exclusion reason in `web_reference_search_note`.
+
+Downloaded reference files must live under:
 
 ```text
 <run-dir>/web_references/<item-id>/<reference-id>.<ext>
 ```
 
-Each plan item may include `web_references`. The runner requires each `local_path` to exist under the current run `web_references/` folder, preserves source/provenance fields, writes `web_reference_manifest.json`, and injects web reference paths plus observed facts into prompt and subagent prompt files.
+Each plan item may include `web_references` and the optional `web_reference_search_note`. The runner requires each `local_path` to exist under the current run `web_references/` folder, preserves source/provenance fields and search notes, writes `web_reference_manifest.json`, and injects web reference count, search note, paths, and observed facts into prompt and subagent prompt files.
 
 Web references are factual references only. Use them for shape, spatial layout, material, landmarks, mood, prop state, weather, and time of day. Do not copy source image composition, watermark, logo, people, brand styling, artist-specific style, or copyrighted visual expression.
 

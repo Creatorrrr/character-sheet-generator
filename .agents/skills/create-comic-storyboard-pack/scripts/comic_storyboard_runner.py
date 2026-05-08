@@ -76,6 +76,19 @@ DEFAULT_COMIC_EFFECTS_NOTES = (
     "Use comic effect lines only when they serve action, emotion, impact, speed, or eye guidance. Speed lines, "
     "focus lines, impact bursts, emotion lines, and motion streaks must match the action direction and mood."
 )
+DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES = (
+    "Preserve the approved character appearance/anatomy lock: species/body structure, face structure, eye count "
+    "and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture. Use character_locks, "
+    "must_match, source references, and page/panel notes as the source of truth for approved anatomy or non-human "
+    "exceptions. Unless explicitly approved by the plan or source, reject missing/extra/merged eyes, one-eyed "
+    "appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, "
+    "changed species/body type, broken joints, and broken body proportions."
+)
+DEFAULT_APPEARANCE_ANATOMY_NEGATIVE_TERMS = (
+    "missing eyes, extra eyes, merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless "
+    "explicitly approved, missing limbs, extra limbs, missing fingers, extra fingers, merged fingers, changed "
+    "species, changed body type, broken joints, broken body proportions"
+)
 
 
 def now_iso() -> str:
@@ -547,7 +560,8 @@ def stage_instruction(stage_id: str) -> str:
             "if requested, lighting, shadows, policy-approved lettering/SFX or required text absence, "
             "and cleanup without changing page layout, panel count, freeform panel shapes, negative "
             "space, text placement or text absence, comic effect lines, visual emphasis, line-weight rhythm, "
-            "character/object blocking, motion direction, or action logic."
+            "character/object blocking, motion direction, or action logic. Finish must preserve the inspected "
+            "storyboard_sketch_ink eye, face, hand, limb, silhouette, body proportion, and posture structure."
         )
     raise SystemExit(f"Unknown stage: {stage_id}")
 
@@ -691,6 +705,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     text_policy_worker_checks = text_policy_worker_check_lines(text_policy)
     character_locks = page_policy_items(state, page, "character_locks")
     visual_text_guard = page_policy_items(state, page, "visual_text_guard")
+    appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
     stage = stage_state(page, stage_id)
     rerun_correction = current_rerun_correction(stage)
     panel_text = "\n".join(panel_line(panel) for panel in panels) or "- no panel details supplied"
@@ -719,7 +734,12 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
         "opposite the throw or shot, inconsistent character design, inconsistent setting, wrong costume, "
         "cropped key action, blurry subject, over-smoothed AI texture."
     )
-    negative_terms = merge_unique(negative, text_policy_negative_terms(text_policy), visual_text_guard)
+    negative_terms = merge_unique(
+        negative,
+        text_policy_negative_terms(text_policy),
+        visual_text_guard,
+        DEFAULT_APPEARANCE_ANATOMY_NEGATIVE_TERMS,
+    )
     negative_prompt_text = ", ".join(negative_terms)
     return "\n".join(
         [
@@ -768,6 +788,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Character locks:",
             bullet_text(character_locks),
             "",
+            "Character appearance/anatomy lock:",
+            appearance_anatomy_lock,
+            "",
             "Visual text guard:",
             bullet_text(visual_text_guard),
             "",
@@ -783,6 +806,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Source consistency checklist:",
             "- Keep character faces, age impression, body shape, hair, outfit, accessories, props, profile details, setting, and landmarks consistent with the approved plan and allowed sources/ references.",
+            "- Preserve approved character appearance/anatomy: species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.",
+            "- Unless explicitly approved by the plan or source, reject missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.",
             "- Do not introduce source-data drift between panels or pages.",
             "",
             "Panel and page continuity checklist:",
@@ -818,6 +843,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Rejects missing planned visual effects, effect lines that contradict motion, and pages where every panel has the same flat visual intensity",
             *text_policy_worker_checks,
             "- Preserves every Character locks item listed above; reject forbidden marker/accessory/silhouette drift",
+            "- Verifies the Character appearance/anatomy lock: species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture",
+            "- Rejects missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions",
+            "- During finish, preserve the inspected storyboard_sketch_ink eye, face, hand, limb, silhouette, body proportion, and posture structure",
             "- Enforces every Visual text guard item listed above; reject arbitrary environmental text, labels, signs, or corner text when forbidden",
             "- Preserves story beat, reading order, composition, and continuity",
             "- Preserves source-data consistency for characters, props, profiles, locations, and page-layout references",
@@ -843,6 +871,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     text_policy = normalize_text_policy(page.get("text_policy") or state.get("text_policy"))
     character_locks = page_policy_items(state, page, "character_locks")
     visual_text_guard = page_policy_items(state, page, "visual_text_guard")
+    appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
     return "\n".join(
         [
             f"Use ${skill_name}.",
@@ -865,12 +894,14 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             f"Page text policy: {text_policy}",
             "Character locks:",
             bullet_text(character_locks),
+            "Character appearance/anatomy lock:",
+            appearance_anatomy_lock,
             "Visual text guard:",
             bullet_text(visual_text_guard),
             "Current rerun correction:",
             current_rerun_correction(stage) or "- none",
             "",
-            "Use image_gen with the assigned prompt file and visual references. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, visual_text_guard, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and visual references. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- worker_status: pass or needs_rerun",
@@ -901,11 +932,13 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need clear story justification.",
         "- Use experimental freeform panel design by default and avoid unintentional uniform rectangular grids.",
         "- Plan and verify comic visual direction: detail density, visual emphasis, line-weight rhythm, and speed/focus/impact/emotion lines when the beat calls for them.",
+        "- Plan and verify character appearance/anatomy locks: species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.",
+        "- Unless explicitly approved by the plan or source, reject missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.",
         f"- Text policy: {text_policy}. {text_policy_batch_summary(text_policy)}",
         "- Reserve at most four pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
-        "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, and panel/page continuity.",
+        "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, character appearance/anatomy locks, and panel/page continuity.",
         "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction.",
         "",
     ]
@@ -953,6 +986,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  reading_order: {page.get('reading_order') or state.get('reading_order') or 'unspecified'}",
                 f"  text_policy: {normalize_text_policy(page.get('text_policy') or text_policy)}",
                 f"  character_locks: {'; '.join(page_policy_items(state, page, 'character_locks')) or 'none'}",
+                f"  appearance_anatomy_lock: {DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES}",
                 f"  visual_text_guard: {'; '.join(page_policy_items(state, page, 'visual_text_guard')) or 'none'}",
                 f"  panel_count: {len(page.get('panels', []))}",
                 f"  pacing: {page.get('pacing_notes') or DEFAULT_PACING_NOTES}",

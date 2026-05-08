@@ -35,6 +35,8 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Include page-level layout notes and panel-level composition/viewpoint notes.
 - Include detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines.
 - Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and `must_match`.
+- Include character appearance/anatomy locks in `character_locks` or `must_match`: approved species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.
+- Unless the plan or source explicitly approves a one-eyed, asymmetric, non-human, or otherwise unusual structure, treat missing/extra/merged eyes, one-eyed appearance for a two-eyed character, missing/extra limbs or fingers, changed species/body type, broken joints, and broken body proportions as rerun causes.
 - Preserve source scene references such as `S01`, `S02-S04`, or the user's own scene names.
 
 ## Text Policy
@@ -64,9 +66,10 @@ Use this format:
 - 컷 형태/레이아웃 자유도: 실험적 자유형 컷 구성 허용
 - 텍스트 정책(text_policy): dialogue_sfx_captions | sfx_only | text_free
 - 캐릭터 고정 조건(character_locks): ...
+- 캐릭터 외형/해부 고정 조건(appearance/anatomy): 종족/신체 구조, 얼굴 구조, 눈 개수/배치, 손/손가락/팔/다리 개수, 실루엣, 체형 비율, 자세. 예: 두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 하며, 외눈 캐릭터처럼 보이면 rerun.
 - 이미지 내 문자 방지 조건(visual_text_guard): ...
 
-| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/문자 고정 조건 | 공간/동선 검수 포인트 |
+| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선 검수 포인트 |
 | ... |
 
 승인 후 진행 방식:
@@ -94,7 +97,10 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
   "style_brief": "Korean comic-book style, tone, palette, rendering direction",
   "reading_order": "top-to-bottom, left-to-right",
   "text_policy": "dialogue_sfx_captions",
-  "character_locks": ["character: fixed visual marker or silhouette requirement"],
+  "character_locks": [
+    "character: fixed visual marker or silhouette requirement",
+    "two-eyed character: keep two-eye structure unless a natural angle, hair, or object occlusion hides one eye"
+  ],
   "visual_text_guard": ["no arbitrary text on buildings, books, flags, labels, or panel corners"],
   "pages": [
     {
@@ -113,7 +119,11 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
       "comic_effects_notes": "Use effect lines only where they clarify action, emotion, impact, speed, or eye guidance.",
       "spatial_logic_notes": "Hoop remains on far wall; ball moves toward the hoop.",
       "motion_checks": ["ball trajectory follows hand release toward target"],
-      "must_match": ["three readable panels", "no impossible ball direction"],
+      "must_match": [
+        "three readable panels",
+        "no impossible ball direction",
+        "two-eyed characters must not look one-eyed unless explicitly approved"
+      ],
       "panels": [
         {
           "panel_no": 1,
@@ -223,9 +233,11 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 
 ## Parent Verification
 
-Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, visual text guard, source consistency, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
+Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
 
-For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, movement direction, and action logic.
+Character appearance/anatomy is an independent reject criterion, not just a technical-quality note. Unless explicitly approved by the plan or source, rerun pages with missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.
+
+For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
 
 Do not claim page coverage, text quality, continuity, spatial logic, or stage quality unless the image was inspected.
 
@@ -246,6 +258,7 @@ After each batch or gate, report in Korean:
 - 부모 검수 결과: ...
 - 텍스트 정책 검수: ...
 - 캐릭터 고정 조건 검수: ...
+- 캐릭터 외형/해부 검수: ...
 - 이미지 내 문자 방지 검수: ...
 - 공간/동선 검수: ...
 - 단계 마무리 검수 결과: ...

@@ -15,7 +15,7 @@ Use the assigned subagent prompt from the pack runner. It provides:
 
 - Run folder, approved plan, assigned page, stage, prompt file, output path, and batch id.
 - Default source folder and excluded output folder.
-- Relevant references, text policy, character locks, visual text guard, rerun correction, and prior-stage reference.
+- Relevant references, text policy, character locks, character appearance/anatomy lock, visual text guard, rerun correction, and prior-stage reference.
 
 Read the prompt file before generation. Do not edit `state.json`, `batch_plan.md`, `approved_storyboard_plan.json`, or any runner state files.
 
@@ -32,6 +32,7 @@ Read the prompt file before generation. Do not edit `state.json`, `batch_plan.md
 - Draw the approved sketch structure and ink lines in this stage.
 - Include approved visual emphasis: selective detail density, focal-point strength, closeup intensity, line-weight rhythm, black-ink weight, and background simplification or emphasis.
 - Use speed lines, focus lines, impact bursts, emotion lines, and motion streaks only where they serve the approved beat. Effect-line direction must match action direction, impact, mood, or eye guidance.
+- Preserve the approved character appearance/anatomy lock: species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.
 
 ## Text And Continuity
 
@@ -40,12 +41,16 @@ Read the prompt file before generation. Do not edit `state.json`, `batch_plan.md
 - For `sfx_only`, render only approved SFX. Do not render speech balloons, dialogue, captions, narration, signage, environmental text, labels, page numbers, panel numbers, random typography, or corner labels.
 - For `text_free`, render no text of any kind, including SFX, dialogue, balloons, captions, signage, labels, logos, page or panel numbers, environmental text, or random glyphs.
 - Preserve all character locks and visual text guards from the prompt.
+- Use `character_locks`, `must_match`, source references, and page/panel notes as the source of truth for approved anatomy or non-human exceptions.
+- Unless explicitly approved by the plan or source, reject missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, and broken body proportions.
 - Preserve character, prop, setting, landmark, gaze, position, object trajectory, time flow, and cause-effect continuity across panels and adjacent-page references.
 - Reject impossible staging, such as a thrown, kicked, or shot object moving opposite the body pose or intended target.
 
 ## Worker Inspection
 
-After generation, inspect the output before returning. Mark `needs_rerun` when any required page structure, text policy, character lock, visual text guard, source consistency, spatial logic, motion direction, or technical quality check fails.
+After generation, inspect the output before returning. Mark `needs_rerun` when any required page structure, text policy, character lock, character appearance/anatomy lock, visual text guard, source consistency, spatial logic, motion direction, or technical quality check fails.
+
+Do not pass a two-eyed character that appears one-eyed unless the approved plan or source explicitly says the character is one-eyed, asymmetric, non-human in that way, or naturally occluded by angle, hair, prop, or framing.
 
 Return only:
 

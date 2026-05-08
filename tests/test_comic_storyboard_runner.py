@@ -498,6 +498,93 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Preserves every Character locks item listed above", finish_prompt)
             self.assertIn("Enforces every Visual text guard item listed above", finish_prompt)
 
+    def test_character_appearance_anatomy_lock_is_in_stage_and_subagent_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = sample_plan(page_count=1, panel_count=2)
+            plan["character_locks"] = [
+                "주인공: 두 눈 구조 유지, 양쪽 눈 위치와 얼굴형 유지, 팔/다리/손가락 개수 정상 유지"
+            ]
+            plan["pages"][0]["must_match"] = [
+                "두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 함"
+            ]
+            plan_path = root / "appearance-anatomy-lock-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            generated = generate_file(root)
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            storyboard_stage = state["pages"][0]["stages"][FIRST_STAGE]
+            storyboard_prompt = Path(storyboard_stage["prompt_file"]).read_text(encoding="utf-8")
+            storyboard_subagent = Path(storyboard_stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+
+            for prompt in (storyboard_prompt, storyboard_subagent):
+                self.assertIn("Character appearance/anatomy lock:", prompt)
+                self.assertIn("one-eyed appearance for a two-eyed character", prompt)
+                self.assertIn("missing/extra/merged eyes", prompt)
+                self.assertIn("one-eyed face unless explicitly approved", prompt)
+                self.assertIn("주인공: 두 눈 구조 유지", prompt)
+            self.assertIn("두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 함", storyboard_prompt)
+            self.assertIn("missing eyes", storyboard_prompt)
+            self.assertIn("extra fingers", storyboard_prompt)
+
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "first stage appearance/anatomy pass",
+                cwd=root,
+            )
+            approve_finish_stage(root, run_dir)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            finish_stage = state["pages"][0]["stages"][FINISH_STAGE]
+            finish_prompt = Path(finish_stage["prompt_file"]).read_text(encoding="utf-8")
+            finish_subagent = Path(finish_stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+
+            for prompt in (finish_prompt, finish_subagent):
+                self.assertIn("Character appearance/anatomy lock:", prompt)
+                self.assertIn("one-eyed appearance for a two-eyed character", prompt)
+                self.assertIn("missing/extra/merged eyes", prompt)
+                self.assertIn("one-eyed face unless explicitly approved", prompt)
+                self.assertIn("주인공: 두 눈 구조 유지", prompt)
+            self.assertIn("preserve the inspected storyboard_sketch_ink eye, face, hand, limb, silhouette, body proportion, and posture structure", finish_prompt)
+
     def test_prompt_uses_sources_by_default_and_excludes_output_source_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

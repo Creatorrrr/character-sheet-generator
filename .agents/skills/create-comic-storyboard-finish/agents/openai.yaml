@@ -1,4 +1,4 @@
 interface:
   display_name: "Comic Storyboard Finish"
   short_description: "Finish an approved comic page from a sketch and ink reference"
-  default_prompt: "Use $create-comic-storyboard-finish only when a create-comic-storyboard-pack subagent prompt assigns one approved page at the finish stage with a parent-inspected storyboard_sketch_ink image. Read the assigned prompt file, use image_gen with the prior-stage reference, do not edit runner state, inspect the result, and return the generated file path with worker_status and worker_note."
+  default_prompt: "Use $create-comic-storyboard-finish only when a create-comic-storyboard-pack subagent prompt assigns one approved page at the finish stage with a parent-inspected storyboard_sketch_ink image. Read the assigned prompt file, use image_gen with the prior-stage reference, preserve passed eye/face/hand/limb/body structure and character appearance/anatomy locks, do not edit runner state, inspect the result, and return the generated file path with worker_status and worker_note."

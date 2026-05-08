@@ -36,6 +36,8 @@ PASS_STATUSES = {"inspected_pass", "complete"}
 CURRENT_STATUSES = {"generation_requested", "imported"}
 VALID_STATUSES = {"pending", "generation_requested", "imported", "inspected_pass", "complete"}
 WORKER_STATUS_VALUES = {"pass", "needs_rerun"}
+REVIEW_STATUSES = {"pending", "passed", "needs_rerun"}
+REVIEW_CLI_STATUSES = {"pass", "needs_rerun"}
 
 
 def now_iso() -> str:
@@ -125,6 +127,27 @@ def build_stage_states() -> dict[str, dict[str, Any]]:
     return {stage_id: blank_stage_state() for stage_id in STAGE_IDS}
 
 
+def blank_stage_review() -> dict[str, Any]:
+    return {
+        "status": "pending",
+        "note": "",
+        "issues": [],
+        "reviewed_at": "",
+    }
+
+
+def build_stage_reviews() -> dict[str, dict[str, Any]]:
+    return {stage_id: blank_stage_review() for stage_id in STAGE_IDS}
+
+
+def normalize_stage_review(review: dict[str, Any], stage_id: str) -> None:
+    for key, value in blank_stage_review().items():
+        review.setdefault(key, value)
+    review["issues"] = as_list(review.get("issues"))
+    if review["status"] not in REVIEW_STATUSES:
+        raise SystemExit(f"Invalid stage review status for {stage_id}: {review['status']}")
+
+
 def normalize_stage_record(stage: dict[str, Any], page_id: str, stage_id: str) -> None:
     for key, value in blank_stage_state().items():
         stage.setdefault(key, value)
@@ -155,6 +178,13 @@ def normalize_state(state: dict[str, Any]) -> None:
     state.setdefault("excluded_source_roots", [str(DEFAULT_OUTPUT_ROOT)])
     state["stage_order"] = STAGE_IDS
     state["source_references"] = validate_reference_paths(state.get("source_references", []))
+    stage_reviews = state.setdefault("stage_reviews", {})
+    for stage_id in list(stage_reviews.keys()):
+        if stage_id not in STAGE_IDS:
+            del stage_reviews[stage_id]
+    for stage_id in STAGE_IDS:
+        review = stage_reviews.setdefault(stage_id, {})
+        normalize_stage_review(review, stage_id)
     state.setdefault("pages", [])
     for page in state.get("pages", []):
         page.setdefault("dependencies", [])
@@ -195,16 +225,21 @@ def page_complete_for_stage(page: dict[str, Any], stage_id: str) -> bool:
     return stage_state(page, stage_id).get("status") in PASS_STATUSES
 
 
-def stage_complete(state: dict[str, Any], stage_id: str) -> bool:
+def pages_complete_for_stage(state: dict[str, Any], stage_id: str) -> bool:
     pages = state.get("pages", [])
     return bool(pages) and all(page_complete_for_stage(page, stage_id) for page in pages)
 
 
+def stage_review_passed(state: dict[str, Any], stage_id: str) -> bool:
+    return state.get("stage_reviews", {}).get(stage_id, {}).get("status") == "passed"
+
+
+def stage_complete(state: dict[str, Any], stage_id: str) -> bool:
+    return pages_complete_for_stage(state, stage_id) and stage_review_passed(state, stage_id)
+
+
 def workflow_complete(state: dict[str, Any]) -> bool:
-    pages = state.get("pages", [])
-    return bool(pages) and all(
-        page_complete_for_stage(page, stage_id) for page in pages for stage_id in STAGE_IDS
-    )
+    return all(stage_complete(state, stage_id) for stage_id in STAGE_IDS)
 
 
 def current_stage_id(state: dict[str, Any]) -> str | None:
@@ -301,6 +336,38 @@ def dependencies_ready(state: dict[str, Any], page: dict[str, Any], stage_id: st
 def page_sort_key(page: dict[str, Any], stage_id: str) -> tuple[int, int, str]:
     stage = stage_state(page, stage_id)
     return (0 if stage.get("rerun_pending") else 1, int(page.get("order", 9999)), page.get("id", ""))
+
+
+def reset_stage_review(state: dict[str, Any], stage_id: str, note: str) -> None:
+    review = state.setdefault("stage_reviews", {}).setdefault(stage_id, blank_stage_review())
+    review["status"] = "pending"
+    review["note"] = note
+    review["issues"] = []
+    review["reviewed_at"] = ""
+
+
+def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) -> None:
+    stage = stage_state(page, stage_id)
+    if stage.get("status") not in {"pending", "generation_requested", "imported", "inspected_pass", "complete"}:
+        raise SystemExit(f"Cannot rerun page stage in status {stage.get('status')}: {page['filename']} {stage_id}")
+    history = stage.setdefault("rerun_history", [])
+    history.append(
+        {
+            "at": now_iso(),
+            "from_status": stage.get("status"),
+            "note": note,
+            "output_path": stage.get("output_path", ""),
+            "worker_status": stage.get("worker_status", ""),
+            "worker_note": stage.get("worker_note", ""),
+        }
+    )
+    stage["status"] = "pending"
+    stage["rerun_pending"] = True
+    stage["batch_id"] = ""
+    stage["requested_at"] = ""
+    stage["worker_status"] = ""
+    stage["worker_note"] = ""
+    stage["parent_note"] = note
 
 
 def stage_instruction(stage_id: str) -> str:
@@ -405,6 +472,14 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             spatial_logic_notes,
             motion_checks,
             "",
+            "Source consistency checklist:",
+            "- Keep character faces, age impression, body shape, hair, outfit, accessories, props, profile details, setting, and landmarks consistent with the approved plan and allowed sources/ references.",
+            "- Do not introduce source-data drift between panels or pages.",
+            "",
+            "Panel and page continuity checklist:",
+            "- Keep same-page panel continuity coherent for positions, gaze, action direction, object movement, time flow, speech/SFX placement, and cause-effect motion.",
+            "- Keep adjacent-page continuity coherent for recurring characters, props, locations, landmarks, and ongoing actions.",
+            "",
             "Must match:",
             must_match,
             "",
@@ -428,6 +503,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Uses adapted dialogue/SFX/captions from the approved plan, not raw source dialogue by default",
             "- Speech balloons, SFX, and captions are legible and do not cover key art",
             "- Preserves story beat, reading order, composition, and continuity",
+            "- Preserves source-data consistency for characters, props, profiles, locations, and page-layout references",
+            "- Preserves panel-to-panel and adjacent-page continuity for character/object placement, gaze, action direction, time flow, and lettering placement",
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
             "- Character/object positions, action direction, object trajectory, and cause-effect motion are physically plausible",
             "- No examples of impossible staging such as a basketball shot where the ball travels behind the shooter",
@@ -459,12 +536,26 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Finish must use the parent-inspected storyboard_sketch_ink image as the required visual input / structure reference.",
         "- Reserve at most four pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",
+        "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
+        "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, and panel/page continuity.",
         "- Approved adapted dialogue, SFX, and short captions are included in the page image.",
         "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction.",
         "",
-        "Pages:",
-        "",
     ]
+    lines.extend(["Stage reviews:", ""])
+    for stage_id in STAGE_IDS:
+        review = state.get("stage_reviews", {}).get(stage_id, blank_stage_review())
+        issues = "; ".join(as_list(review.get("issues"))) or "none"
+        lines.extend(
+            [
+                f"- {stage_id}: {review.get('status', 'pending')}",
+                f"  note: {review.get('note', '')}",
+                f"  issues: {issues}",
+                f"  reviewed_at: {review.get('reviewed_at', '')}",
+                "",
+            ]
+        )
+    lines.extend(["Pages:", ""])
     for page in state.get("pages", []):
         stage_summary = ", ".join(
             f"{stage_id}={stage_state(page, stage_id).get('status')}" for stage_id in STAGE_IDS
@@ -521,6 +612,7 @@ def command_init(args: argparse.Namespace) -> None:
         "excluded_source_roots": [str(DEFAULT_OUTPUT_ROOT)],
         "source_references": [],
         "stage_order": STAGE_IDS,
+        "stage_reviews": build_stage_reviews(),
         "plan_approved": False,
         "complete": False,
         "pages": [],
@@ -710,6 +802,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     state["pages"] = pages
     state.pop("panels", None)
     state["batches"] = []
+    state["stage_reviews"] = build_stage_reviews()
     state.setdefault("notes", []).append(f"Approved {len(pages)} comic pages at {state['approved_at']}.")
 
     write_json(
@@ -760,6 +853,8 @@ def command_next_batch(args: argparse.Namespace) -> None:
     candidates.sort(key=lambda page: page_sort_key(page, stage_id))
 
     if not candidates:
+        if pages_complete_for_stage(state, stage_id) and not stage_review_passed(state, stage_id):
+            print(f"STAGE_REVIEW_REQUIRED: {stage_id}")
         print("NO_ELIGIBLE_ITEMS")
         command_status(args)
         return
@@ -862,31 +957,57 @@ def command_rerun(args: argparse.Namespace) -> None:
     state = load_state(run_dir)
     page = resolve_page(state, args.item)
     stage_id = args.stage
-    stage = stage_state(page, stage_id)
-    if stage.get("status") not in {"pending", "generation_requested", "imported", "inspected_pass", "complete"}:
-        raise SystemExit(f"Cannot rerun page stage in status {stage.get('status')}: {page['filename']} {stage_id}")
-    history = stage.setdefault("rerun_history", [])
-    history.append(
-        {
-            "at": now_iso(),
-            "from_status": stage.get("status"),
-            "note": args.note,
-            "output_path": stage.get("output_path", ""),
-            "worker_status": stage.get("worker_status", ""),
-            "worker_note": stage.get("worker_note", ""),
-        }
-    )
-    stage["status"] = "pending"
-    stage["rerun_pending"] = True
-    stage["batch_id"] = ""
-    stage["requested_at"] = ""
-    stage["worker_status"] = ""
-    stage["worker_note"] = ""
-    stage["parent_note"] = args.note
+    mark_page_stage_for_rerun(page, stage_id, args.note)
+    reset_stage_review(state, stage_id, f"Stage review reset because {page['filename']} was marked for rerun.")
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
     print(f"RERUN_PENDING: {page['filename']} {stage_id}")
     print("NEXT: Resolve any other current items, then run next-batch.")
+
+
+def command_stage_review(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    state = load_state(run_dir)
+    stage_id = args.stage
+    if not pages_complete_for_stage(state, stage_id):
+        raise SystemExit(
+            f"Stage review requires every page in {stage_id} to be parent-inspected pass or complete first."
+        )
+
+    review = state.setdefault("stage_reviews", {}).setdefault(stage_id, blank_stage_review())
+    issues = as_list(args.issue)
+    rerun_items = as_list(args.rerun_item)
+
+    if args.status == "pass":
+        if rerun_items:
+            raise SystemExit("Do not pass a stage review while rerun items are specified.")
+        review["status"] = "passed"
+        review["note"] = args.note
+        review["issues"] = issues
+        review["reviewed_at"] = now_iso()
+    elif args.status == "needs_rerun":
+        if not rerun_items:
+            raise SystemExit("Use --rerun-item at least once when stage-review status is needs_rerun.")
+        resolved_pages = []
+        for item in rerun_items:
+            page = resolve_page(state, item)
+            resolved_pages.append(page)
+        for page in resolved_pages:
+            mark_page_stage_for_rerun(page, stage_id, args.note)
+        review["status"] = "needs_rerun"
+        review["note"] = args.note
+        review["issues"] = issues + [f"rerun_item={page['filename']}" for page in resolved_pages]
+        review["reviewed_at"] = now_iso()
+    else:
+        raise SystemExit(f"Invalid stage review status: {args.status}")
+
+    write_batch_plan(run_dir, state)
+    save_state(run_dir, state)
+    print(f"STAGE_REVIEW: {stage_id}")
+    print(f"STATUS: {review['status']}")
+    if rerun_items:
+        for item in rerun_items:
+            print(f"RERUN_ITEM: {item}")
 
 
 def command_batch_status(args: argparse.Namespace) -> None:
@@ -918,6 +1039,8 @@ def command_status(args: argparse.Namespace) -> None:
             counts[status] = counts.get(status, 0) + 1
         parts = ", ".join(f"{status}={counts[status]}" for status in sorted(counts)) or "none"
         print(f"{stage_id}: {parts}")
+        review = state.get("stage_reviews", {}).get(stage_id, blank_stage_review())
+        print(f"{stage_id}_review: {review.get('status', 'pending')}")
     blockers = current_blockers(state)
     if blockers:
         print("CURRENT_BLOCKERS:")
@@ -970,6 +1093,15 @@ def build_parser() -> argparse.ArgumentParser:
     rerun.add_argument("--stage", choices=STAGE_IDS, required=True)
     rerun.add_argument("--note", required=True)
     rerun.set_defaults(func=command_rerun)
+
+    stage_review = subparsers.add_parser("stage-review")
+    stage_review.add_argument("--run-dir", required=True)
+    stage_review.add_argument("--stage", choices=STAGE_IDS, required=True)
+    stage_review.add_argument("--status", choices=sorted(REVIEW_CLI_STATUSES), required=True)
+    stage_review.add_argument("--note", required=True)
+    stage_review.add_argument("--issue", action="append", default=[])
+    stage_review.add_argument("--rerun-item", action="append", default=[])
+    stage_review.set_defaults(func=command_stage_review)
 
     batch_status = subparsers.add_parser("batch-status")
     batch_status.add_argument("--run-dir", required=True)

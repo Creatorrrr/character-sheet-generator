@@ -1,6 +1,6 @@
 ---
 name: create-comic-storyboard-pack
-description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with multi-panel page layouts, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, and parent inspection."
+description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with multi-panel page layouts, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
 ---
 
 # Create Comic Storyboard Pack
@@ -19,6 +19,7 @@ If the user does not specify where to save files, create a new run folder under 
 - Build `<slug>` from the scenario title, scenario filename stem, or concise scenario name. Normalize it to lowercase ASCII letters, numbers, and hyphens. If empty, use `comic-storyboard-pack`.
 - If the user is resuming from an existing run folder, keep using that folder.
 - Save `scenario.md`, `state.json`, `approved_storyboard_plan.json`, `batch_plan.md`, prompt files, generated stage images, worker notes, and parent inspection notes under the selected run folder.
+- Also save stage finish review state and notes in `state.json` and `batch_plan.md`.
 
 ## Default Source Data Location
 
@@ -105,7 +106,11 @@ Use this approval format:
 - 각 단계 최대 4페이지씩 서브에이전트 병렬 생성
 - 각 서브에이전트 1차 검수
 - 부모 세션 최종 검수
+- 각 단계의 모든 페이지 부모 검수 후 단계 마무리 검수 stage-review
+- 단계 마무리 검수에서 소스 데이터 일관성과 컷/페이지 연속성 확인
+- 문제가 있으면 보완 대상 페이지를 rerun으로 되돌린 뒤 같은 단계 재진행
 - 모든 페이지의 1단계 부모 검수 통과 전에는 2단계를 시작하지 않음
+- 모든 페이지의 1단계 단계 마무리 검수 통과 전에는 2단계를 시작하지 않음
 - 2단계는 1단계 생성 이미지를 필수 입력/구조 참조로 사용
 - 실패 페이지 rerun 후 다음 배치 진행
 ```
@@ -216,6 +221,13 @@ python3 "$RUNNER" rerun --run-dir <run-dir> --item <page-filename-or-id> --stage
 python3 "$RUNNER" batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
 
+Stage finish review after every page in a stage passes parent inspection:
+
+```bash
+python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_sketch_ink --status pass --note "<source consistency and panel continuity pass note>"
+python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_sketch_ink --status needs_rerun --rerun-item <page-filename-or-id> --issue "<source or continuity issue>" --note "<reason>"
+```
+
 Use the same commands with `--stage finish` after every `storyboard_sketch_ink` page passes parent inspection.
 
 State rules:
@@ -225,9 +237,12 @@ State rules:
 - Stages must run in order: `storyboard_sketch_ink`, then `finish`.
 - `next-batch --limit 4` reserves at most four eligible pages from the current stage and writes one prompt file per page under `prompts/<stage>/`.
 - Do not reserve a new batch while any page stage is still `generation_requested` or `imported`.
-- A later stage is eligible only after every page in the previous stage is parent-inspected as `inspected_pass` or marked `complete`.
+- A later stage is eligible only after every page in the previous stage is parent-inspected as `inspected_pass` or marked `complete`, and the previous stage's stage finish review is `passed`.
 - Stage pipelining is not allowed: do not start `finish` for any page until every page has passed `storyboard_sketch_ink`.
 - `finish` requires the parent-inspected `storyboard_sketch_ink` image as visual input and structure reference.
+- After all pages in a stage pass parent inspection, run `stage-review` before reserving the next stage or declaring completion.
+- `stage-review --status pass` requires every page in that stage to be parent-inspected pass or complete.
+- `stage-review --status needs_rerun` requires one or more `--rerun-item` values and moves those page stages back to `pending` with `rerun_pending=true`.
 - Page dependencies, when present, must pass in the current stage before the dependent page can be reserved.
 - Subagent inspection is advisory. Store it through `import`, but only the parent session may run `inspect-pass`.
 - If a generated page fails parent inspection, run `rerun`; the rerun is prioritized before new pending pages in that same stage.
@@ -237,9 +252,11 @@ State rules:
 
 1. `storyboard_sketch_ink`
    Generate the combined comic page storyboard, sketch, and ink pass. Prioritize page layout, panel count, gutters, reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, and ink line clarity.
+   Stage finish review must compare every panel against approved source data and allowed `sources/` references for character, prop, profile, setting, and page-layout consistency, then check same-page and adjacent-page continuity.
 
 2. `finish`
    Use the parent-inspected `storyboard_sketch_ink` page as the required visual input and structure reference. Add tone, color if requested, lighting, shadows, final lettering, SFX, captions, and cleanup without changing page layout, panel count, text placement, character/object blocking, movement direction, or action logic.
+   Stage finish review must verify that tone/color/final polish did not introduce source-data drift or break continuity from the inspected `storyboard_sketch_ink` images.
 
 ## Parallel Generation Rules
 
@@ -276,6 +293,8 @@ Prior-stage reference: <path or none>
 Relevant references: <paths or "none">
 Page text policy: include approved adapted dialogue, SFX, and short captions inside speech balloons/caption areas/SFX lettering.
 Spatial logic policy: reject impossible positions, object trajectories, or motion direction.
+Source consistency policy: reject drift in character face/body/hair/outfit, props, profile details, setting, landmarks, or page-layout references compared with the approved plan and allowed sources/.
+Panel continuity policy: reject discontinuity across panels or adjacent pages in positions, gaze, action direction, object movement, time flow, speech balloons, SFX, captions, and cause-effect motion.
 Source policy: when no explicit reference path is provided, use relevant files from the default source folder; never use output/ files as source data.
 
 Use image_gen with the assigned prompt and visual references. After generation, inspect the output for stage fit, page/story fit, multi-panel layout, adapted text/SFX fit, text legibility, spatial continuity, motion plausibility, technical quality, and obvious defects. Return only:
@@ -295,6 +314,8 @@ Inspect every imported page before marking it passed. Check:
 - Speech balloons, SFX, and captions use approved adapted text and are legible.
 - Source dialogue was adapted for comic timing unless exact preservation was explicitly approved.
 - Source/reference data came from user-provided paths or `sources/`, not from `output/` generated artifacts.
+- Character face, age impression, body shape, hair, outfit, accessories, props, profile details, setting, landmarks, and page-layout references stay consistent with the approved plan and allowed source data.
+- Same-page panels and adjacent pages preserve continuity for position, gaze, action direction, object movement, time flow, speech/SFX placement, captions, and cause-effect motion.
 - Composition, character blocking, props, setting, and continuity match the plan.
 - Character/object positions, motion direction, ball/projectile paths, gaze direction, and cause-effect movement are plausible.
 - `storyboard_sketch_ink` contains the approved page layout, cut structure, lettering placement, sketch structure, and ink lines.
@@ -304,6 +325,17 @@ Inspect every imported page before marking it passed. Check:
 - The generated output is mapped to the correct page filename and stage.
 
 Do not claim page coverage, text quality, continuity, spatial logic, or stage quality unless the image was inspected.
+
+## Stage Finish Review
+
+After every page in the current stage has passed parent inspection, review the complete stage before moving on:
+
+- Compare all pages and all panels against approved source data and allowed `sources/` references.
+- Check character, prop, profile, setting, landmark, and page-layout consistency across the whole stage.
+- Check continuity within each page and across adjacent pages.
+- If everything passes, run `stage-review --status pass`.
+- If any page needs correction, run `stage-review --status needs_rerun --rerun-item <page>` with an issue note, then regenerate and inspect the rerun page before repeating stage finish review.
+- Do not start `finish` and do not claim the pack complete until the relevant stage finish review is `passed`.
 
 ## Reporting
 
@@ -323,6 +355,10 @@ After each batch, report in Korean:
 - 부모 검수 결과: ...
 - 대사/효과음 검수: ...
 - 공간/동선 검수: ...
+- 단계 마무리 검수 결과: ...
+- 소스 일관성 이슈: ...
+- 컷 연속성 이슈: ...
+- 보완 대상 페이지: ...
 - rerun 필요 페이지: ...
 - 다음 결정: ...
 ```

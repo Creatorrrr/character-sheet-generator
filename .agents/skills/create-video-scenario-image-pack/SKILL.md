@@ -37,7 +37,7 @@ The skill-local script is only a compatibility shim. Do not use `scripts/video_p
    python3 scripts/video_scenario_image_pack_runner.py next-batch --run-dir <run-dir> --limit 4
    python3 scripts/video_scenario_image_pack_runner.py batch-prompts --run-dir <run-dir> --batch-id <batch-id>
    ```
-5. Spawn one subagent per reserved item, maximum four per batch. Each subagent generates exactly one image with `image_gen`.
+5. Spawn one subagent per reserved item, maximum four per batch. Each subagent generates exactly one image with `image_gen`. If using `fork_context=true`, omit subagent role fields such as `agent_type` or `role`; put the generation/inspection behavior in the task prompt instead.
 6. Import worker results through the runner. Prefer batch manifests over parallel shell calls:
    ```bash
    python3 scripts/video_scenario_image_pack_runner.py import-batch --manifest <import-manifest.json>

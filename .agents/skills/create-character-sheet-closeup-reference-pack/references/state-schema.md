@@ -112,7 +112,7 @@ Only `inspected_pass` and `complete` count toward pack completion.
 
 - Do not mark `01_face_front.png` as `inspected_pass` until the image was visually inspected.
 - With `anchor_policy: "auto_if_pass"`, a passing `01_face_front.png` inspection allows dependent items to proceed without a separate approval question unless the user requested a gated workflow.
-- After the anchor passes, dependent generation must use `next-batch --limit 4` and one `fork_context=true` subagent per item. If subagents are unavailable, stop and report the blocker.
+- After the anchor passes, dependent generation must use `next-batch --limit 4` and one `fork_context=true` subagent per item, with no `agent_type` or `role` field. If subagents are unavailable, stop and report the blocker.
 - Do not mark the pack complete until every requested output is `inspected_pass` or `complete`.
 - `import-latest` is never approval. It only moves the item to `imported`.
 - Subagent inspection is advisory only; parent visual inspection plus `inspect-pass` is required for final acceptance.

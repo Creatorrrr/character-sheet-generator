@@ -42,6 +42,9 @@ Default policy:
 - Use the anchor command flow only for `01_face_front.png` before the master face anchor is approved.
 - If `01_face_front.png` is visually inspected and passes, continue to the rest of the pack without asking for another approval unless the user explicitly requested a gated workflow.
 - After the master face anchor is approved, dependent images must be generated through `next-batch --limit 4` and one `fork_context=true` subagent per batch item.
+- When `fork_context=true` is used, omit subagent role fields such as `agent_type` or `role`. Do not pass `worker`, `default`, or `explorer` as a role/type field.
+- Treat `worker` only as the runner's inspection-result label (`worker_status`, `worker_note`), not as a subagent role type.
+- Put the assigned-output generation and first-pass inspection behavior in the subagent prompt text instead of role metadata.
 - Do not use serial fallback for dependent images. Do not call parent-session `image_gen`, `next`, or `import-latest` for dependent images after the anchor is approved.
 - If subagents are unavailable after the anchor is approved, stop and report that dependent generation is blocked by missing subagent support.
 - If the anchor fails inspection, run `rerun` for `01_face_front.png` and do not generate dependent items yet.
@@ -63,8 +66,8 @@ Parallel command flow after the master face anchor is approved:
 
 ```bash
 python3 scripts/video_pack_runner.py next-batch --run-dir <run-dir> --limit 4
-# Spawn one subagent per printed item, with fork_context=true.
-# Each subagent generates exactly one assigned output with image_gen and reports the generated file path plus a first-pass inspection note.
+# Spawn one subagent per printed item, with fork_context=true and no agent_type/role field.
+# Put the worker behavior in the task prompt. Each subagent generates exactly one assigned output with image_gen and reports the generated file path plus a first-pass inspection note.
 python3 scripts/video_pack_runner.py import --run-dir <run-dir> --item <filename> --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
 # Parent session inspects each imported image before marking final pass.
 python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<parent inspection note>"
@@ -143,10 +146,11 @@ Use these dependency rules:
 
 ## Subagent Batch Contract
 
-When spawning subagents for `next-batch`, use `fork_context=true` and pass explicit task context even though the session is forked:
+When spawning subagents for `next-batch`, use `fork_context=true` with no `agent_type` or `role`, then pass explicit task context even though the session is forked:
 
 ```text
 You are generating exactly one image for create-video-closeup-reference-pack.
+Act as the generation-and-inspection worker for this assigned output in the prompt only; do not require a worker role field.
 Do not edit state.json.
 Run folder: <run-dir>
 Source character sheet: <run-dir>/source_character_sheet.png

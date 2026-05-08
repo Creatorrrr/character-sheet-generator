@@ -246,6 +246,9 @@ State rules:
 After approval, all image generation must happen through subagents:
 
 - Use one `fork_context=true` subagent per batch item.
+- When `fork_context=true` is used, omit subagent role fields such as `agent_type` or `role`. Do not pass `worker`, `default`, or `explorer` as a role/type field.
+- Treat `worker` only as the runner's inspection-result label (`worker_status`, `worker_note`), not as a subagent role type.
+- Put the one-page generation and inspection behavior in the subagent prompt text instead of role metadata.
 - Use a maximum of four subagents per batch.
 - Each subagent generates exactly one assigned page stage.
 - Do not use serial parent-session `image_gen` as a fallback.
@@ -254,10 +257,11 @@ After approval, all image generation must happen through subagents:
 
 ## Subagent Batch Contract
 
-When spawning subagents for `next-batch`, pass explicit task context:
+When spawning subagents for `next-batch`, use `fork_context=true` with no `agent_type` or `role`, then pass explicit task context:
 
 ```text
 You are generating exactly one image for create-comic-storyboard-pack.
+Act as the generation-and-inspection worker for this assigned page in the prompt only; do not require a worker role field.
 Do not edit state.json.
 Run folder: <run-dir>
 Story/scenario file: <run-dir>/scenario.md

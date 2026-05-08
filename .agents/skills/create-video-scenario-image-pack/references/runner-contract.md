@@ -54,6 +54,8 @@ Each reserved item writes:
 
 Use the subagent prompt as the spawn task text. Do not ask subagents to edit `state.json`.
 
+If spawning with `fork_context=true`, omit subagent role fields such as `agent_type` or `role`. Do not pass `worker`, `default`, or `explorer` as a role/type field. Treat `worker_status` and `worker_note` only as import-result labels, and describe generation plus first-pass inspection behavior in the prompt text.
+
 ## Import Manifest
 
 Use one manifest to avoid parallel `state.json` writes:

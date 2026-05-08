@@ -17,18 +17,26 @@ DEFAULT_SOURCE_ROOT = REPO_ROOT / "sources"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output"
 STORYBOARD_SKETCH_INK_STAGE = "storyboard_sketch_ink"
 FINISH_STAGE = "finish"
+TEXT_POLICY_DIALOGUE_SFX_CAPTIONS = "dialogue_sfx_captions"
+TEXT_POLICY_SFX_ONLY = "sfx_only"
+TEXT_POLICY_TEXT_FREE = "text_free"
+TEXT_POLICY_VALUES = {
+    TEXT_POLICY_DIALOGUE_SFX_CAPTIONS,
+    TEXT_POLICY_SFX_ONLY,
+    TEXT_POLICY_TEXT_FREE,
+}
 STAGES = [
     {
         "id": STORYBOARD_SKETCH_INK_STAGE,
         "label": "storyboard/sketch/ink",
         "dir": "01_storyboard_sketch_ink",
-        "purpose": "comic page storyboard, panel layout, dialogue/SFX placement, sketch, and ink line pass",
+        "purpose": "comic page storyboard, panel layout, policy-approved text/SFX placement or text absence, sketch, and ink line pass",
     },
     {
         "id": FINISH_STAGE,
         "label": "tone/color/finish",
         "dir": "02_finish",
-        "purpose": "tone, color, lettering, and final polish pass",
+        "purpose": "tone, color, policy-approved lettering/text absence, and final polish pass",
     },
 ]
 STAGE_IDS = [stage["id"] for stage in STAGES]
@@ -81,6 +89,26 @@ def as_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return [str(value)]
+
+
+def merge_unique(*values: Any) -> list[str]:
+    merged: list[str] = []
+    for value in values:
+        for item in as_list(value):
+            item = item.strip()
+            if item and item not in merged:
+                merged.append(item)
+    return merged
+
+
+def normalize_text_policy(value: Any) -> str:
+    if value is None or value == "":
+        return TEXT_POLICY_DIALOGUE_SFX_CAPTIONS
+    policy = str(value).strip()
+    if policy not in TEXT_POLICY_VALUES:
+        choices = ", ".join(sorted(TEXT_POLICY_VALUES))
+        raise SystemExit(f"Invalid text_policy: {policy}. Expected one of: {choices}")
+    return policy
 
 
 def path_is_under(path: Path, root: Path) -> bool:
@@ -145,6 +173,7 @@ def blank_stage_state() -> dict[str, Any]:
         "worker_status": "",
         "worker_note": "",
         "parent_note": "",
+        "current_rerun_correction": "",
     }
 
 
@@ -201,6 +230,9 @@ def normalize_state(state: dict[str, Any]) -> None:
         state["pages"] = legacy_panels_to_pages({"panels": state.get("panels", [])})
     state.setdefault("source_root", str(DEFAULT_SOURCE_ROOT))
     state.setdefault("excluded_source_roots", [str(DEFAULT_OUTPUT_ROOT)])
+    state["text_policy"] = normalize_text_policy(state.get("text_policy"))
+    state["character_locks"] = merge_unique(state.get("character_locks"))
+    state["visual_text_guard"] = merge_unique(state.get("visual_text_guard"))
     state["stage_order"] = STAGE_IDS
     state["source_references"] = validate_reference_paths(state.get("source_references", []))
     stage_reviews = state.setdefault("stage_reviews", {})
@@ -215,6 +247,9 @@ def normalize_state(state: dict[str, Any]) -> None:
         page.setdefault("dependencies", [])
         page["references"] = validate_reference_paths(page.get("references", []))
         page.setdefault("panels", [])
+        page["text_policy"] = normalize_text_policy(page.get("text_policy") or state["text_policy"])
+        page["character_locks"] = merge_unique(page.get("character_locks"))
+        page["visual_text_guard"] = merge_unique(page.get("visual_text_guard"))
         page.setdefault("page_dialogue_notes", "")
         page.setdefault("pacing_notes", DEFAULT_PACING_NOTES)
         page.setdefault("panel_shape_notes", DEFAULT_PANEL_SHAPE_NOTES)
@@ -399,6 +434,7 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
     stage["worker_status"] = ""
     stage["worker_note"] = ""
     stage["parent_note"] = note
+    stage["current_rerun_correction"] = note
 
 
 def stage_instruction(stage_id: str) -> str:
@@ -406,8 +442,8 @@ def stage_instruction(stage_id: str) -> str:
         return (
             "Create the combined Korean comic-book page storyboard, sketch, and ink pass. Show a full "
             "page with 3-5 panels by default, measured cinematic pacing, experimental freeform panel "
-            "design, gutters or open borders where appropriate, clear reading order, speech balloon "
-            "placement, SFX placement, captions where useful, clear action blocking, planned detail "
+            "design, gutters or open borders where appropriate, clear reading order, active-text-policy "
+            "placement or required text absence, clear action blocking, planned detail "
             "density, visual emphasis, comic effect lines, line-weight contrast, and clean ink lines. "
             "Use 1-2 panels for special staging such as a full-page emotion beat, silence, stillness, "
             "or a decisive action moment."
@@ -416,12 +452,112 @@ def stage_instruction(stage_id: str) -> str:
         return (
             "Create the final Korean comic-book page using the required parent-inspected "
             "storyboard_sketch_ink image as the visual input and structure reference. Add tones, color "
-            "if requested, lighting, shadows, final lettering, speech balloons, SFX, short captions, "
+            "if requested, lighting, shadows, policy-approved lettering/SFX or required text absence, "
             "and cleanup without changing page layout, panel count, freeform panel shapes, negative "
-            "space, text placement, comic effect lines, visual emphasis, line-weight rhythm, "
+            "space, text placement or text absence, comic effect lines, visual emphasis, line-weight rhythm, "
             "character/object blocking, motion direction, or action logic."
         )
     raise SystemExit(f"Unknown stage: {stage_id}")
+
+
+def ordered_sfx(page: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for panel in page.get("panels", []):
+        values = merge_unique(values, panel.get("sfx"))
+    return values
+
+
+def text_policy_instruction_lines(policy: str, page: dict[str, Any]) -> list[str]:
+    policy = normalize_text_policy(policy)
+    if policy == TEXT_POLICY_DIALOGUE_SFX_CAPTIONS:
+        return [
+            "Text policy: dialogue_sfx_captions",
+            "Use adapted_dialogue, approved SFX, and approved captions inside the page image. Keep lettering short, legible, and placed so it does not cover key faces, hands, props, or action.",
+        ]
+    if policy == TEXT_POLICY_SFX_ONLY:
+        allowed_sfx = ", ".join(ordered_sfx(page)) or "none listed"
+        return [
+            "Text policy: sfx_only",
+            f"Only approved SFX may appear in the generated image: {allowed_sfx}.",
+            "Do not render any other text: no spoken dialogue, no speech balloons, no captions, no narration, no signage, no environmental text, no labels, no page or panel numbers, no random typography, and no corner labels.",
+        ]
+    if policy == TEXT_POLICY_TEXT_FREE:
+        return [
+            "Text policy: text_free",
+            "No text of any kind may appear in the generated image.",
+            "Do not render SFX, dialogue, speech balloons, captions, signage, labels, page or panel numbers, logos, environmental text, random glyphs, or corner labels.",
+            "Absolute ban: no dialogue, no speech balloons, no captions, no signage, no labels, no page or panel numbers, no SFX, no environmental text, no random glyphs.",
+        ]
+    raise SystemExit(f"Unknown text_policy: {policy}")
+
+
+def text_policy_worker_check_lines(policy: str) -> list[str]:
+    policy = normalize_text_policy(policy)
+    if policy == TEXT_POLICY_DIALOGUE_SFX_CAPTIONS:
+        return [
+            "- Uses adapted dialogue/SFX/captions from the approved plan, not raw source dialogue by default",
+            "- Speech balloons, SFX, and captions are legible and do not cover key art",
+        ]
+    if policy == TEXT_POLICY_SFX_ONLY:
+        return [
+            "- Rejects spoken dialogue, speech balloons, captions/narration, signage, labels, page/panel numbers, random typography, environmental text, or corner labels",
+            "- Allows only approved SFX from the panel metadata and verifies SFX placement does not cover key art",
+        ]
+    if policy == TEXT_POLICY_TEXT_FREE:
+        return [
+            "- Rejects all rendered text/glyphs, including SFX, dialogue, captions, signage, labels, panel/page numbers, logos, environmental text, random typography, and corner labels",
+            "- Treats dialogue, caption, and SFX fields as planning metadata only; none may appear in the image",
+        ]
+    raise SystemExit(f"Unknown text_policy: {policy}")
+
+
+def text_policy_negative_terms(policy: str) -> str:
+    policy = normalize_text_policy(policy)
+    if policy == TEXT_POLICY_SFX_ONLY:
+        return (
+            "spoken dialogue, speech balloons, captions, narration, signage, environmental text, labels, "
+            "page numbers, panel numbers, random typography, corner labels, unapproved text"
+        )
+    if policy == TEXT_POLICY_TEXT_FREE:
+        return (
+            "any text, SFX letters, speech balloons, captions, narration, signage, environmental text, "
+            "labels, page numbers, panel numbers, logos, random glyphs, random typography, corner labels"
+        )
+    return ""
+
+
+def text_policy_batch_summary(policy: str) -> str:
+    policy = normalize_text_policy(policy)
+    if policy == TEXT_POLICY_SFX_ONLY:
+        return (
+            "Only approved SFX may be rendered; speech balloons, dialogue, captions, signage, labels, "
+            "environmental text, and page/panel numbers are forbidden."
+        )
+    if policy == TEXT_POLICY_TEXT_FREE:
+        return "All rendered text is forbidden, including SFX, dialogue, captions, signage, labels, and page/panel numbers."
+    return "Approved adapted dialogue, SFX, and short captions are included in the page image."
+
+
+def bullet_text(items: list[str], empty: str = "- none") -> str:
+    return "\n".join(f"- {item}" for item in items) or empty
+
+
+def page_policy_items(state: dict[str, Any], page: dict[str, Any], key: str) -> list[str]:
+    return merge_unique(state.get(key), page.get(key))
+
+
+def current_rerun_correction(stage: dict[str, Any], require_pending: bool = False) -> str:
+    if require_pending and not stage.get("rerun_pending"):
+        return ""
+    notes: list[str] = []
+    notes = merge_unique(notes, stage.get("current_rerun_correction"))
+    history = stage.get("rerun_history")
+    if isinstance(history, list) and history:
+        latest = history[-1]
+        if isinstance(latest, dict):
+            notes = merge_unique(notes, latest.get("note"))
+    notes = merge_unique(notes, stage.get("parent_note"))
+    return bullet_text(notes, "")
 
 
 def panel_line(panel: dict[str, Any]) -> str:
@@ -458,6 +594,13 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     source_root = state.get("source_root") or str(DEFAULT_SOURCE_ROOT)
     excluded_roots = ", ".join(state.get("excluded_source_roots") or [str(DEFAULT_OUTPUT_ROOT)])
     panels = page.get("panels", [])
+    text_policy = normalize_text_policy(page.get("text_policy") or state.get("text_policy"))
+    text_policy_lines = text_policy_instruction_lines(text_policy, page)
+    text_policy_worker_checks = text_policy_worker_check_lines(text_policy)
+    character_locks = page_policy_items(state, page, "character_locks")
+    visual_text_guard = page_policy_items(state, page, "visual_text_guard")
+    stage = stage_state(page, stage_id)
+    rerun_correction = current_rerun_correction(stage)
     panel_text = "\n".join(panel_line(panel) for panel in panels) or "- no panel details supplied"
     page_dialogue_notes = page.get("page_dialogue_notes") or (
         "Adapt source dialogue to fit comic timing, mood, panel rhythm, and balloon space. "
@@ -484,6 +627,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
         "opposite the throw or shot, inconsistent character design, inconsistent setting, wrong costume, "
         "cropped key action, blurry subject, over-smoothed AI texture."
     )
+    negative_terms = merge_unique(negative, text_policy_negative_terms(text_policy), visual_text_guard)
+    negative_prompt_text = ", ".join(negative_terms)
     return "\n".join(
         [
             f"Workflow: {WORKFLOW}",
@@ -520,9 +665,22 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "For storyboard_sketch_ink, draw planned speed lines, focus lines, impact bursts, emotion lines, motion streaks, line-weight contrast, and ink emphasis directly in the sketch/ink pass when they serve the beat.",
             "For finish, preserve the inspected storyboard_sketch_ink visual emphasis, effect-line direction, and ink rhythm; tone/color must not weaken or cover them.",
             "",
-            "Page dialogue and lettering policy:",
-            page_dialogue_notes,
-            "Use adapted_dialogue, approved SFX, and approved captions inside the page image. Keep lettering short, legible, and placed so it does not cover key faces, hands, props, or action.",
+            "Page text policy:",
+            *text_policy_lines,
+            "",
+            "Page dialogue notes:",
+            page_dialogue_notes
+            if text_policy == TEXT_POLICY_DIALOGUE_SFX_CAPTIONS
+            else "Dialogue and caption fields remain plan metadata only under this text_policy unless the policy above explicitly permits them.",
+            "",
+            "Character locks:",
+            bullet_text(character_locks),
+            "",
+            "Visual text guard:",
+            bullet_text(visual_text_guard),
+            "",
+            "Current rerun correction:",
+            rerun_correction or "- none",
             "",
             "Panels on this page:",
             panel_text,
@@ -566,8 +724,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Executes and verifies the approved comic visual direction: detail density, focal-point emphasis, closeup intensity, line weight, black-ink weight, and background simplification/emphasis",
             "- Verifies planned speed lines, focus lines, impact bursts, emotion lines, and motion streaks; effect-line direction must match action direction, impact, mood, or eye guidance",
             "- Rejects missing planned visual effects, effect lines that contradict motion, and pages where every panel has the same flat visual intensity",
-            "- Uses adapted dialogue/SFX/captions from the approved plan, not raw source dialogue by default",
-            "- Speech balloons, SFX, and captions are legible and do not cover key art",
+            *text_policy_worker_checks,
+            "- Preserves every Character locks item listed above; reject forbidden marker/accessory/silhouette drift",
+            "- Enforces every Visual text guard item listed above; reject arbitrary environmental text, labels, signs, or corner text when forbidden",
             "- Preserves story beat, reading order, composition, and continuity",
             "- Preserves source-data consistency for characters, props, profiles, locations, and page-layout references",
             "- Preserves panel-to-panel and adjacent-page continuity for character/object placement, gaze, action direction, time flow, and lettering placement",
@@ -577,7 +736,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Has no obvious anatomy, perspective, crop, object, or continuity defects",
             "",
             "Negative prompt:",
-            negative,
+            negative_prompt_text,
             "",
             "Return only: generated file path, worker_status, worker_note.",
         ]
@@ -585,6 +744,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
 
 
 def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
+    text_policy = normalize_text_policy(state.get("text_policy"))
     lines = [
         "# Approved Comic Storyboard Page Plan",
         "",
@@ -603,14 +763,19 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need clear story justification.",
         "- Use experimental freeform panel design by default and avoid unintentional uniform rectangular grids.",
         "- Plan and verify comic visual direction: detail density, visual emphasis, line-weight rhythm, and speed/focus/impact/emotion lines when the beat calls for them.",
+        f"- Text policy: {text_policy}. {text_policy_batch_summary(text_policy)}",
         "- Reserve at most four pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
         "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, and panel/page continuity.",
-        "- Approved adapted dialogue, SFX, and short captions are included in the page image.",
         "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction.",
         "",
     ]
+    for lock in state.get("character_locks", []):
+        lines.append(f"- Character lock: {lock}")
+    for guard in state.get("visual_text_guard", []):
+        lines.append(f"- Visual text guard: {guard}")
+    lines.append("")
     lines.extend(["Stage reviews:", ""])
     for stage_id in STAGE_IDS:
         review = state.get("stage_reviews", {}).get(stage_id, blank_stage_review())
@@ -638,6 +803,9 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  scenes: {', '.join(page.get('scene_refs', [])) or 'unspecified'}",
                 f"  layout: {page.get('layout_brief') or ''}",
                 f"  reading_order: {page.get('reading_order') or state.get('reading_order') or 'unspecified'}",
+                f"  text_policy: {normalize_text_policy(page.get('text_policy') or text_policy)}",
+                f"  character_locks: {'; '.join(page_policy_items(state, page, 'character_locks')) or 'none'}",
+                f"  visual_text_guard: {'; '.join(page_policy_items(state, page, 'visual_text_guard')) or 'none'}",
                 f"  panel_count: {len(page.get('panels', []))}",
                 f"  pacing: {page.get('pacing_notes') or DEFAULT_PACING_NOTES}",
                 f"  panel_shapes: {page.get('panel_shape_notes') or DEFAULT_PANEL_SHAPE_NOTES}",
@@ -686,6 +854,9 @@ def command_init(args: argparse.Namespace) -> None:
         "source_root": str(DEFAULT_SOURCE_ROOT),
         "excluded_source_roots": [str(DEFAULT_OUTPUT_ROOT)],
         "source_references": [],
+        "text_policy": TEXT_POLICY_DIALOGUE_SFX_CAPTIONS,
+        "character_locks": [],
+        "visual_text_guard": [],
         "stage_order": STAGE_IDS,
         "stage_reviews": build_stage_reviews(),
         "plan_approved": False,
@@ -763,6 +934,9 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
                 "adapted_dialogue": raw.get("adapted_dialogue") or [],
                 "sfx": raw.get("sfx") or [],
                 "caption": raw.get("caption") or raw.get("narration") or [],
+                "text_policy": raw.get("text_policy") or "",
+                "character_locks": raw.get("character_locks") or [],
+                "visual_text_guard": raw.get("visual_text_guard") or [],
                 "detail_density_notes": raw.get("detail_density_notes") or "",
                 "visual_emphasis_notes": raw.get("visual_emphasis_notes") or "",
                 "comic_effects_notes": raw.get("comic_effects_notes") or "",
@@ -785,6 +959,9 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "scene_refs": as_list(raw.get("scene_refs") or raw.get("scenes")),
         "layout_brief": str(raw.get("layout_brief") or raw.get("visual_brief") or ""),
         "reading_order": str(raw.get("reading_order") or ""),
+        "text_policy": normalize_text_policy(raw.get("text_policy")) if raw.get("text_policy") else "",
+        "character_locks": merge_unique(raw.get("character_locks")),
+        "visual_text_guard": merge_unique(raw.get("visual_text_guard")),
         "page_dialogue_notes": str(raw.get("page_dialogue_notes") or ""),
         "pacing_notes": str(raw.get("pacing_notes") or DEFAULT_PACING_NOTES),
         "panel_shape_notes": str(raw.get("panel_shape_notes") or DEFAULT_PANEL_SHAPE_NOTES),
@@ -884,6 +1061,9 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     state["source_root"] = str(DEFAULT_SOURCE_ROOT)
     state["excluded_source_roots"] = [str(DEFAULT_OUTPUT_ROOT)]
     state["source_references"] = validate_reference_paths(plan.get("references") or plan.get("reference_paths"))
+    state["text_policy"] = normalize_text_policy(plan.get("text_policy"))
+    state["character_locks"] = merge_unique(plan.get("character_locks"))
+    state["visual_text_guard"] = merge_unique(plan.get("visual_text_guard"))
     state["plan_approved"] = True
     state["approved_at"] = now_iso()
     state["pages"] = pages
@@ -891,6 +1071,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     state["batches"] = []
     state["stage_reviews"] = build_stage_reviews()
     state.setdefault("notes", []).append(f"Approved {len(pages)} comic pages at {state['approved_at']}.")
+    normalize_state(state)
 
     write_json(
         run_dir / "approved_storyboard_plan.json",
@@ -901,7 +1082,10 @@ def command_approve_plan(args: argparse.Namespace) -> None:
             "source_root": state.get("source_root", ""),
             "excluded_source_roots": state.get("excluded_source_roots", []),
             "source_references": state.get("source_references", []),
-            "pages": pages,
+            "text_policy": state.get("text_policy", TEXT_POLICY_DIALOGUE_SFX_CAPTIONS),
+            "character_locks": state.get("character_locks", []),
+            "visual_text_guard": state.get("visual_text_guard", []),
+            "pages": state.get("pages", []),
         },
     )
     write_batch_plan(run_dir, state)
@@ -952,6 +1136,7 @@ def command_next_batch(args: argparse.Namespace) -> None:
     batch_id = f"batch-{len(state.get('batches', [])) + 1:03d}"
     for page in selected:
         stage = stage_state(page, stage_id)
+        rerun_correction = current_rerun_correction(stage, require_pending=True)
         stage["status"] = "generation_requested"
         stage["batch_id"] = batch_id
         stage["attempts"] = int(stage.get("attempts", 0)) + 1
@@ -960,6 +1145,7 @@ def command_next_batch(args: argparse.Namespace) -> None:
         stage["worker_status"] = ""
         stage["worker_note"] = ""
         stage["parent_note"] = ""
+        stage["current_rerun_correction"] = rerun_correction
         prompt_path = stage_prompt_path(run_dir, page, stage_id)
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
         prompt_path.write_text(prompt_text(run_dir, page, stage_id, state), encoding="utf-8")
@@ -1005,7 +1191,8 @@ def command_import(args: argparse.Namespace) -> None:
 
     destination = stage_output_path(run_dir, page, stage_id)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(generated, destination)
+    if generated.resolve(strict=False) != destination.resolve(strict=False):
+        shutil.copy2(generated, destination)
     stage["status"] = "imported"
     stage["generated_source"] = str(generated)
     stage["output_path"] = str(destination)

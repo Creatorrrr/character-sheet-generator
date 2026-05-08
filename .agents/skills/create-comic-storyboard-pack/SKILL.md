@@ -1,6 +1,6 @@
 ---
 name: create-comic-storyboard-pack
-description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with 3-5 panel page layouts by default, 1-2 panel special staging, experimental freeform panel shapes, comic visual direction, detail density, visual emphasis, effect lines, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
+description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with 3-5 panel page layouts by default, 1-2 panel special staging, experimental freeform panel shapes, comic visual direction, text_policy handling, visual text guards, character locks, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
 ---
 
 # Create Comic Storyboard Pack
@@ -47,7 +47,7 @@ Ask for missing inputs only when the story outline or scenario cannot define pag
 
 Extract comic-book pages that serve the story outline or scenario, not every moment or minor beat.
 
-- Default output is one complete page image containing 3-5 panels by default, gutters or open borders, varied panel sizes, speech balloons, SFX lettering, and short captions when useful.
+- Default output is one complete page image containing 3-5 panels by default, gutters or open borders, varied panel sizes, and rendered text only as allowed by the approved `text_policy`.
 - Follow a measured cinematic Korean comic-book composition: clear reading flow, readable balloon placement, meaningful pauses, and balanced black/white or tone/color finish.
 - Use 1-2 panels for special staging such as a full-page emotional beat, silence, stillness, large reveal, or decisive action moment; do not treat approved 1-2 panel special staging as a failure.
 - Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, half/full-page panels, borderless or open panels, inset panels, partial overlaps, and wide negative space are allowed when reading order and continuity stay clear.
@@ -61,18 +61,21 @@ Extract comic-book pages that serve the story outline or scenario, not every mom
 - Include comic visual direction notes: detail density, focal point, visual emphasis, closeup intensity, line-weight/black-ink emphasis, background detail omission or emphasis, and planned speed/focus/impact/emotion lines.
 - Use comic effect lines selectively. Do not add them as decoration to every panel; use them when they clarify action, emotion, impact, speed, or eye guidance.
 - Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and comic visual direction as metadata.
+- Include `text_policy`, `character_locks`, and `visual_text_guard` in the approved plan when the user gives restrictions such as "대사 없이 효과음만", "텍스트 없음", fixed character markings, forbidden symbols, or forbidden environmental lettering.
 - Use concise stable page filenames with a numeric prefix.
 
 ## Dialogue and Text Rules
 
-Comic text is part of the generated page by default.
+Generated page text is controlled by `text_policy`.
 
-- Do not copy provided source dialogue verbatim by default.
-- Rewrite dialogue to fit comic timing, panel rhythm, emotion, balloon space, and page mood.
-- Record the original line as `source_dialogue` and the used comic line as `adapted_dialogue`.
-- Include approved `adapted_dialogue`, SFX, and short captions inside the generated page image.
-- Keep lettering short, legible, and placed where it does not cover faces, hands, props, or key action.
+- Default `text_policy` is `dialogue_sfx_captions`: comic text is allowed, including approved `adapted_dialogue`, SFX, and short captions inside the generated page image.
+- `sfx_only` means no spoken dialogue, no speech balloons, no captions, no narration, no signage, no environmental text, no labels, no page or panel numbers, no random typography, and no corner labels. Only approved SFX from the plan may appear.
+- `text_free` means no rendered text of any kind, including SFX, dialogue, speech balloons, captions, signage, labels, page or panel numbers, logos, environmental text, random glyphs, or corner labels.
+- Record original lines as `source_dialogue` and comic lines as `adapted_dialogue` even when the active text policy forbids rendering them; they remain planning metadata unless the policy allows them.
+- For `dialogue_sfx_captions`, do not copy provided source dialogue verbatim by default. Rewrite dialogue to fit comic timing, panel rhythm, emotion, balloon space, and page mood.
+- Keep any allowed lettering short, legible, and placed where it does not cover faces, hands, props, or key action.
 - If the user explicitly asks for exact dialogue preservation, mark that in `page_dialogue_notes` and keep the quoted line unchanged.
+- Use `visual_text_guard` for concrete bans such as "건물/깃발/책/장식/컷 모서리에 임의 문자 금지".
 
 ## Spatial and Motion Logic
 
@@ -100,14 +103,19 @@ Use this approval format:
 - 페이지 호흡/컷 밀도: 기본 3-5컷 권장, 1-2컷은 특수 연출에 권장
 - 컷 형태/레이아웃 자유도: 실험적 자유형 컷 구성 허용
 - 6컷 이상 사용 사유: 해당 페이지가 있으면 명시
+- 텍스트 정책(text_policy): dialogue_sfx_captions | sfx_only | text_free 중 승인안에 반영
+- 캐릭터 고정 조건(character_locks): 있으면 명시
+- 이미지 내 문자 방지 조건(visual_text_guard): 있으면 명시
 
-| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 주요 대사/SFX 각색 | 공간/동선 검수 포인트 |
+| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/문자 고정 조건 | 공간/동선 검수 포인트 |
 | ... |
 
 텍스트 정책:
-- 기본값: 승인된 말풍선 대사/효과음/짧은 캡션을 이미지 내부에 포함
-- 원문 대사: 보존 자료로 기록
-- 사용 대사: 만화 타이밍과 분위기에 맞게 각색하여 기록
+- 승인된 text_policy: ...
+- dialogue_sfx_captions: 승인된 각색 대사/효과음/짧은 캡션을 이미지 내부에 포함
+- sfx_only: 말풍선/대사/캡션/간판/환경문자/컷번호/라벨 금지, 승인 SFX만 허용
+- text_free: SFX를 포함한 모든 이미지 내 문자 금지
+- 원문 대사/각색 대사는 정책과 별도로 계획 메타데이터로 기록
 
 승인 후 진행 방식:
 - 1단계: 콘티/스케치/펜선 storyboard_sketch_ink
@@ -122,6 +130,8 @@ Use this approval format:
 - 모든 페이지의 1단계 단계 마무리 검수 통과 전에는 2단계를 시작하지 않음
 - 2단계는 1단계 생성 이미지를 필수 입력/구조 참조로 사용
 - 실패 페이지 rerun 후 다음 배치 진행
+- rerun --note의 보정 문구는 다음 재생성 프롬프트의 Current rerun correction에 자동 포함
+- subagent가 completed:null이거나 생성 파일 경로를 반환하지 않으면 import하지 말고 rerun으로 라우팅
 ```
 
 Do not call `approve-plan` or `next-batch` until the user approves this list. If the user edits the list, update the plan first and ask approval again when the change affects generated pages or page text.
@@ -135,6 +145,13 @@ After approval, write an approved plan and import it with the runner:
   "scenario_title": "short title",
   "style_brief": "Korean comic-book style, tone, palette, rendering direction",
   "reading_order": "right-to-left or top-to-bottom as approved",
+  "text_policy": "dialogue_sfx_captions",
+  "character_locks": [
+    "character name: fixed visual marker or silhouette requirement; forbidden drift"
+  ],
+  "visual_text_guard": [
+    "no arbitrary text on buildings, signs, books, flags, decorations, labels, or panel corners"
+  ],
   "pages": [
     {
       "id": "001-gym-arrival",
@@ -143,6 +160,9 @@ After approval, write an approved plan and import it with the runner:
       "scene_refs": ["S01"],
       "layout_brief": "Three-panel cinematic page: one wide borderless establishing panel, one diagonal action panel, one quiet close reaction panel with breathing room.",
       "reading_order": "top-to-bottom, left-to-right within each row",
+      "text_policy": "dialogue_sfx_captions",
+      "character_locks": [],
+      "visual_text_guard": [],
       "pacing_notes": "3-5 panels by default; 1-2 panels are recommended for special staging such as silence, stillness, or a decisive action moment.",
       "panel_shape_notes": "Use experimental freeform composition: borderless wide opening panel, diagonal action panel, and asymmetrical closeup panel.",
       "negative_space_notes": "Leave quiet negative space around the protagonist's entrance and the final reaction.",
@@ -195,6 +215,8 @@ After approval, write an approved plan and import it with the runner:
 Legacy flat `panels` plans are accepted only for compatibility. The runner converts each panel into a single-panel page, but new plans should use `pages[].panels[]`.
 
 `references` and top-level `reference_paths` must point to user-provided files or relevant files under `sources/`. Do not put files from `output/` in the approved plan.
+
+`text_policy` is optional for backward compatibility. If omitted, the runner treats it as `dialogue_sfx_captions`. Use page-level `text_policy`, `character_locks`, or `visual_text_guard` only when a page intentionally differs from the top-level rule.
 
 ## Resumable Runner Contract
 
@@ -259,6 +281,9 @@ State rules:
 - A later stage is eligible only after every page in the previous stage is parent-inspected as `inspected_pass` or marked `complete`, and the previous stage's stage finish review is `passed`.
 - Stage pipelining is not allowed: do not start `finish` for any page until every page has passed `storyboard_sketch_ink`.
 - `finish` requires the parent-inspected `storyboard_sketch_ink` image as visual input and structure reference.
+- `text_policy`, `character_locks`, and `visual_text_guard` are copied into every stage prompt and worker inspection checklist.
+- `rerun --note` stores the correction in `rerun_history`; the next `next-batch` prompt for that page includes it under `Current rerun correction`.
+- `import --generated` may point directly to the stage output path. The runner updates state without copying over the same file.
 - After all pages in a stage pass parent inspection, run `stage-review` before reserving the next stage or declaring completion.
 - `stage-review --status pass` requires every page in that stage to be parent-inspected pass or complete.
 - `stage-review --status needs_rerun` requires one or more `--rerun-item` values and moves those page stages back to `pending` with `rerun_pending=true`.
@@ -270,11 +295,11 @@ State rules:
 ## Two Stage Rules
 
 1. `storyboard_sketch_ink`
-   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize 3-5 panel measured cinematic pacing, experimental freeform panel shapes, clear reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, ink line clarity, detail density, visual emphasis, and planned comic effect lines. Use 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments. Draw speed lines, focus lines, impact bursts, emotion lines, motion streaks, line-weight contrast, and black-ink emphasis only where they serve the approved beat. Reject over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, pages packed with dialogue/SFX without breathing room, missing planned effects, effect lines that contradict motion, or pages where every panel has the same flat visual intensity.
+   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize 3-5 panel measured cinematic pacing, experimental freeform panel shapes, clear reading flow, text/SFX placement according to the approved `text_policy`, beat clarity, action blocking, spatial logic, clean sketch structure, ink line clarity, detail density, visual emphasis, and planned comic effect lines. Use 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments. Draw speed lines, focus lines, impact bursts, emotion lines, motion streaks, line-weight contrast, and black-ink emphasis only where they serve the approved beat. Reject over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, pages whose allowed text/SFX lacks breathing room, missing planned effects, effect lines that contradict motion, or pages where every panel has the same flat visual intensity.
    Stage finish review must compare every panel against approved source data and allowed `sources/` references for character, prop, profile, setting, and page-layout consistency, then check same-page and adjacent-page continuity.
 
 2. `finish`
-   Use the parent-inspected `storyboard_sketch_ink` page as the required visual input and structure reference. Add tone, color if requested, lighting, shadows, final lettering, SFX, captions, and cleanup without changing page layout, panel count, freeform panel shapes, negative space, text placement, comic effect lines, visual emphasis, line-weight rhythm, character/object blocking, movement direction, or action logic.
+   Use the parent-inspected `storyboard_sketch_ink` page as the required visual input and structure reference. Add tone, color if requested, lighting, shadows, final policy-approved lettering/SFX, and cleanup without changing page layout, panel count, freeform panel shapes, negative space, text placement or text absence, comic effect lines, visual emphasis, line-weight rhythm, character/object blocking, movement direction, or action logic.
    Stage finish review must verify that tone/color/final polish did not introduce source-data drift or break continuity from the inspected `storyboard_sketch_ink` images.
 
 ## Parallel Generation Rules
@@ -290,6 +315,8 @@ After approval, all image generation must happen through subagents:
 - Do not use serial parent-session `image_gen` as a fallback.
 - If subagents are unavailable, stop and report that generation is blocked by missing subagent support.
 - Do not start the next four pages until the parent has inspected every imported page from the current batch and routed failures to `rerun` or passes to `inspect-pass`.
+- After a batch item is imported and parent-routed, close completed subagents that are no longer needed before starting the next batch.
+- If a subagent returns `completed:null`, no final message, or no usable generated file path, do not invent an import path. Mark the page for `rerun` with the missing-result reason.
 
 ## Subagent Batch Contract
 
@@ -310,16 +337,19 @@ Default source folder: /Users/chasoik/Projects/character-sheet-generator/sources
 Excluded source folder: /Users/chasoik/Projects/character-sheet-generator/output/
 Prior-stage reference: <path or none>
 Relevant references: <paths or "none">
-Page text policy: include approved adapted dialogue, SFX, and short captions inside speech balloons/caption areas/SFX lettering.
+Page text policy: <approved text_policy and exact rendered-text allowance/prohibitions from prompt file>
+Character locks: <top-level and page-level character_locks, or "none">
+Visual text guard: <top-level and page-level visual_text_guard, or "none">
+Current rerun correction: <rerun_history[-1].note / parent_note if present, or "none">
 Page pacing policy: use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need explicit story justification.
 Panel shape policy: experimental freeform panel shapes are allowed and should not be rejected when reading order and continuity are clear.
 Comic visual direction policy: follow approved detail density, visual emphasis, line-weight/black-ink rhythm, and speed/focus/impact/emotion lines; use effect lines only when they serve the beat.
 Spatial logic policy: reject impossible positions, object trajectories, or motion direction.
 Source consistency policy: reject drift in character face/body/hair/outfit, props, profile details, setting, landmarks, or page-layout references compared with the approved plan and allowed sources/.
-Panel continuity policy: reject discontinuity across panels or adjacent pages in positions, gaze, action direction, object movement, time flow, speech balloons, SFX, captions, and cause-effect motion.
+Panel continuity policy: reject discontinuity across panels or adjacent pages in positions, gaze, action direction, object movement, time flow, policy-approved text/SFX placement or required text absence, and cause-effect motion.
 Source policy: when no explicit reference path is provided, use relevant files from the default source folder; never use output/ files as source data.
 
-Use image_gen with the assigned prompt and visual references. After generation, inspect the output for stage fit, page/story fit, multi-panel layout, adapted text/SFX fit, text legibility, spatial continuity, motion plausibility, technical quality, and obvious defects. Return only:
+Use image_gen with the assigned prompt and visual references. After generation, inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, visual_text_guard, spatial continuity, motion plausibility, technical quality, and obvious defects. Return only:
 - generated file path
 - worker_status: pass or needs_rerun
 - worker_note: concise inspection note
@@ -341,11 +371,13 @@ Inspect every imported page before marking it passed. Check:
 - Planned focal points, detail density, closeup intensity, line-weight/black-ink emphasis, and background simplification/emphasis match the approved page and panel notes.
 - Planned speed lines, focus lines, impact bursts, emotion lines, and motion streaks are present where needed and match action direction, impact, mood, or eye guidance.
 - Missing planned visual effects, effect lines that contradict motion, and pages where every panel has the same flat visual intensity must be rejected.
-- Speech balloons, SFX, and captions use approved adapted text and are legible.
-- Source dialogue was adapted for comic timing unless exact preservation was explicitly approved.
+- Active `text_policy` is followed exactly: `dialogue_sfx_captions` uses approved adapted text/SFX/captions, `sfx_only` allows only approved SFX, and `text_free` contains no rendered text at all.
+- `visual_text_guard` is satisfied: no arbitrary text on buildings, flags, books, decorations, panel corners, labels, or other listed surfaces.
+- Source dialogue was adapted for comic timing unless exact preservation was explicitly approved and the active text policy allows dialogue rendering.
 - Source/reference data came from user-provided paths or `sources/`, not from `output/` generated artifacts.
 - Character face, age impression, body shape, hair, outfit, accessories, props, profile details, setting, landmarks, and page-layout references stay consistent with the approved plan and allowed source data.
-- Same-page panels and adjacent pages preserve continuity for position, gaze, action direction, object movement, time flow, speech/SFX placement, captions, and cause-effect motion.
+- `character_locks` are preserved, including fixed markings, silhouettes, forbidden accessories, or other drift guards.
+- Same-page panels and adjacent pages preserve continuity for position, gaze, action direction, object movement, time flow, policy-approved text/SFX placement or required text absence, and cause-effect motion.
 - Composition, character blocking, props, setting, and continuity match the plan.
 - Character/object positions, motion direction, ball/projectile paths, gaze direction, and cause-effect movement are plausible.
 - `storyboard_sketch_ink` contains the approved page layout, cut structure, lettering placement, sketch structure, and ink lines.
@@ -385,7 +417,9 @@ After each batch, report in Korean:
 - 이번 병렬 그룹: ...
 - worker 검수 결과: ...
 - 부모 검수 결과: ...
-- 대사/효과음 검수: ...
+- 텍스트 정책 검수: ...
+- 캐릭터 고정 조건 검수: ...
+- 이미지 내 문자 방지 검수: ...
 - 공간/동선 검수: ...
 - 단계 마무리 검수 결과: ...
 - 소스 일관성 이슈: ...

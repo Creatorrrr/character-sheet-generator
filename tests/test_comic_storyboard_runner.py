@@ -341,6 +341,132 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Source consistency checklist:", prompt)
             self.assertIn("Panel and page continuity checklist:", prompt)
 
+    def test_sfx_only_text_policy_prompt_rejects_dialogue_captions_signage_and_panel_numbers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = sample_plan(page_count=1, panel_count=2)
+            plan["text_policy"] = "sfx_only"
+            plan_path = root / "sfx-only-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            prompt_path = Path(state["pages"][0]["stages"][FIRST_STAGE]["prompt_file"])
+            prompt = prompt_path.read_text(encoding="utf-8")
+
+            self.assertEqual(state["text_policy"], "sfx_only")
+            self.assertIn("Text policy: sfx_only", prompt)
+            self.assertIn("Only approved SFX may appear", prompt)
+            self.assertIn("no spoken dialogue", prompt)
+            self.assertIn("no speech balloons", prompt)
+            self.assertIn("no captions", prompt)
+            self.assertIn("no signage", prompt)
+            self.assertIn("no environmental text", prompt)
+            self.assertIn("no page or panel numbers", prompt)
+            self.assertIn("Rejects spoken dialogue, speech balloons, captions/narration, signage, labels, page/panel numbers", prompt)
+            self.assertNotIn("Use adapted_dialogue, approved SFX, and approved captions", prompt)
+
+    def test_text_free_policy_prompt_rejects_all_text_including_sfx(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = sample_plan(page_count=1, panel_count=2)
+            plan["text_policy"] = "text_free"
+            plan_path = root / "text-free-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            prompt_path = Path(state["pages"][0]["stages"][FIRST_STAGE]["prompt_file"])
+            prompt = prompt_path.read_text(encoding="utf-8")
+
+            self.assertEqual(state["text_policy"], "text_free")
+            self.assertIn("Text policy: text_free", prompt)
+            self.assertIn("No text of any kind may appear in the generated image", prompt)
+            self.assertIn("Do not render SFX", prompt)
+            self.assertIn("no dialogue, no speech balloons, no captions, no signage, no labels, no page or panel numbers", prompt)
+            self.assertIn("Rejects all rendered text/glyphs, including SFX, dialogue, captions, signage, labels, panel/page numbers", prompt)
+            self.assertNotIn("Only approved SFX may appear", prompt)
+
+    def test_character_locks_and_visual_text_guard_are_in_storyboard_and_finish_prompts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = sample_plan(page_count=1, panel_count=2)
+            plan["character_locks"] = ["그림자마왕: 검은 물방울형 몸 표식 유지, 해골 장식 금지"]
+            plan["visual_text_guard"] = ["건물/깃발/책/장식/컷 모서리에 임의 문자 금지"]
+            plan_path = root / "locks-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            generated = generate_file(root)
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            storyboard_prompt_path = Path(state["pages"][0]["stages"][FIRST_STAGE]["prompt_file"])
+            storyboard_prompt = storyboard_prompt_path.read_text(encoding="utf-8")
+
+            self.assertIn("Character locks:", storyboard_prompt)
+            self.assertIn("그림자마왕: 검은 물방울형 몸 표식 유지, 해골 장식 금지", storyboard_prompt)
+            self.assertIn("Visual text guard:", storyboard_prompt)
+            self.assertIn("건물/깃발/책/장식/컷 모서리에 임의 문자 금지", storyboard_prompt)
+            self.assertIn("Preserves every Character locks item listed above", storyboard_prompt)
+            self.assertIn("Enforces every Visual text guard item listed above", storyboard_prompt)
+
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "first stage source and continuity pass",
+                cwd=root,
+            )
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            finish_prompt_path = Path(state["pages"][0]["stages"][FINISH_STAGE]["prompt_file"])
+            finish_prompt = finish_prompt_path.read_text(encoding="utf-8")
+
+            self.assertIn("Character locks:", finish_prompt)
+            self.assertIn("그림자마왕: 검은 물방울형 몸 표식 유지, 해골 장식 금지", finish_prompt)
+            self.assertIn("Visual text guard:", finish_prompt)
+            self.assertIn("건물/깃발/책/장식/컷 모서리에 임의 문자 금지", finish_prompt)
+            self.assertIn("Preserves every Character locks item listed above", finish_prompt)
+            self.assertIn("Enforces every Visual text guard item listed above", finish_prompt)
+
     def test_prompt_uses_sources_by_default_and_excludes_output_source_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -863,6 +989,87 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn(f"CURRENT_STAGE: {FIRST_STAGE}", result.stdout)
             self.assertIn(f"{FIRST_STAGE}: inspected_pass=1, pending=1", result.stdout)
             self.assertIn(f"{FINISH_STAGE}: pending=2", result.stdout)
+
+    def test_rerun_note_is_included_in_next_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "rerun",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "LIBRARY 표기 금지",
+                cwd=root,
+            )
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            prompt_path = Path(state["pages"][0]["stages"][FIRST_STAGE]["prompt_file"])
+            prompt = prompt_path.read_text(encoding="utf-8")
+
+            self.assertIn("Current rerun correction:", prompt)
+            self.assertIn("LIBRARY 표기 금지", prompt)
+
+    def test_import_accepts_generated_path_that_is_already_stage_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            generated = Path(stage["output_path"])
+            generated.parent.mkdir(parents=True, exist_ok=True)
+            generated.write_bytes(b"already generated in place")
+
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            state = json.loads((run_dir / "state.json").read_text())
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+
+            self.assertEqual(stage["status"], "imported")
+            self.assertEqual(stage["generated_source"], str(generated))
+            self.assertEqual(Path(stage["output_path"]), generated)
+            self.assertEqual(generated.read_bytes(), b"already generated in place")
 
     def test_worker_needs_rerun_is_advisory_until_parent_decides(self):
         with tempfile.TemporaryDirectory() as tmp:

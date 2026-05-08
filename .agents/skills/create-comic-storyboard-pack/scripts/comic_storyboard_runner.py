@@ -51,6 +51,18 @@ DEFAULT_PANEL_SHAPE_NOTES = (
 DEFAULT_NEGATIVE_SPACE_NOTES = (
     "Leave breathing room around faces, hands, key action, speech balloons, SFX, and quiet mood beats."
 )
+DEFAULT_DETAIL_DENSITY_NOTES = (
+    "Use selective detail density: emphasize focal characters, props, hands, faces, and key action; simplify "
+    "backgrounds or low-priority areas when they would distract from the story beat."
+)
+DEFAULT_VISUAL_EMPHASIS_NOTES = (
+    "Plan visual emphasis with focal points, closeup intensity, line weight, black-ink weight, silhouette, "
+    "contrast, and background omission or emphasis so important beats read stronger than support beats."
+)
+DEFAULT_COMIC_EFFECTS_NOTES = (
+    "Use comic effect lines only when they serve action, emotion, impact, speed, or eye guidance. Speed lines, "
+    "focus lines, impact bursts, emotion lines, and motion streaks must match the action direction and mood."
+)
 
 
 def now_iso() -> str:
@@ -207,6 +219,9 @@ def normalize_state(state: dict[str, Any]) -> None:
         page.setdefault("pacing_notes", DEFAULT_PACING_NOTES)
         page.setdefault("panel_shape_notes", DEFAULT_PANEL_SHAPE_NOTES)
         page.setdefault("negative_space_notes", DEFAULT_NEGATIVE_SPACE_NOTES)
+        page.setdefault("detail_density_notes", DEFAULT_DETAIL_DENSITY_NOTES)
+        page.setdefault("visual_emphasis_notes", DEFAULT_VISUAL_EMPHASIS_NOTES)
+        page.setdefault("comic_effects_notes", DEFAULT_COMIC_EFFECTS_NOTES)
         page.setdefault("spatial_logic_notes", "")
         page.setdefault("motion_checks", [])
         page.setdefault("must_match", [])
@@ -392,7 +407,8 @@ def stage_instruction(stage_id: str) -> str:
             "Create the combined Korean comic-book page storyboard, sketch, and ink pass. Show a full "
             "page with 3-5 panels by default, measured cinematic pacing, experimental freeform panel "
             "design, gutters or open borders where appropriate, clear reading order, speech balloon "
-            "placement, SFX placement, captions where useful, clear action blocking, and clean ink lines. "
+            "placement, SFX placement, captions where useful, clear action blocking, planned detail "
+            "density, visual emphasis, comic effect lines, line-weight contrast, and clean ink lines. "
             "Use 1-2 panels for special staging such as a full-page emotion beat, silence, stillness, "
             "or a decisive action moment."
         )
@@ -402,7 +418,8 @@ def stage_instruction(stage_id: str) -> str:
             "storyboard_sketch_ink image as the visual input and structure reference. Add tones, color "
             "if requested, lighting, shadows, final lettering, speech balloons, SFX, short captions, "
             "and cleanup without changing page layout, panel count, freeform panel shapes, negative "
-            "space, text placement, character/object blocking, motion direction, or action logic."
+            "space, text placement, comic effect lines, visual emphasis, line-weight rhythm, "
+            "character/object blocking, motion direction, or action logic."
         )
     raise SystemExit(f"Unknown stage: {stage_id}")
 
@@ -414,6 +431,9 @@ def panel_line(panel: dict[str, Any]) -> str:
     captions = "; ".join(as_list(panel.get("caption") or panel.get("narration"))) or "none"
     checks = "; ".join(as_list(panel.get("motion_checks"))) or "none"
     must_match = "; ".join(as_list(panel.get("must_match"))) or "none"
+    detail_density = panel.get("detail_density_notes") or "use selective detail; simplify non-focal areas"
+    visual_emphasis = panel.get("visual_emphasis_notes") or "clear focal point and line-weight emphasis"
+    comic_effects = panel.get("comic_effects_notes") or "use effect lines only when they match motion or mood"
     return (
         f"- panel {panel.get('panel_no', panel.get('order', ''))}: "
         f"beat={panel.get('beat') or panel.get('purpose') or ''}; "
@@ -424,6 +444,8 @@ def panel_line(panel: dict[str, Any]) -> str:
         f"sfx={sfx}; captions={captions}; "
         f"speech_balloon={panel.get('speech_balloon') or 'place naturally without covering faces/action'}; "
         f"sfx_placement={panel.get('sfx_placement') or 'near the sound source'}; "
+        f"detail_density={detail_density}; visual_emphasis={visual_emphasis}; "
+        f"comic_effects={comic_effects}; "
         f"spatial_logic={panel.get('spatial_logic_notes') or panel.get('continuity_notes') or 'keep positions and directions plausible'}; "
         f"motion_checks={checks}; must_match={must_match}"
     )
@@ -444,6 +466,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     pacing_notes = page.get("pacing_notes") or DEFAULT_PACING_NOTES
     panel_shape_notes = page.get("panel_shape_notes") or DEFAULT_PANEL_SHAPE_NOTES
     negative_space_notes = page.get("negative_space_notes") or DEFAULT_NEGATIVE_SPACE_NOTES
+    detail_density_notes = page.get("detail_density_notes") or DEFAULT_DETAIL_DENSITY_NOTES
+    visual_emphasis_notes = page.get("visual_emphasis_notes") or DEFAULT_VISUAL_EMPHASIS_NOTES
+    comic_effects_notes = page.get("comic_effects_notes") or DEFAULT_COMIC_EFFECTS_NOTES
     spatial_logic_notes = page.get("spatial_logic_notes") or "Keep character, object, prop, and environment positions physically plausible."
     motion_checks = "\n".join(f"- {entry}" for entry in as_list(page.get("motion_checks"))) or "- no impossible motion: thrown, kicked, or shot objects move in the direction implied by body pose and panel action"
     must_match = "\n".join(f"- {entry}" for entry in as_list(page.get("must_match"))) or "- preserve approved page layout, panel count, action direction, and character/object continuity"
@@ -488,6 +513,13 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             panel_shape_notes,
             negative_space_notes,
             "",
+            "Comic visual direction:",
+            detail_density_notes,
+            visual_emphasis_notes,
+            comic_effects_notes,
+            "For storyboard_sketch_ink, draw planned speed lines, focus lines, impact bursts, emotion lines, motion streaks, line-weight contrast, and ink emphasis directly in the sketch/ink pass when they serve the beat.",
+            "For finish, preserve the inspected storyboard_sketch_ink visual emphasis, effect-line direction, and ink rhythm; tone/color must not weaken or cover them.",
+            "",
             "Page dialogue and lettering policy:",
             page_dialogue_notes,
             "Use adapted_dialogue, approved SFX, and approved captions inside the page image. Keep lettering short, legible, and placed so it does not cover key faces, hands, props, or action.",
@@ -531,6 +563,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Requires explicit story justification for six or more panels",
             "- Uses experimental freeform panel design; do not reject diagonal, asymmetric, open, borderless, inset, overlapping, or negative-space layouts when reading order and continuity are clear",
             "- Rejects overcrowded pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room",
+            "- Executes and verifies the approved comic visual direction: detail density, focal-point emphasis, closeup intensity, line weight, black-ink weight, and background simplification/emphasis",
+            "- Verifies planned speed lines, focus lines, impact bursts, emotion lines, and motion streaks; effect-line direction must match action direction, impact, mood, or eye guidance",
+            "- Rejects missing planned visual effects, effect lines that contradict motion, and pages where every panel has the same flat visual intensity",
             "- Uses adapted dialogue/SFX/captions from the approved plan, not raw source dialogue by default",
             "- Speech balloons, SFX, and captions are legible and do not cover key art",
             "- Preserves story beat, reading order, composition, and continuity",
@@ -567,6 +602,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Finish must use the parent-inspected storyboard_sketch_ink image as the required visual input / structure reference.",
         "- Use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need clear story justification.",
         "- Use experimental freeform panel design by default and avoid unintentional uniform rectangular grids.",
+        "- Plan and verify comic visual direction: detail density, visual emphasis, line-weight rhythm, and speed/focus/impact/emotion lines when the beat calls for them.",
         "- Reserve at most four pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
@@ -606,6 +642,9 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  pacing: {page.get('pacing_notes') or DEFAULT_PACING_NOTES}",
                 f"  panel_shapes: {page.get('panel_shape_notes') or DEFAULT_PANEL_SHAPE_NOTES}",
                 f"  negative_space: {page.get('negative_space_notes') or DEFAULT_NEGATIVE_SPACE_NOTES}",
+                f"  detail_density: {page.get('detail_density_notes') or DEFAULT_DETAIL_DENSITY_NOTES}",
+                f"  visual_emphasis: {page.get('visual_emphasis_notes') or DEFAULT_VISUAL_EMPHASIS_NOTES}",
+                f"  comic_effects: {page.get('comic_effects_notes') or DEFAULT_COMIC_EFFECTS_NOTES}",
                 f"  dialogue_notes: {page.get('page_dialogue_notes') or ''}",
                 f"  spatial_logic: {page.get('spatial_logic_notes') or ''}",
                 f"  dependencies: {', '.join(page.get('dependencies', [])) or 'none'}",
@@ -685,6 +724,9 @@ def normalize_panel(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "caption": as_list(raw.get("caption") or raw.get("narration")),
         "speech_balloon": str(raw.get("speech_balloon") or raw.get("speech_balloon_placement") or ""),
         "sfx_placement": str(raw.get("sfx_placement") or ""),
+        "detail_density_notes": str(raw.get("detail_density_notes") or ""),
+        "visual_emphasis_notes": str(raw.get("visual_emphasis_notes") or ""),
+        "comic_effects_notes": str(raw.get("comic_effects_notes") or ""),
         "continuity_notes": str(raw.get("continuity_notes") or ""),
         "spatial_logic_notes": str(raw.get("spatial_logic_notes") or ""),
         "motion_checks": as_list(raw.get("motion_checks")),
@@ -721,6 +763,9 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
                 "adapted_dialogue": raw.get("adapted_dialogue") or [],
                 "sfx": raw.get("sfx") or [],
                 "caption": raw.get("caption") or raw.get("narration") or [],
+                "detail_density_notes": raw.get("detail_density_notes") or "",
+                "visual_emphasis_notes": raw.get("visual_emphasis_notes") or "",
+                "comic_effects_notes": raw.get("comic_effects_notes") or "",
                 "continuity_notes": raw.get("continuity_notes") or "",
                 "spatial_logic_notes": raw.get("spatial_logic_notes") or "",
                 "motion_checks": raw.get("motion_checks") or [],
@@ -744,6 +789,9 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "pacing_notes": str(raw.get("pacing_notes") or DEFAULT_PACING_NOTES),
         "panel_shape_notes": str(raw.get("panel_shape_notes") or DEFAULT_PANEL_SHAPE_NOTES),
         "negative_space_notes": str(raw.get("negative_space_notes") or DEFAULT_NEGATIVE_SPACE_NOTES),
+        "detail_density_notes": str(raw.get("detail_density_notes") or DEFAULT_DETAIL_DENSITY_NOTES),
+        "visual_emphasis_notes": str(raw.get("visual_emphasis_notes") or DEFAULT_VISUAL_EMPHASIS_NOTES),
+        "comic_effects_notes": str(raw.get("comic_effects_notes") or DEFAULT_COMIC_EFFECTS_NOTES),
         "spatial_logic_notes": str(raw.get("spatial_logic_notes") or ""),
         "motion_checks": as_list(raw.get("motion_checks")),
         "must_match": as_list(raw.get("must_match")),

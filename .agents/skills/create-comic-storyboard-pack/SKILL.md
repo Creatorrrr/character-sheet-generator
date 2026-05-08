@@ -1,6 +1,6 @@
 ---
 name: create-comic-storyboard-pack
-description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with 3-5 panel page layouts by default, 1-2 panel special staging, experimental freeform panel shapes, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
+description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with 3-5 panel page layouts by default, 1-2 panel special staging, experimental freeform panel shapes, comic visual direction, detail density, visual emphasis, effect lines, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
 ---
 
 # Create Comic Storyboard Pack
@@ -58,7 +58,9 @@ Extract comic-book pages that serve the story outline or scenario, not every mom
 - Split panels within a page when the reader needs a new beat, reaction, reveal, action change, object insert, or timing pause.
 - Preserve scene references such as `S01`, `S02-S04`, or the user's own scene names.
 - Include page-level layout notes and panel-level composition/viewpoint notes: wide, closeup, over-shoulder, low angle, top view, insert, reaction, or establishing.
-- Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, and motion checks as metadata.
+- Include comic visual direction notes: detail density, focal point, visual emphasis, closeup intensity, line-weight/black-ink emphasis, background detail omission or emphasis, and planned speed/focus/impact/emotion lines.
+- Use comic effect lines selectively. Do not add them as decoration to every panel; use them when they clarify action, emotion, impact, speed, or eye guidance.
+- Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and comic visual direction as metadata.
 - Use concise stable page filenames with a numeric prefix.
 
 ## Dialogue and Text Rules
@@ -99,7 +101,7 @@ Use this approval format:
 - 컷 형태/레이아웃 자유도: 실험적 자유형 컷 구성 허용
 - 6컷 이상 사용 사유: 해당 페이지가 있으면 명시
 
-| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 주요 대사/SFX 각색 | 공간/동선 검수 포인트 |
+| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 주요 대사/SFX 각색 | 공간/동선 검수 포인트 |
 | ... |
 
 텍스트 정책:
@@ -144,6 +146,9 @@ After approval, write an approved plan and import it with the runner:
       "pacing_notes": "3-5 panels by default; 1-2 panels are recommended for special staging such as silence, stillness, or a decisive action moment.",
       "panel_shape_notes": "Use experimental freeform composition: borderless wide opening panel, diagonal action panel, and asymmetrical closeup panel.",
       "negative_space_notes": "Leave quiet negative space around the protagonist's entrance and the final reaction.",
+      "detail_density_notes": "Keep the protagonist, door hand, ball, and hoop more detailed; simplify empty bleachers and far background.",
+      "visual_emphasis_notes": "Use stronger line weight and black-ink contrast on the protagonist's face, hand, ball, and the final reaction closeup.",
+      "comic_effects_notes": "Use subtle door squeak lines, a short ball motion streak, and light focus lines toward the hoop only where the action calls for them.",
       "page_dialogue_notes": "Rewrite dialogue to sound tense and concise; do not copy source lines verbatim.",
       "spatial_logic_notes": "Hoop remains on the far wall; protagonist enters from foreground-left; basketball moves toward the hoop when shot.",
       "motion_checks": [
@@ -171,6 +176,9 @@ After approval, write an approved plan and import it with the runner:
           "caption": ["방과 후, 체육관."],
           "speech_balloon": "small balloon near protagonist, not covering face",
           "sfx_placement": "near opening door",
+          "detail_density_notes": "Door handle, hand, and protagonist silhouette are detailed; empty court background is simplified.",
+          "visual_emphasis_notes": "Focal point is the protagonist entering; use thicker foreground lines and lighter background line weight.",
+          "comic_effects_notes": "Small squeak effect lines near the door hinge; no decorative speed lines.",
           "spatial_logic_notes": "door stays foreground-left; hoop stays far wall"
         }
       ],
@@ -262,11 +270,11 @@ State rules:
 ## Two Stage Rules
 
 1. `storyboard_sketch_ink`
-   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize 3-5 panel measured cinematic pacing, experimental freeform panel shapes, clear reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, and ink line clarity. Use 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments. Reject over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room.
+   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize 3-5 panel measured cinematic pacing, experimental freeform panel shapes, clear reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, ink line clarity, detail density, visual emphasis, and planned comic effect lines. Use 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments. Draw speed lines, focus lines, impact bursts, emotion lines, motion streaks, line-weight contrast, and black-ink emphasis only where they serve the approved beat. Reject over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, pages packed with dialogue/SFX without breathing room, missing planned effects, effect lines that contradict motion, or pages where every panel has the same flat visual intensity.
    Stage finish review must compare every panel against approved source data and allowed `sources/` references for character, prop, profile, setting, and page-layout consistency, then check same-page and adjacent-page continuity.
 
 2. `finish`
-   Use the parent-inspected `storyboard_sketch_ink` page as the required visual input and structure reference. Add tone, color if requested, lighting, shadows, final lettering, SFX, captions, and cleanup without changing page layout, panel count, freeform panel shapes, negative space, text placement, character/object blocking, movement direction, or action logic.
+   Use the parent-inspected `storyboard_sketch_ink` page as the required visual input and structure reference. Add tone, color if requested, lighting, shadows, final lettering, SFX, captions, and cleanup without changing page layout, panel count, freeform panel shapes, negative space, text placement, comic effect lines, visual emphasis, line-weight rhythm, character/object blocking, movement direction, or action logic.
    Stage finish review must verify that tone/color/final polish did not introduce source-data drift or break continuity from the inspected `storyboard_sketch_ink` images.
 
 ## Parallel Generation Rules
@@ -305,6 +313,7 @@ Relevant references: <paths or "none">
 Page text policy: include approved adapted dialogue, SFX, and short captions inside speech balloons/caption areas/SFX lettering.
 Page pacing policy: use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need explicit story justification.
 Panel shape policy: experimental freeform panel shapes are allowed and should not be rejected when reading order and continuity are clear.
+Comic visual direction policy: follow approved detail density, visual emphasis, line-weight/black-ink rhythm, and speed/focus/impact/emotion lines; use effect lines only when they serve the beat.
 Spatial logic policy: reject impossible positions, object trajectories, or motion direction.
 Source consistency policy: reject drift in character face/body/hair/outfit, props, profile details, setting, landmarks, or page-layout references compared with the approved plan and allowed sources/.
 Panel continuity policy: reject discontinuity across panels or adjacent pages in positions, gaze, action direction, object movement, time flow, speech balloons, SFX, captions, and cause-effect motion.
@@ -329,6 +338,9 @@ Inspect every imported page before marking it passed. Check:
 - Six or more panels require explicit story justification in the approved plan.
 - Experimental freeform panels are acceptable when reading order and continuity are clear.
 - Over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room must be rejected.
+- Planned focal points, detail density, closeup intensity, line-weight/black-ink emphasis, and background simplification/emphasis match the approved page and panel notes.
+- Planned speed lines, focus lines, impact bursts, emotion lines, and motion streaks are present where needed and match action direction, impact, mood, or eye guidance.
+- Missing planned visual effects, effect lines that contradict motion, and pages where every panel has the same flat visual intensity must be rejected.
 - Speech balloons, SFX, and captions use approved adapted text and are legible.
 - Source dialogue was adapted for comic timing unless exact preservation was explicitly approved.
 - Source/reference data came from user-provided paths or `sources/`, not from `output/` generated artifacts.
@@ -337,7 +349,9 @@ Inspect every imported page before marking it passed. Check:
 - Composition, character blocking, props, setting, and continuity match the plan.
 - Character/object positions, motion direction, ball/projectile paths, gaze direction, and cause-effect movement are plausible.
 - `storyboard_sketch_ink` contains the approved page layout, cut structure, lettering placement, sketch structure, and ink lines.
+- `storyboard_sketch_ink` contains the approved comic visual direction: selective detail density, focal emphasis, line-weight/black-ink rhythm, and planned effect lines.
 - `finish` uses and preserves the inspected `storyboard_sketch_ink` page structure.
+- `finish` does not weaken, hide, or contradict the inspected visual emphasis, effect-line direction, or ink rhythm.
 - Watermarks, random logos, unrelated captions, garbled lettering, and random typography are absent.
 - Characters, hands, faces, props, perspective, and key action do not contain obvious defects.
 - The generated output is mapped to the correct page filename and stage.

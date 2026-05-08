@@ -66,6 +66,9 @@ def sample_page(page_index, panel_count=3):
                 "caption": ["방과 후 체육관"],
                 "speech_balloon": "small balloon near the speaker",
                 "sfx_placement": "near the moving basketball",
+                "detail_density_notes": "detail the hand, ball, hoop rim, and face; simplify the far wall",
+                "visual_emphasis_notes": "use stronger line weight on the shooter and ball, lighter background lines",
+                "comic_effects_notes": "speed lines follow the ball toward the hoop and focus lines guide the eye to the rim",
                 "spatial_logic_notes": "ball travels from hand toward hoop",
                 "motion_checks": ["basketball moves toward hoop, not behind shooter"],
                 "must_match": ["hoop stays on far wall"],
@@ -82,6 +85,9 @@ def sample_page(page_index, panel_count=3):
         "pacing_notes": "3-5 panels by default with measured cinematic pacing.",
         "panel_shape_notes": "Use experimental freeform panel design with diagonal, asymmetric, inset, or borderless panels.",
         "negative_space_notes": "Leave wide negative space around faces, ball motion, balloons, and quiet reaction beats.",
+        "detail_density_notes": "Keep the shooter, ball, hoop, and hand details crisp; simplify distant bleachers.",
+        "visual_emphasis_notes": "Strongest visual emphasis goes to the shot release and final reaction closeup.",
+        "comic_effects_notes": "Use speed lines on the ball, subtle focus lines toward the hoop, and small impact lines on rim contact.",
         "page_dialogue_notes": "Adapt dialogue for comic timing; do not copy source lines verbatim.",
         "spatial_logic_notes": "Hoop remains on far wall; ball moves toward hoop after release.",
         "motion_checks": ["basketball shot trajectory follows the hand release toward the hoop"],
@@ -195,6 +201,12 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(first["pacing_notes"], "3-5 panels by default with measured cinematic pacing.")
             self.assertIn("experimental freeform panel design", first["panel_shape_notes"])
             self.assertIn("wide negative space", first["negative_space_notes"])
+            self.assertIn("shooter, ball, hoop", first["detail_density_notes"])
+            self.assertIn("shot release", first["visual_emphasis_notes"])
+            self.assertIn("speed lines", first["comic_effects_notes"])
+            self.assertIn("hand, ball, hoop rim", first["panels"][0]["detail_density_notes"])
+            self.assertIn("stronger line weight", first["panels"][0]["visual_emphasis_notes"])
+            self.assertIn("focus lines", first["panels"][0]["comic_effects_notes"])
             self.assertEqual(state["source_root"], "/Users/chasoik/Projects/character-sheet-generator/sources")
             self.assertEqual(state["excluded_source_roots"], ["/Users/chasoik/Projects/character-sheet-generator/output"])
             self.assertEqual(set(first["stages"].keys()), {FIRST_STAGE, FINISH_STAGE})
@@ -311,6 +323,15 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Avoid a uniform rectangular grid", prompt)
             self.assertIn("unintentional uniform rectangular grids", prompt)
             self.assertIn("dialogue/SFX without breathing room", prompt)
+            self.assertIn("Comic visual direction:", prompt)
+            self.assertIn("detail density", prompt)
+            self.assertIn("visual emphasis", prompt)
+            self.assertIn("speed lines", prompt)
+            self.assertIn("focus lines", prompt)
+            self.assertIn("impact bursts", prompt)
+            self.assertIn("emotion lines", prompt)
+            self.assertIn("effect-line direction must match action direction", prompt)
+            self.assertIn("same flat visual intensity", prompt)
             self.assertIn("Use adapted_dialogue", prompt)
             self.assertIn("각색 대사 1-1", prompt)
             self.assertIn("휙", prompt)
@@ -346,6 +367,10 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("six or more panels", batch_plan)
             self.assertIn("experimental freeform panel design", batch_plan)
             self.assertIn("negative_space:", batch_plan)
+            self.assertIn("comic visual direction", batch_plan)
+            self.assertIn("detail_density:", batch_plan)
+            self.assertIn("visual_emphasis:", batch_plan)
+            self.assertIn("comic_effects:", batch_plan)
 
     def test_imported_or_requested_pages_block_next_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -528,6 +553,9 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn(str(first_stage_output), prompt)
             self.assertIn("required visual input / structure reference", prompt)
             self.assertIn("Do not redraw the page from scratch", prompt)
+            self.assertIn("preserve the inspected storyboard_sketch_ink visual emphasis", prompt)
+            self.assertIn("effect-line direction", prompt)
+            self.assertIn("ink rhythm", prompt)
 
     def test_stage_review_pass_requires_all_pages_parent_inspected(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Comic Storyboard Sketch Ink"
+  short_description: "Generate the sketch and ink stage for an approved comic page"
+  default_prompt: "Use $create-comic-storyboard-sketch-ink only when a create-comic-storyboard-pack subagent prompt assigns one approved page at the storyboard_sketch_ink stage. Read the assigned prompt file, use image_gen, do not edit runner state, inspect the result, and return the generated file path with worker_status and worker_note."

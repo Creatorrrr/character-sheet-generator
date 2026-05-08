@@ -40,6 +40,11 @@ STAGES = [
     },
 ]
 STAGE_IDS = [stage["id"] for stage in STAGES]
+STAGE_SKILL_NAMES = {
+    STORYBOARD_SKETCH_INK_STAGE: "create-comic-storyboard-sketch-ink",
+    FINISH_STAGE: "create-comic-storyboard-finish",
+}
+STAGE_GATE_STATUSES = {"pending", "pending_user_feedback", "approved", "stopped"}
 PASS_STATUSES = {"inspected_pass", "complete"}
 CURRENT_STATUSES = {"generation_requested", "imported"}
 VALID_STATUSES = {"pending", "generation_requested", "imported", "inspected_pass", "complete"}
@@ -168,8 +173,10 @@ def blank_stage_state() -> dict[str, Any]:
         "rerun_pending": False,
         "batch_id": "",
         "prompt_file": "",
+        "subagent_prompt_file": "",
         "output_path": "",
         "generated_source": "",
+        "external_prior_stage": False,
         "worker_status": "",
         "worker_note": "",
         "parent_note": "",
@@ -192,6 +199,46 @@ def blank_stage_review() -> dict[str, Any]:
 
 def build_stage_reviews() -> dict[str, dict[str, Any]]:
     return {stage_id: blank_stage_review() for stage_id in STAGE_IDS}
+
+
+def stage_gate_key(from_stage: str, to_stage: str) -> str:
+    return f"{from_stage}_to_{to_stage}"
+
+
+def blank_stage_gate() -> dict[str, Any]:
+    return {
+        "status": "pending",
+        "note": "",
+        "updated_at": "",
+    }
+
+
+def build_stage_gates() -> dict[str, dict[str, Any]]:
+    return {stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE): blank_stage_gate()}
+
+
+def normalize_stage_gates(state: dict[str, Any]) -> None:
+    gates = state.setdefault("stage_gates", {})
+    for key, value in build_stage_gates().items():
+        gate = gates.setdefault(key, value)
+        for field, default in blank_stage_gate().items():
+            gate.setdefault(field, default)
+        if gate["status"] not in STAGE_GATE_STATUSES:
+            raise SystemExit(f"Invalid stage gate status for {key}: {gate['status']}")
+
+
+def normalize_target_stages(state: dict[str, Any]) -> None:
+    raw = state.get("target_stages") or STAGE_IDS
+    target_stages = as_list(raw)
+    if not target_stages:
+        target_stages = list(STAGE_IDS)
+    for stage_id in target_stages:
+        if stage_id not in STAGE_IDS:
+            raise SystemExit(f"Invalid target stage: {stage_id}")
+    ordered = [stage_id for stage_id in STAGE_IDS if stage_id in target_stages]
+    if not ordered:
+        ordered = list(STAGE_IDS)
+    state["target_stages"] = ordered
 
 
 def normalize_stage_review(review: dict[str, Any], stage_id: str) -> None:
@@ -234,6 +281,8 @@ def normalize_state(state: dict[str, Any]) -> None:
     state["character_locks"] = merge_unique(state.get("character_locks"))
     state["visual_text_guard"] = merge_unique(state.get("visual_text_guard"))
     state["stage_order"] = STAGE_IDS
+    normalize_target_stages(state)
+    normalize_stage_gates(state)
     state["source_references"] = validate_reference_paths(state.get("source_references", []))
     stage_reviews = state.setdefault("stage_reviews", {})
     for stage_id in list(stage_reviews.keys()):
@@ -304,12 +353,17 @@ def stage_complete(state: dict[str, Any], stage_id: str) -> bool:
     return pages_complete_for_stage(state, stage_id) and stage_review_passed(state, stage_id)
 
 
+def target_stages(state: dict[str, Any]) -> list[str]:
+    normalize_target_stages(state)
+    return state["target_stages"]
+
+
 def workflow_complete(state: dict[str, Any]) -> bool:
-    return all(stage_complete(state, stage_id) for stage_id in STAGE_IDS)
+    return all(stage_complete(state, stage_id) for stage_id in target_stages(state))
 
 
 def current_stage_id(state: dict[str, Any]) -> str | None:
-    for stage_id in STAGE_IDS:
+    for stage_id in target_stages(state):
         if not stage_complete(state, stage_id):
             return stage_id
     return None
@@ -344,6 +398,11 @@ def stage_prompt_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Pat
     return run_dir / "prompts" / stage_id / f"{stem}.prompt.txt"
 
 
+def subagent_prompt_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Path:
+    stem = Path(page["filename"]).stem
+    return run_dir / "subagent_prompts" / stage_id / f"{stem}.subagent.txt"
+
+
 def previous_stage_id(stage_id: str) -> str:
     index = STAGE_IDS.index(stage_id)
     if index == 0:
@@ -362,11 +421,14 @@ def prior_stage_reference(run_dir: Path, page: dict[str, Any], stage_id: str) ->
     return str(path) if path.exists() else f"{path} (not found yet)"
 
 
-def assert_required_prior_stage_outputs_exist(run_dir: Path, pages: list[dict[str, Any]], stage_id: str) -> None:
+def assert_required_prior_stage_outputs_exist(state: dict[str, Any], run_dir: Path, pages: list[dict[str, Any]], stage_id: str) -> None:
     if stage_id != FINISH_STAGE:
         return
     missing = []
     for page in pages:
+        if not page_complete_for_stage(page, STORYBOARD_SKETCH_INK_STAGE):
+            missing.append(f"{page['filename']} needs parent-inspected storyboard_sketch_ink before finish")
+            continue
         path = stage_output_path(run_dir, page, STORYBOARD_SKETCH_INK_STAGE)
         if not path.exists():
             missing.append(f"{page['filename']} requires {path}")
@@ -375,6 +437,10 @@ def assert_required_prior_stage_outputs_exist(run_dir: Path, pages: list[dict[st
         raise SystemExit(
             "Finish stage requires the parent-inspected storyboard_sketch_ink image as input before reservation: "
             f"{details}"
+        )
+    if not stage_review_passed(state, STORYBOARD_SKETCH_INK_STAGE):
+        raise SystemExit(
+            "Finish stage requires storyboard_sketch_ink stage-review pass before reservation."
         )
 
 
@@ -410,6 +476,32 @@ def reset_stage_review(state: dict[str, Any], stage_id: str, note: str) -> None:
     review["note"] = note
     review["issues"] = []
     review["reviewed_at"] = ""
+
+
+def reset_following_stage_gates(state: dict[str, Any], stage_id: str, note: str) -> None:
+    if stage_id == STORYBOARD_SKETCH_INK_STAGE:
+        gate = state.setdefault("stage_gates", {}).setdefault(
+            stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE),
+            blank_stage_gate(),
+        )
+        gate["status"] = "pending"
+        gate["note"] = note
+        gate["updated_at"] = now_iso()
+
+
+def mark_transition_waiting_for_feedback(state: dict[str, Any], from_stage: str, to_stage: str, note: str) -> None:
+    if to_stage not in target_stages(state):
+        return
+    gate = state.setdefault("stage_gates", {}).setdefault(stage_gate_key(from_stage, to_stage), blank_stage_gate())
+    if gate.get("status") != "approved":
+        gate["status"] = "pending_user_feedback"
+        gate["note"] = note
+        gate["updated_at"] = now_iso()
+
+
+def transition_gate_allows(state: dict[str, Any], from_stage: str, to_stage: str) -> bool:
+    gate = state.setdefault("stage_gates", {}).setdefault(stage_gate_key(from_stage, to_stage), blank_stage_gate())
+    return gate.get("status") == "approved"
 
 
 def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) -> None:
@@ -743,6 +835,50 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     )
 
 
+def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[str, Any]) -> str:
+    stage = stage_state(page, stage_id)
+    references = validate_reference_paths(as_list(state.get("source_references")) + as_list(page.get("references")))
+    reference_text = "\n".join(f"- {ref}" for ref in references) or "- none"
+    skill_name = STAGE_SKILL_NAMES[stage_id]
+    text_policy = normalize_text_policy(page.get("text_policy") or state.get("text_policy"))
+    character_locks = page_policy_items(state, page, "character_locks")
+    visual_text_guard = page_policy_items(state, page, "visual_text_guard")
+    return "\n".join(
+        [
+            f"Use ${skill_name}.",
+            "You are generating exactly one image for create-comic-storyboard-pack.",
+            "Do not edit state.json or any runner state files.",
+            f"Run folder: {run_dir}",
+            f"Story/scenario file: {run_dir / 'scenario.md'}",
+            f"Approved plan: {run_dir / 'approved_storyboard_plan.json'}",
+            f"Assigned page: {page['filename']}",
+            f"Page id: {page['id']}",
+            f"Stage: {stage_id}",
+            f"Prompt file: {stage.get('prompt_file')}",
+            f"Output path: {stage.get('output_path')}",
+            f"Batch id: {stage.get('batch_id')}",
+            f"Default source folder: {state.get('source_root') or DEFAULT_SOURCE_ROOT}",
+            f"Excluded source folder: {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])}",
+            f"Prior-stage reference: {prior_stage_reference(run_dir, page, stage_id)}",
+            "Relevant references:",
+            reference_text,
+            f"Page text policy: {text_policy}",
+            "Character locks:",
+            bullet_text(character_locks),
+            "Visual text guard:",
+            bullet_text(visual_text_guard),
+            "Current rerun correction:",
+            current_rerun_correction(stage) or "- none",
+            "",
+            "Use image_gen with the assigned prompt file and visual references. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, visual_text_guard, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Return only:",
+            "- generated file path",
+            "- worker_status: pass or needs_rerun",
+            "- worker_note: concise inspection note",
+        ]
+    )
+
+
 def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
     text_policy = normalize_text_policy(state.get("text_policy"))
     lines = [
@@ -751,6 +887,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         f"Run folder: {run_dir}",
         f"Scenario title: {state.get('title', '')}",
         f"Plan approved: {state.get('plan_approved', False)}",
+        f"Target stages: {', '.join(target_stages(state))}",
         "",
         "Generation policy:",
         "- Use Codex built-in image_gen only through one subagent per reserved page.",
@@ -759,6 +896,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         f"- Do not use {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])} or any output/ subtree as source/reference data.",
         "- Generate stages in order: storyboard_sketch_ink, finish.",
         "- Do not reserve finish until every page has passed storyboard_sketch_ink parent inspection.",
+        "- Do not reserve finish until storyboard_sketch_ink stage-review has passed and the user has approved the next stage with approve-next-stage.",
         "- Finish must use the parent-inspected storyboard_sketch_ink image as the required visual input / structure reference.",
         "- Use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need clear story justification.",
         "- Use experimental freeform panel design by default and avoid unintentional uniform rectangular grids.",
@@ -776,6 +914,16 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
     for guard in state.get("visual_text_guard", []):
         lines.append(f"- Visual text guard: {guard}")
     lines.append("")
+    lines.extend(["Stage gates:", ""])
+    for key, gate in state.get("stage_gates", {}).items():
+        lines.extend(
+            [
+                f"- {key}: {gate.get('status', 'pending')}",
+                f"  note: {gate.get('note', '')}",
+                f"  updated_at: {gate.get('updated_at', '')}",
+                "",
+            ]
+        )
     lines.extend(["Stage reviews:", ""])
     for stage_id in STAGE_IDS:
         review = state.get("stage_reviews", {}).get(stage_id, blank_stage_review())
@@ -831,8 +979,10 @@ def command_init(args: argparse.Namespace) -> None:
     run_dir = output_root / f"{slug}-comic-storyboard-pack-{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
     (run_dir / "prompts").mkdir()
+    (run_dir / "subagent_prompts").mkdir()
     for stage in STAGES:
         (run_dir / "prompts" / stage["id"]).mkdir()
+        (run_dir / "subagent_prompts" / stage["id"]).mkdir()
         (run_dir / stage["dir"]).mkdir()
 
     scenario_path = run_dir / "scenario.md"
@@ -858,7 +1008,9 @@ def command_init(args: argparse.Namespace) -> None:
         "character_locks": [],
         "visual_text_guard": [],
         "stage_order": STAGE_IDS,
+        "target_stages": STAGE_IDS,
         "stage_reviews": build_stage_reviews(),
+        "stage_gates": build_stage_gates(),
         "plan_approved": False,
         "complete": False,
         "pages": [],
@@ -1066,10 +1218,12 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     state["visual_text_guard"] = merge_unique(plan.get("visual_text_guard"))
     state["plan_approved"] = True
     state["approved_at"] = now_iso()
+    state["target_stages"] = [args.target_stage] if args.target_stage else list(STAGE_IDS)
     state["pages"] = pages
     state.pop("panels", None)
     state["batches"] = []
     state["stage_reviews"] = build_stage_reviews()
+    state["stage_gates"] = build_stage_gates()
     state.setdefault("notes", []).append(f"Approved {len(pages)} comic pages at {state['approved_at']}.")
     normalize_state(state)
 
@@ -1085,6 +1239,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
             "text_policy": state.get("text_policy", TEXT_POLICY_DIALOGUE_SFX_CAPTIONS),
             "character_locks": state.get("character_locks", []),
             "visual_text_guard": state.get("visual_text_guard", []),
+            "target_stages": state.get("target_stages", STAGE_IDS),
             "pages": state.get("pages", []),
         },
     )
@@ -1132,7 +1287,25 @@ def command_next_batch(args: argparse.Namespace) -> None:
 
     limit = min(max(args.limit, 1), 4)
     selected = candidates[:limit]
-    assert_required_prior_stage_outputs_exist(run_dir, selected, stage_id)
+    assert_required_prior_stage_outputs_exist(state, run_dir, selected, stage_id)
+    if stage_id == FINISH_STAGE and not transition_gate_allows(state, STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE):
+        gate = state.get("stage_gates", {}).get(
+            stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE),
+            blank_stage_gate(),
+        )
+        if gate.get("status") == "pending":
+            mark_transition_waiting_for_feedback(
+                state,
+                STORYBOARD_SKETCH_INK_STAGE,
+                FINISH_STAGE,
+                "storyboard_sketch_ink passed; user feedback is required before finish.",
+            )
+            write_batch_plan(run_dir, state)
+            save_state(run_dir, state)
+        print("USER_FEEDBACK_REQUIRED: storyboard_sketch_ink -> finish")
+        print(f"GATE_STATUS: {gate.get('status', 'pending_user_feedback')}")
+        command_status(args)
+        return
     batch_id = f"batch-{len(state.get('batches', [])) + 1:03d}"
     for page in selected:
         stage = stage_state(page, stage_id)
@@ -1151,6 +1324,10 @@ def command_next_batch(args: argparse.Namespace) -> None:
         prompt_path.write_text(prompt_text(run_dir, page, stage_id, state), encoding="utf-8")
         stage["prompt_file"] = str(prompt_path)
         stage["output_path"] = str(stage_output_path(run_dir, page, stage_id))
+        subagent_path = subagent_prompt_path(run_dir, page, stage_id)
+        subagent_path.parent.mkdir(parents=True, exist_ok=True)
+        stage["subagent_prompt_file"] = str(subagent_path)
+        subagent_path.write_text(subagent_prompt_text(run_dir, page, stage_id, state), encoding="utf-8")
 
     state.setdefault("batches", []).append(
         {
@@ -1172,6 +1349,7 @@ def command_next_batch(args: argparse.Namespace) -> None:
         print(f"ITEM: {page['filename']}")
         print(f"ITEM_ID: {page['id']}")
         print(f"PROMPT_FILE: {stage['prompt_file']}")
+        print(f"SUBAGENT_PROMPT_FILE: {stage['subagent_prompt_file']}")
         print(f"OUTPUT: {stage['output_path']}")
 
 
@@ -1233,6 +1411,7 @@ def command_rerun(args: argparse.Namespace) -> None:
     stage_id = args.stage
     mark_page_stage_for_rerun(page, stage_id, args.note)
     reset_stage_review(state, stage_id, f"Stage review reset because {page['filename']} was marked for rerun.")
+    reset_following_stage_gates(state, stage_id, f"Stage gate reset because {page['filename']} was marked for rerun.")
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
     print(f"RERUN_PENDING: {page['filename']} {stage_id}")
@@ -1259,6 +1438,13 @@ def command_stage_review(args: argparse.Namespace) -> None:
         review["note"] = args.note
         review["issues"] = issues
         review["reviewed_at"] = now_iso()
+        if stage_id == STORYBOARD_SKETCH_INK_STAGE:
+            mark_transition_waiting_for_feedback(
+                state,
+                STORYBOARD_SKETCH_INK_STAGE,
+                FINISH_STAGE,
+                "storyboard_sketch_ink stage-review passed; user feedback is required before finish.",
+            )
     elif args.status == "needs_rerun":
         if not rerun_items:
             raise SystemExit("Use --rerun-item at least once when stage-review status is needs_rerun.")
@@ -1272,6 +1458,7 @@ def command_stage_review(args: argparse.Namespace) -> None:
         review["note"] = args.note
         review["issues"] = issues + [f"rerun_item={page['filename']}" for page in resolved_pages]
         review["reviewed_at"] = now_iso()
+        reset_following_stage_gates(state, stage_id, f"Stage review needs rerun for {stage_id}.")
     else:
         raise SystemExit(f"Invalid stage review status: {args.status}")
 
@@ -1282,6 +1469,78 @@ def command_stage_review(args: argparse.Namespace) -> None:
     if rerun_items:
         for item in rerun_items:
             print(f"RERUN_ITEM: {item}")
+
+
+def command_approve_next_stage(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    state = load_state(run_dir)
+    if args.from_stage not in STAGE_IDS or args.to_stage not in STAGE_IDS:
+        raise SystemExit("Unknown stage transition.")
+    if previous_stage_id(args.to_stage) != args.from_stage:
+        raise SystemExit(f"Unsupported stage transition: {args.from_stage} -> {args.to_stage}")
+    if not stage_complete(state, args.from_stage):
+        raise SystemExit(f"Cannot approve next stage until {args.from_stage} is complete.")
+    if args.to_stage not in target_stages(state):
+        state["target_stages"] = [stage_id for stage_id in STAGE_IDS if stage_id in set(target_stages(state) + [args.to_stage])]
+    gate = state.setdefault("stage_gates", {}).setdefault(stage_gate_key(args.from_stage, args.to_stage), blank_stage_gate())
+    gate["status"] = "approved"
+    gate["note"] = args.note
+    gate["updated_at"] = now_iso()
+    state.setdefault("notes", []).append(f"Approved next stage {args.from_stage}->{args.to_stage}: {args.note}")
+    write_batch_plan(run_dir, state)
+    save_state(run_dir, state)
+    print(f"NEXT_STAGE_APPROVED: {args.from_stage} -> {args.to_stage}")
+    print("NEXT: comic_storyboard_runner.py next-batch --run-dir <run-dir> --limit 4")
+
+
+def command_stop_after_stage(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    state = load_state(run_dir)
+    if not stage_complete(state, args.stage):
+        raise SystemExit(f"Cannot stop after {args.stage} until that stage is complete.")
+    stop_index = STAGE_IDS.index(args.stage)
+    state["target_stages"] = STAGE_IDS[: stop_index + 1]
+    if args.stage == STORYBOARD_SKETCH_INK_STAGE:
+        gate = state.setdefault("stage_gates", {}).setdefault(
+            stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE),
+            blank_stage_gate(),
+        )
+        gate["status"] = "stopped"
+        gate["note"] = args.note
+        gate["updated_at"] = now_iso()
+    state.setdefault("notes", []).append(f"Stopped after {args.stage}: {args.note}")
+    write_batch_plan(run_dir, state)
+    save_state(run_dir, state)
+    print(f"STOPPED_AFTER_STAGE: {args.stage}")
+    print(f"TARGET_STAGES: {', '.join(state['target_stages'])}")
+
+
+def command_import_prior_stage(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    state = load_state(run_dir)
+    if args.stage == FINISH_STAGE:
+        raise SystemExit("import-prior-stage is for stages before finish, not finish itself.")
+    page = resolve_page(state, args.item)
+    generated = Path(args.generated)
+    if not generated.exists():
+        raise SystemExit(f"Generated file not found: {generated}")
+    destination = stage_output_path(run_dir, page, args.stage)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if generated.resolve(strict=False) != destination.resolve(strict=False):
+        shutil.copy2(generated, destination)
+    stage = stage_state(page, args.stage)
+    stage["status"] = "inspected_pass"
+    stage["generated_source"] = str(generated)
+    stage["output_path"] = str(destination)
+    stage["external_prior_stage"] = True
+    stage["parent_note"] = args.note
+    stage["imported_at"] = now_iso()
+    stage["inspected_at"] = now_iso()
+    state.setdefault("notes", []).append(f"Imported external prior-stage reference for {page['filename']}:{args.stage}.")
+    write_batch_plan(run_dir, state)
+    save_state(run_dir, state)
+    print(f"IMPORTED_PRIOR_STAGE: {page['filename']} {args.stage}")
+    print(f"OUTPUT: {destination}")
 
 
 def command_batch_status(args: argparse.Namespace) -> None:
@@ -1305,6 +1564,7 @@ def command_status(args: argparse.Namespace) -> None:
     print(f"RUN_DIR: {run_dir}")
     print(f"PLAN_APPROVED: {state.get('plan_approved')}")
     print(f"PAGES: {len(state.get('pages', []))}")
+    print(f"TARGET_STAGES: {', '.join(target_stages(state))}")
     print(f"CURRENT_STAGE: {current_stage_id(state) or 'complete'}")
     for stage_id in STAGE_IDS:
         counts: dict[str, int] = {}
@@ -1315,6 +1575,8 @@ def command_status(args: argparse.Namespace) -> None:
         print(f"{stage_id}: {parts}")
         review = state.get("stage_reviews", {}).get(stage_id, blank_stage_review())
         print(f"{stage_id}_review: {review.get('status', 'pending')}")
+    for key, gate in state.get("stage_gates", {}).items():
+        print(f"{key}_gate: {gate.get('status', 'pending')}")
     blockers = current_blockers(state)
     if blockers:
         print("CURRENT_BLOCKERS:")
@@ -1338,6 +1600,7 @@ def build_parser() -> argparse.ArgumentParser:
     approve.add_argument("--run-dir", required=True)
     approve.add_argument("--plan-file", default="")
     approve.add_argument("--plan-json", default="")
+    approve.add_argument("--target-stage", choices=STAGE_IDS, default="")
     approve.set_defaults(func=command_approve_plan)
 
     next_batch = subparsers.add_parser("next-batch")
@@ -1376,6 +1639,27 @@ def build_parser() -> argparse.ArgumentParser:
     stage_review.add_argument("--issue", action="append", default=[])
     stage_review.add_argument("--rerun-item", action="append", default=[])
     stage_review.set_defaults(func=command_stage_review)
+
+    approve_next = subparsers.add_parser("approve-next-stage")
+    approve_next.add_argument("--run-dir", required=True)
+    approve_next.add_argument("--from-stage", choices=STAGE_IDS, required=True)
+    approve_next.add_argument("--to-stage", choices=STAGE_IDS, required=True)
+    approve_next.add_argument("--note", required=True)
+    approve_next.set_defaults(func=command_approve_next_stage)
+
+    stop_after = subparsers.add_parser("stop-after-stage")
+    stop_after.add_argument("--run-dir", required=True)
+    stop_after.add_argument("--stage", choices=STAGE_IDS, required=True)
+    stop_after.add_argument("--note", required=True)
+    stop_after.set_defaults(func=command_stop_after_stage)
+
+    import_prior = subparsers.add_parser("import-prior-stage")
+    import_prior.add_argument("--run-dir", required=True)
+    import_prior.add_argument("--item", required=True)
+    import_prior.add_argument("--stage", choices=STAGE_IDS, required=True)
+    import_prior.add_argument("--generated", required=True)
+    import_prior.add_argument("--note", required=True)
+    import_prior.set_defaults(func=command_import_prior_stage)
 
     batch_status = subparsers.add_parser("batch-status")
     batch_status.add_argument("--run-dir", required=True)

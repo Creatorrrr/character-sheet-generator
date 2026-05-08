@@ -142,6 +142,36 @@ def approve_plan(root, run_dir, page_count=5, panel_count=3):
     return run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
 
 
+def approve_plan_with_target(root, run_dir, target_stage, page_count=5, panel_count=3):
+    plan_path = root / f"plan-{target_stage}.json"
+    plan_path.write_text(json.dumps(sample_plan(page_count, panel_count), indent=2), encoding="utf-8")
+    return run_cli(
+        "approve-plan",
+        "--run-dir",
+        str(run_dir),
+        "--plan-file",
+        str(plan_path),
+        "--target-stage",
+        target_stage,
+        cwd=root,
+    )
+
+
+def approve_finish_stage(root, run_dir, note="user approved finish"):
+    return run_cli(
+        "approve-next-stage",
+        "--run-dir",
+        str(run_dir),
+        "--from-stage",
+        FIRST_STAGE,
+        "--to-stage",
+        FINISH_STAGE,
+        "--note",
+        note,
+        cwd=root,
+    )
+
+
 def generate_file(root, name="generated.png", data=b"generated image"):
     path = root / name
     path.write_bytes(data)
@@ -455,6 +485,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "first stage source and continuity pass",
                 cwd=root,
             )
+            approve_finish_stage(root, run_dir)
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             state = json.loads((run_dir / "state.json").read_text())
             finish_prompt_path = Path(state["pages"][0]["stages"][FINISH_STAGE]["prompt_file"])
@@ -497,6 +528,76 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("detail_density:", batch_plan)
             self.assertIn("visual_emphasis:", batch_plan)
             self.assertIn("comic_effects:", batch_plan)
+
+    def test_subagent_prompt_uses_stage_specific_skill_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1, panel_count=2)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            storyboard_stage = state["pages"][0]["stages"][FIRST_STAGE]
+            storyboard_subagent = Path(storyboard_stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+
+            self.assertIn("$create-comic-storyboard-sketch-ink", storyboard_subagent)
+            self.assertIn("Stage: storyboard_sketch_ink", storyboard_subagent)
+            self.assertIn("Do not edit state.json", storyboard_subagent)
+            self.assertIn("Return only:", storyboard_subagent)
+            self.assertIn("worker_status: pass or needs_rerun", storyboard_subagent)
+            self.assertIn("Prior-stage reference: none", storyboard_subagent)
+
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "first stage continuity pass",
+                cwd=root,
+            )
+            approve_finish_stage(root, run_dir)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            finish_stage = state["pages"][0]["stages"][FINISH_STAGE]
+            finish_subagent = Path(finish_stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+
+            self.assertIn("$create-comic-storyboard-finish", finish_subagent)
+            self.assertIn("Stage: finish", finish_subagent)
+            self.assertIn("Prior-stage reference:", finish_subagent)
+            self.assertIn(str(run_dir / "01_storyboard_sketch_ink" / "001-page-1.png"), finish_subagent)
 
     def test_imported_or_requested_pages_block_next_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -616,9 +717,132 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "source consistency and panel continuity pass",
                 cwd=root,
             )
+            feedback_blocked = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            self.assertIn("USER_FEEDBACK_REQUIRED: storyboard_sketch_ink -> finish", feedback_blocked.stdout)
+            self.assertNotIn("BATCH_ID:", feedback_blocked.stdout)
+            self.assertNotIn("ITEM: 001-page-1.png", feedback_blocked.stdout)
+
+            approve_finish_stage(root, run_dir)
             finish = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
             self.assertIn(f"STAGE: {FINISH_STAGE}", finish.stdout)
             self.assertEqual(finish.stdout.count("ITEM: "), 4)
+
+    def test_storyboard_only_target_completes_after_first_stage_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan_with_target(root, run_dir, FIRST_STAGE, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "storyboard only complete",
+                cwd=root,
+            )
+
+            status = run_cli("status", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn("TARGET_STAGES: storyboard_sketch_ink", status.stdout)
+            self.assertIn("CURRENT_STAGE: complete", status.stdout)
+            self.assertIn("COMPLETE: true", status.stdout)
+
+    def test_stop_after_stage_marks_full_workflow_complete_at_first_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "first stage complete",
+                cwd=root,
+            )
+            run_cli(
+                "stop-after-stage",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "user stops before finish",
+                cwd=root,
+            )
+
+            status = run_cli("status", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn("TARGET_STAGES: storyboard_sketch_ink", status.stdout)
+            self.assertIn("COMPLETE: true", status.stdout)
 
     def test_finish_prompt_uses_first_stage_image_as_required_input(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -669,6 +893,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 cwd=root,
             )
 
+            approve_finish_stage(root, run_dir)
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             state = json.loads((run_dir / "state.json").read_text())
             prompt_path = Path(state["pages"][0]["stages"][FINISH_STAGE]["prompt_file"])
@@ -851,6 +1076,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "first stage continuity pass",
                 cwd=root,
             )
+            approve_finish_stage(root, run_dir)
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             run_cli(
                 "import",
@@ -903,6 +1129,48 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("finish_review: passed", status_after.stdout)
             self.assertIn("COMPLETE: true", status_after.stdout)
 
+    def test_finish_only_target_requires_imported_prior_stage_before_reservation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan_with_target(root, run_dir, FINISH_STAGE, page_count=1)
+
+            missing_prior = run_cli_raw("next-batch", "--run-dir", str(run_dir), cwd=root)
+            self.assertNotEqual(missing_prior.returncode, 0)
+            self.assertIn("Finish stage requires the parent-inspected storyboard_sketch_ink image", missing_prior.stderr)
+
+            generated = generate_file(root, name="external-sketch.png")
+            run_cli(
+                "import-prior-stage",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--note",
+                "external sketch/ink reference approved by user",
+                cwd=root,
+            )
+            run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "external prior stage accepted",
+                cwd=root,
+            )
+            approve_finish_stage(root, run_dir, note="user approves finishing external prior")
+            finish = run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn(f"STAGE: {FINISH_STAGE}", finish.stdout)
+            self.assertIn("001-page-1.png", finish.stdout)
+
     def test_finish_batch_fails_when_first_stage_output_file_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -951,6 +1219,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "first stage final review pass",
                 cwd=root,
             )
+            approve_finish_stage(root, run_dir)
             first_stage_output = run_dir / "01_storyboard_sketch_ink" / "001-page-1.png"
             first_stage_output.unlink()
 

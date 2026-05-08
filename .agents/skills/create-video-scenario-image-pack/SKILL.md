@@ -13,46 +13,48 @@ Do not generate images before the user approves the exact source list.
 
 ## Runner
 
-Use only the root runner:
+Use `[스킬 경로]/scripts/video_scenario_image_pack_runner.py` for this workflow. `[스킬 경로]` means the directory that contains this `SKILL.md`, not the checkout root. The root `scripts/video_scenario_image_pack_runner.py` path remains a compatibility shim.
 
 ```bash
-python3 scripts/video_scenario_image_pack_runner.py <command>
+SKILL_DIR=".agents/skills/create-video-scenario-image-pack"
+RUNNER="$SKILL_DIR/scripts/video_scenario_image_pack_runner.py"
+python3 "$RUNNER" <command>
 ```
 
-The skill-local script is only a compatibility shim. Do not use `scripts/video_pack_runner.py`; that runner belongs to a different video closeup workflow.
+Do not use `scripts/video_pack_runner.py`; that runner belongs to a different video closeup workflow.
 
 ## Workflow
 
 1. Save or initialize the scenario run.
    ```bash
-   python3 scripts/video_scenario_image_pack_runner.py init --title "<scenario title>" --scenario <scenario-file>
+   python3 "$RUNNER" init --title "<scenario title>" --scenario <scenario-file>
    ```
 2. Extract and deduplicate useful image sources, then ask for approval in Korean.
 3. After approval, write `approved_image_plan.json` and approve it:
    ```bash
-   python3 scripts/video_scenario_image_pack_runner.py approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
+   python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
    ```
 4. Reserve only dependency-ready work:
    ```bash
-   python3 scripts/video_scenario_image_pack_runner.py next-batch --run-dir <run-dir> --limit 4
-   python3 scripts/video_scenario_image_pack_runner.py batch-prompts --run-dir <run-dir> --batch-id <batch-id>
+   python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+   python3 "$RUNNER" batch-prompts --run-dir <run-dir> --batch-id <batch-id>
    ```
 5. Spawn one subagent per reserved item, maximum four per batch. Each subagent generates exactly one image with `image_gen`. If using `fork_context=true`, omit subagent role fields such as `agent_type` or `role`; put the generation/inspection behavior in the task prompt instead.
 6. Import worker results through the runner. Prefer batch manifests over parallel shell calls:
    ```bash
-   python3 scripts/video_scenario_image_pack_runner.py import-batch --manifest <import-manifest.json>
+   python3 "$RUNNER" import-batch --manifest <import-manifest.json>
    ```
 7. Parent-inspect every imported image before passing it:
    ```bash
-   python3 scripts/video_scenario_image_pack_runner.py inspect-batch-pass --manifest <inspect-manifest.json>
+   python3 "$RUNNER" inspect-batch-pass --manifest <inspect-manifest.json>
    ```
 8. Route failures through rerun. Rerun notes become prompt hints for the next attempt:
    ```bash
-   python3 scripts/video_scenario_image_pack_runner.py rerun --run-dir <run-dir> --item <id-or-filename> --note "<reason>"
+   python3 "$RUNNER" rerun --run-dir <run-dir> --item <id-or-filename> --note "<reason>"
    ```
 9. Report status in Korean:
    ```bash
-   python3 scripts/video_scenario_image_pack_runner.py report --run-dir <run-dir>
+   python3 "$RUNNER" report --run-dir <run-dir>
    ```
 
 ## Extraction Policy

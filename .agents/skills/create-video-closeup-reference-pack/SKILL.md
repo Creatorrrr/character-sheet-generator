@@ -33,7 +33,14 @@ Ask for missing inputs only when identity cannot be inferred. If the user reques
 
 ## Resumable Runner Contract
 
-Use `scripts/video_pack_runner.py` for this workflow. The runner exists because Codex image generation may end the turn immediately after an `image_gen` call. Do not rely on the same turn continuing after image generation.
+Use `[스킬 경로]/scripts/video_pack_runner.py` for this workflow. `[스킬 경로]` means the directory that contains this `SKILL.md`, not the checkout root. The root `scripts/video_pack_runner.py` path remains a compatibility shim. The runner exists because Codex image generation may end the turn immediately after an `image_gen` call. Do not rely on the same turn continuing after image generation.
+
+Set the skill directory before running examples:
+
+```bash
+SKILL_DIR=".agents/skills/create-video-closeup-reference-pack"
+RUNNER="$SKILL_DIR/scripts/video_pack_runner.py"
+```
 
 Default policy:
 
@@ -52,12 +59,12 @@ Default policy:
 Anchor command flow:
 
 ```bash
-python3 scripts/video_pack_runner.py init --source <source-image>
-python3 scripts/video_pack_runner.py next --run-dir <run-dir>
+python3 "$RUNNER" init --source <source-image>
+python3 "$RUNNER" next --run-dir <run-dir>
 # Use the printed prompt with parent-session image_gen only for 01_face_front.png. The turn may end here.
-python3 scripts/video_pack_runner.py import-latest --run-dir <run-dir>
+python3 "$RUNNER" import-latest --run-dir <run-dir>
 # Inspect the imported output before marking pass.
-python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item 01_face_front.png --note "<short inspection note>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item 01_face_front.png --note "<short inspection note>"
 ```
 
 Do not use this flow for dependent images after `01_face_front.png` is `inspected_pass` or `complete`.
@@ -65,27 +72,27 @@ Do not use this flow for dependent images after `01_face_front.png` is `inspecte
 Parallel command flow after the master face anchor is approved:
 
 ```bash
-python3 scripts/video_pack_runner.py next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 # Spawn one subagent per printed item, with fork_context=true and no agent_type/role field.
 # Put the worker behavior in the task prompt. Each subagent generates exactly one assigned output with image_gen and reports the generated file path plus a first-pass inspection note.
-python3 scripts/video_pack_runner.py import --run-dir <run-dir> --item <filename> --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
+python3 "$RUNNER" import --run-dir <run-dir> --item <filename> --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
 # Parent session inspects each imported image before marking final pass.
-python3 scripts/video_pack_runner.py inspect-pass --run-dir <run-dir> --item <filename> --note "<parent inspection note>"
-python3 scripts/video_pack_runner.py batch-status --run-dir <run-dir> --batch-id <batch-id>
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <filename> --note "<parent inspection note>"
+python3 "$RUNNER" batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
 
 If the anchor image is wrong:
 
 ```bash
-python3 scripts/video_pack_runner.py rerun --run-dir <run-dir> --item 01_face_front.png --note "<reason>"
-python3 scripts/video_pack_runner.py next --run-dir <run-dir>
+python3 "$RUNNER" rerun --run-dir <run-dir> --item 01_face_front.png --note "<reason>"
+python3 "$RUNNER" next --run-dir <run-dir>
 ```
 
 If a dependent batch image is wrong after the anchor is approved:
 
 ```bash
-python3 scripts/video_pack_runner.py rerun --run-dir <run-dir> --item <filename> --note "<reason>"
-python3 scripts/video_pack_runner.py next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" rerun --run-dir <run-dir> --item <filename> --note "<reason>"
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 ```
 
 State rules:

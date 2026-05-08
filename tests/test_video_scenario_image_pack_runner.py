@@ -7,7 +7,15 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RUNNER = REPO_ROOT / "scripts" / "video_scenario_image_pack_runner.py"
+RUNNER = (
+    REPO_ROOT
+    / ".agents"
+    / "skills"
+    / "create-video-scenario-image-pack"
+    / "scripts"
+    / "video_scenario_image_pack_runner.py"
+)
+ROOT_SHIM = REPO_ROOT / "scripts" / "video_scenario_image_pack_runner.py"
 
 
 def run_cli(*args):
@@ -81,6 +89,17 @@ def sample_plan():
 
 
 class VideoScenarioImagePackRunnerTest(unittest.TestCase):
+    def test_root_shim_help_dispatches_to_skill_runner(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT_SHIM), "--help"],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertIn("usage:", result.stdout)
+        self.assertIn("init", result.stdout)
+
     def init_run(self, root):
         scenario = root / "scenario.md"
         scenario.write_text("# Noeul Court\n\nEmpty sunset basketball court.", encoding="utf-8")

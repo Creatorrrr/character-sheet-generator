@@ -5,7 +5,9 @@
 Use `write-plan-template` for a starter file:
 
 ```bash
-python3 scripts/video_scenario_image_pack_runner.py write-plan-template --run-dir <run-dir>
+SKILL_DIR=".agents/skills/create-video-scenario-image-pack"
+RUNNER="$SKILL_DIR/scripts/video_scenario_image_pack_runner.py"
+python3 "$RUNNER" write-plan-template --run-dir <run-dir>
 ```
 
 Approved plans use this shape:
@@ -43,8 +45,8 @@ The runner normalizes `continuity_anchor` into `dependencies`, validates depende
 Reserve work:
 
 ```bash
-python3 scripts/video_scenario_image_pack_runner.py next-batch --run-dir <run-dir> --limit 4
-python3 scripts/video_scenario_image_pack_runner.py batch-prompts --run-dir <run-dir> --batch-id <batch-id>
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" batch-prompts --run-dir <run-dir> --batch-id <batch-id>
 ```
 
 Each reserved item writes:
@@ -77,7 +79,7 @@ Use one manifest to avoid parallel `state.json` writes:
 Run:
 
 ```bash
-python3 scripts/video_scenario_image_pack_runner.py import-batch --manifest <manifest.json>
+python3 "$RUNNER" import-batch --manifest <manifest.json>
 ```
 
 ## Parent Inspection Manifest
@@ -97,7 +99,7 @@ python3 scripts/video_scenario_image_pack_runner.py import-batch --manifest <man
 Run:
 
 ```bash
-python3 scripts/video_scenario_image_pack_runner.py inspect-batch-pass --manifest <manifest.json>
+python3 "$RUNNER" inspect-batch-pass --manifest <manifest.json>
 ```
 
 Use `rerun` instead of passing if any strict no-character or spatial-continuity rule fails.

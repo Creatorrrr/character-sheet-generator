@@ -12,7 +12,9 @@ from typing import Any
 
 
 WORKFLOW = "create-comic-storyboard-pack"
-DEFAULT_OUTPUT_ROOT = Path("/Users/chasoik/Projects/character-sheet-generator/output")
+REPO_ROOT = Path("/Users/chasoik/Projects/character-sheet-generator")
+DEFAULT_SOURCE_ROOT = REPO_ROOT / "sources"
+DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output"
 STAGES = [
     {
         "id": "storyboard",
@@ -58,6 +60,36 @@ def as_list(value: Any) -> list[str]:
     return [str(value)]
 
 
+def path_is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def is_output_reference(value: str) -> bool:
+    path = Path(value).expanduser()
+    parts = [part.lower() for part in path.parts if part not in {"", "."}]
+    if "output" in parts:
+        return True
+    candidate = path if path.is_absolute() else REPO_ROOT / path
+    return path_is_under(candidate, DEFAULT_OUTPUT_ROOT)
+
+
+def validate_reference_paths(references: Any) -> list[str]:
+    validated: list[str] = []
+    for ref in as_list(references):
+        ref = ref.strip()
+        if not ref:
+            continue
+        if is_output_reference(ref):
+            raise SystemExit(f"Reference path is under output/ and cannot be used as source data: {ref}")
+        if ref not in validated:
+            validated.append(ref)
+    return validated
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -99,10 +131,13 @@ def build_stage_states() -> dict[str, dict[str, Any]]:
 def normalize_state(state: dict[str, Any]) -> None:
     if "pages" not in state and "panels" in state:
         state["pages"] = legacy_panels_to_pages({"panels": state.get("panels", [])})
+    state.setdefault("source_root", str(DEFAULT_SOURCE_ROOT))
+    state.setdefault("excluded_source_roots", [str(DEFAULT_OUTPUT_ROOT)])
+    state["source_references"] = validate_reference_paths(state.get("source_references", []))
     state.setdefault("pages", [])
     for page in state.get("pages", []):
         page.setdefault("dependencies", [])
-        page.setdefault("references", [])
+        page["references"] = validate_reference_paths(page.get("references", []))
         page.setdefault("panels", [])
         page.setdefault("page_dialogue_notes", "")
         page.setdefault("spatial_logic_notes", "")
@@ -284,8 +319,10 @@ def panel_line(panel: dict[str, Any]) -> str:
 
 def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[str, Any]) -> str:
     meta = stage_meta(stage_id)
-    references = as_list(page.get("references"))
+    references = validate_reference_paths(as_list(state.get("source_references")) + as_list(page.get("references")))
     reference_text = "\n".join(f"- {ref}" for ref in references) or "- none"
+    source_root = state.get("source_root") or str(DEFAULT_SOURCE_ROOT)
+    excluded_roots = ", ".join(state.get("excluded_source_roots") or [str(DEFAULT_OUTPUT_ROOT)])
     panels = page.get("panels", [])
     panel_text = "\n".join(panel_line(panel) for panel in panels) or "- no panel details supplied"
     page_dialogue_notes = page.get("page_dialogue_notes") or (
@@ -336,6 +373,14 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Must match:",
             must_match,
             "",
+            "Default source data folder:",
+            f"- {source_root}",
+            "- If no explicit reference paths are listed, inspect/search this folder for relevant story, character, location, style, and page-layout source files before generation.",
+            "",
+            "Output source exclusion:",
+            f"- Do not use {excluded_roots} or any output/ subtree as source/reference data; it may contain unrelated generated files or failed cases.",
+            "- Only the current run's parent-inspected prior-stage reference listed above may be used as workflow structure input.",
+            "",
             "Reference paths:",
             reference_text,
             "",
@@ -372,6 +417,8 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "Generation policy:",
         "- Use Codex built-in image_gen only through one subagent per reserved page.",
         "- Do not reserve images before approve-plan.",
+        f"- Use {state.get('source_root') or DEFAULT_SOURCE_ROOT} as the default source data folder when the user did not specify source/reference paths.",
+        f"- Do not use {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])} or any output/ subtree as source/reference data.",
         "- Generate stages in order: storyboard, sketch_ink, finish.",
         "- Reserve at most four pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",
@@ -433,6 +480,9 @@ def command_init(args: argparse.Namespace) -> None:
         "title": title,
         "run_dir": str(run_dir),
         "scenario_file": str(scenario_path),
+        "source_root": str(DEFAULT_SOURCE_ROOT),
+        "excluded_source_roots": [str(DEFAULT_OUTPUT_ROOT)],
+        "source_references": [],
         "stage_order": STAGE_IDS,
         "plan_approved": False,
         "complete": False,
@@ -529,7 +579,7 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "spatial_logic_notes": str(raw.get("spatial_logic_notes") or ""),
         "motion_checks": as_list(raw.get("motion_checks")),
         "must_match": as_list(raw.get("must_match")),
-        "references": as_list(raw.get("references") or raw.get("reference_paths")),
+        "references": validate_reference_paths(raw.get("references") or raw.get("reference_paths")),
         "prompt": str(raw.get("prompt") or raw.get("layout_brief") or raw.get("visual_brief") or ""),
         "negative_prompt": str(raw.get("negative_prompt") or ""),
         "dependencies": as_list(raw.get("dependencies")),
@@ -615,6 +665,9 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     state["title"] = plan.get("scenario_title") or plan.get("story_title") or state.get("title")
     state["style_brief"] = str(plan.get("style_brief") or "")
     state["reading_order"] = str(plan.get("reading_order") or "right-to-left or top-to-bottom as approved")
+    state["source_root"] = str(DEFAULT_SOURCE_ROOT)
+    state["excluded_source_roots"] = [str(DEFAULT_OUTPUT_ROOT)]
+    state["source_references"] = validate_reference_paths(plan.get("references") or plan.get("reference_paths"))
     state["plan_approved"] = True
     state["approved_at"] = now_iso()
     state["pages"] = pages
@@ -628,6 +681,9 @@ def command_approve_plan(args: argparse.Namespace) -> None:
             "scenario_title": state["title"],
             "style_brief": state.get("style_brief", ""),
             "reading_order": state.get("reading_order", ""),
+            "source_root": state.get("source_root", ""),
+            "excluded_source_roots": state.get("excluded_source_roots", []),
+            "source_references": state.get("source_references", []),
             "pages": pages,
         },
     )

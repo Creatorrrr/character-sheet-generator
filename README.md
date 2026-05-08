@@ -114,6 +114,7 @@
 기본 정책:
 
 - 승인 전에는 이미지를 생성하지 않습니다.
+- 사용자가 소스/레퍼런스 경로를 지정하지 않으면 `/Users/chasoik/Projects/character-sheet-generator/sources/`에서 필요한 자료를 참고하고, `/Users/chasoik/Projects/character-sheet-generator/output/` 하위 파일은 소스 데이터로 쓰지 않습니다.
 - 승인된 각색 대사, 효과음, 짧은 캡션은 말풍선/효과음 글자/캡션 영역으로 페이지 이미지 내부에 포함합니다.
 - 캐릭터, 물체, 배경, 공/소품의 위치와 움직임이 상식적인지 worker와 부모 세션이 모두 검수합니다.
 - 다음 단계는 이전 단계의 모든 페이지가 부모 검수를 통과한 뒤에만 진행합니다.

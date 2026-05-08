@@ -168,10 +168,29 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(first["filename"], "001-page-1.png")
             self.assertEqual(len(first["panels"]), 3)
             self.assertEqual(first["panels"][0]["adapted_dialogue"], ["각색 대사 1-1"])
+            self.assertEqual(state["source_root"], "/Users/chasoik/Projects/character-sheet-generator/sources")
+            self.assertEqual(state["excluded_source_roots"], ["/Users/chasoik/Projects/character-sheet-generator/output"])
             self.assertEqual(set(first["stages"].keys()), {"storyboard", "sketch_ink", "finish"})
             self.assertEqual(first["stages"]["storyboard"]["status"], "pending")
             self.assertTrue((run_dir / "approved_storyboard_plan.json").exists())
             self.assertTrue((run_dir / "batch_plan.md").exists())
+
+    def test_approve_plan_rejects_output_references(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = sample_plan(page_count=1)
+            plan["pages"][0]["references"] = [
+                "/Users/chasoik/Projects/character-sheet-generator/output/failed-page.png"
+            ]
+            plan_path = root / "plan-output-ref.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            result = run_cli_raw("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Reference path is under output/", result.stderr)
+            self.assertIn("cannot be used as source data", result.stderr)
 
     def test_legacy_flat_panels_are_converted_to_single_panel_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -233,6 +252,26 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("ball moves toward hoop after release", prompt)
             self.assertIn("basketball moves toward hoop, not behind shooter", prompt)
             self.assertIn("No examples of impossible staging", prompt)
+
+    def test_prompt_uses_sources_by_default_and_excludes_output_source_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1, panel_count=2)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            prompt_path = Path(state["pages"][0]["stages"]["storyboard"]["prompt_file"])
+            prompt = prompt_path.read_text(encoding="utf-8")
+            batch_plan = (run_dir / "batch_plan.md").read_text(encoding="utf-8")
+
+            self.assertIn("Default source data folder:", prompt)
+            self.assertIn("/Users/chasoik/Projects/character-sheet-generator/sources", prompt)
+            self.assertIn("Output source exclusion:", prompt)
+            self.assertIn("Do not use /Users/chasoik/Projects/character-sheet-generator/output", prompt)
+            self.assertIn("Only the current run's parent-inspected prior-stage reference", prompt)
+            self.assertIn("default source data folder", batch_plan)
+            self.assertIn("Do not use /Users/chasoik/Projects/character-sheet-generator/output", batch_plan)
 
     def test_imported_or_requested_pages_block_next_batch(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -20,6 +20,15 @@ If the user does not specify where to save files, create a new run folder under 
 - If the user is resuming from an existing run folder, keep using that folder.
 - Save `scenario.md`, `state.json`, `approved_storyboard_plan.json`, `batch_plan.md`, prompt files, generated stage images, worker notes, and parent inspection notes under the selected run folder.
 
+## Default Source Data Location
+
+If the user does not specify source or reference paths, use `/Users/chasoik/Projects/character-sheet-generator/sources/` as the default folder for source data.
+
+- Search only for relevant story, character, location, style, object, and page-layout source files needed for the current request.
+- Do not use `/Users/chasoik/Projects/character-sheet-generator/output/` or any `output/` subtree as source/reference data. It may contain unrelated generated files, rejected attempts, or failed cases from other runs.
+- Current-run generated images under the selected run folder may be used only as prior-stage workflow structure references after parent inspection, not as general source data.
+- Record user-provided or `sources/` reference paths in the approved plan. The runner rejects `references` or `reference_paths` that point under `output/`.
+
 ## Inputs
 
 Accept any of these:
@@ -28,6 +37,7 @@ Accept any of these:
 - A screenplay, shot list, or scene brief when the source happens to be written in that format.
 - A story or scenario file path.
 - Existing character, location, style, or page-layout references.
+- If no reference path is specified, relevant files from `/Users/chasoik/Projects/character-sheet-generator/sources/`.
 - A resumed run folder from this skill.
 
 Ask for missing inputs only when the story outline or scenario cannot define page beats or when a visual dependency would be risky to infer.
@@ -76,6 +86,8 @@ Use this approval format:
 [만화 페이지 생성 승인 요청]
 - 줄거리/시나리오: ...
 - 저장 폴더: ...
+- 기본 참고 폴더: /Users/chasoik/Projects/character-sheet-generator/sources/
+- 참고 제외 폴더: /Users/chasoik/Projects/character-sheet-generator/output/
 - 총 페이지 수: ...
 - 페이지당 컷 구성 기준: ...
 
@@ -157,6 +169,8 @@ After approval, write an approved plan and import it with the runner:
 
 Legacy flat `panels` plans are accepted only for compatibility. The runner converts each panel into a single-panel page, but new plans should use `pages[].panels[]`.
 
+`references` and top-level `reference_paths` must point to user-provided files or relevant files under `sources/`. Do not put files from `output/` in the approved plan.
+
 ## Resumable Runner Contract
 
 Use `scripts/comic_storyboard_runner.py`. The runner keeps state because `image_gen` may end a turn and because subagent results must be mapped back to exact page and stage outputs.
@@ -199,6 +213,7 @@ Use the same commands with `--stage sketch_ink` and `--stage finish` as the work
 State rules:
 
 - `approve-plan` is the only transition from approval-gated planning into generation-ready state.
+- `approve-plan` rejects `references` and `reference_paths` under `output/`.
 - Stages must run in order: `storyboard`, then `sketch_ink`, then `finish`.
 - `next-batch --limit 4` reserves at most four eligible pages from the current stage and writes one prompt file per page under `prompts/<stage>/`.
 - Do not reserve a new batch while any page stage is still `generation_requested` or `imported`.
@@ -244,10 +259,13 @@ Assigned page: <filename-or-id>
 Stage: <storyboard|sketch_ink|finish>
 Prompt file: <prompt-file>
 Batch id: <batch-id>
+Default source folder: /Users/chasoik/Projects/character-sheet-generator/sources/
+Excluded source folder: /Users/chasoik/Projects/character-sheet-generator/output/
 Prior-stage reference: <path or none>
 Relevant references: <paths or "none">
 Page text policy: include approved adapted dialogue, SFX, and short captions inside speech balloons/caption areas/SFX lettering.
 Spatial logic policy: reject impossible positions, object trajectories, or motion direction.
+Source policy: when no explicit reference path is provided, use relevant files from the default source folder; never use output/ files as source data.
 
 Use image_gen with the assigned prompt and visual references. After generation, inspect the output for stage fit, page/story fit, multi-panel layout, adapted text/SFX fit, text legibility, spatial continuity, motion plausibility, technical quality, and obvious defects. Return only:
 - generated file path
@@ -265,6 +283,7 @@ Inspect every imported page before marking it passed. Check:
 - The page matches the approved page id, panel count, reading order, layout brief, and current stage.
 - Speech balloons, SFX, and captions use approved adapted text and are legible.
 - Source dialogue was adapted for comic timing unless exact preservation was explicitly approved.
+- Source/reference data came from user-provided paths or `sources/`, not from `output/` generated artifacts.
 - Composition, character blocking, props, setting, and continuity match the plan.
 - Character/object positions, motion direction, ball/projectile paths, gaze direction, and cause-effect movement are plausible.
 - `sketch_ink` preserves the inspected storyboard page structure.
@@ -283,6 +302,8 @@ After each batch, report in Korean:
 [만화 콘티 팩 진행 결과]
 - 줄거리/시나리오: ...
 - 저장 폴더: ...
+- 기본 참고 폴더: ...
+- 참고 제외 폴더: output/
 - 상태 파일: ...
 - 현재 단계: storyboard | sketch_ink | finish
 - 승인된 페이지 수: ...

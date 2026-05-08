@@ -35,6 +35,8 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Include page-level layout notes and panel-level composition/viewpoint notes.
 - Include detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines.
 - Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and `must_match`.
+- For action or staging where direction, cover, line of sight, object trajectory, or landmark continuity matters, include a structured `spatial_contract`. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, and machine-checkable constraints before generation.
+- Use `spatial_contract.constraints` for relations such as `aims_at`, `trajectory_to`, `cover_between`, `behind_cover_from`, `line_of_sight_blocked`, `left_of`, `right_of`, and `same_landmark_relation_as`. Treat failures as generation blockers before approval and rerun causes after image inspection.
 - Include character appearance/anatomy locks in `character_locks` or `must_match`: approved species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.
 - Unless the plan or source explicitly approves a one-eyed, asymmetric, non-human, or otherwise unusual structure, treat missing/extra/merged eyes, one-eyed appearance for a two-eyed character, missing/extra limbs or fingers, changed species/body type, broken joints, and broken body proportions as rerun causes.
 - Preserve source scene references such as `S01`, `S02-S04`, or the user's own scene names.
@@ -68,8 +70,9 @@ Use this format:
 - 캐릭터 고정 조건(character_locks): ...
 - 캐릭터 외형/해부 고정 조건(appearance/anatomy): 종족/신체 구조, 얼굴 구조, 눈 개수/배치, 손/손가락/팔/다리 개수, 실루엣, 체형 비율, 자세. 예: 두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 하며, 외눈 캐릭터처럼 보이면 rerun.
 - 이미지 내 문자 방지 조건(visual_text_guard): ...
+- 구조화 공간 계약(spatial_contract): 총구/시선/투사체/엄폐/랜드마크 관계가 중요한 컷은 승인 전 벡터와 관계 검증을 통과해야 함
 
-| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선 검수 포인트 |
+| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/spatial_contract 검수 포인트 |
 | ... |
 
 승인 후 진행 방식:
@@ -124,6 +127,34 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
         "no impossible ball direction",
         "two-eyed characters must not look one-eyed unless explicitly approved"
       ],
+      "spatial_contract": {
+        "coordinate_space": {
+          "type": "panel_screen_2d",
+          "origin": "top_left",
+          "x_axis": "right",
+          "y_axis": "down",
+          "units": "normalized 0..1 or consistent scene units"
+        },
+        "entities": [
+          {"id": "protagonist", "type": "character", "role": "shooter"},
+          {"id": "basketball", "type": "object", "role": "projectile"},
+          {"id": "hoop", "type": "landmark", "role": "target"}
+        ],
+        "panel_snapshots": [
+          {
+            "panel": 1,
+            "entities": [
+              {"id": "protagonist", "position": [0.25, 0.68], "facing_vector": [1, -0.15]},
+              {"id": "basketball", "position": [0.34, 0.55], "trajectory_vector": [1, -0.2]},
+              {"id": "hoop", "position": [0.82, 0.36]}
+            ]
+          }
+        ],
+        "constraints": [
+          {"type": "trajectory_to", "panel": 1, "object": "basketball", "target": "hoop"},
+          {"type": "right_of", "panel": 1, "subject": "hoop", "anchor": "protagonist"}
+        ]
+      },
       "panels": [
         {
           "panel_no": 1,
@@ -165,8 +196,11 @@ Initialize and approve:
 ```bash
 python3 "$RUNNER" init --title "<story/scenario title>" --scenario <story-or-scenario-file>
 python3 "$RUNNER" status --run-dir <run-dir>
+python3 "$RUNNER" spatial-check --plan-file <approved-plan.json>
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
 ```
+
+`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite aim vectors, impossible projectile trajectories, missing cover between actor/threat, and fixed-landmark relation drift fail before any generation is reserved. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
 
 Optional single-stage targets:
 
@@ -182,7 +216,8 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 # Spawn one fork_context=true subagent per printed item.
 # Use the printed SUBAGENT_PROMPT_FILE content as the subagent task.
 python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
-python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<parent inspection note>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial contract visual inspection pass>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<parent inspection note>" --spatial-verdict needs_rerun --spatial-note "<spatial contradiction found>"
 python3 "$RUNNER" rerun --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<reason>"
 python3 "$RUNNER" batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
@@ -226,18 +261,22 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 - `stop-after-stage` changes the completion target to the requested completed stage.
 - `finish` requires a parent-inspected or imported prior `storyboard_sketch_ink` image.
 - `next-batch --limit 4` reserves at most four eligible pages and writes both `prompts/<stage>/...prompt.txt` and `subagent_prompts/<stage>/...subagent.txt`.
+- `next-batch` injects `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved entity positions, vectors, visibility/occlusion, cover, line-of-sight, trajectory, and landmark-relation constraints.
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
+- Parent `inspect-pass --spatial-verdict needs_rerun` never marks the page passed; it routes the page back to `pending` rerun and resets stage review / following gates.
 - If a subagent returns `completed:null`, no final message, or no generated path, do not invent an import path. Route the page to `rerun`.
 - Rerun resets the relevant stage review and any following stage gate.
 
 ## Parent Verification
 
-Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
+Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, structured `spatial_contract` compliance, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
+
+When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, and constraint. Reject target-opposite aim vectors, projectile paths that do not move toward the target, cover that is not between actor and threat, exposed characters that were specified as hidden behind cover, broken line-of-sight blocking, left/right relation flips, and fixed landmark relation drift. Record the result with `--spatial-verdict` and `--spatial-note`.
 
 Character appearance/anatomy is an independent reject criterion, not just a technical-quality note. Unless explicitly approved by the plan or source, rerun pages with missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.
 
-For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
+For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, structured spatial contract, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
 
 Do not claim page coverage, text quality, continuity, spatial logic, or stage quality unless the image was inspected.
 

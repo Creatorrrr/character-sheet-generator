@@ -107,6 +107,52 @@ def sample_plan(page_count=5, panel_count=3):
     }
 
 
+def action_spatial_contract():
+    return {
+        "coordinate_space": {
+            "type": "panel_screen_2d",
+            "origin": "top_left",
+            "x_axis": "right",
+            "y_axis": "down",
+        },
+        "entities": [
+            {"id": "hero", "type": "character", "role": "protected shooter"},
+            {"id": "villain", "type": "character", "role": "opponent"},
+            {"id": "hero_gun", "type": "object", "role": "hero weapon"},
+            {"id": "villain_gun", "type": "object", "role": "villain weapon"},
+            {"id": "crate", "type": "object", "role": "cover"},
+            {"id": "basketball", "type": "object", "role": "projectile"},
+            {"id": "hoop", "type": "landmark", "role": "target"},
+        ],
+        "panel_snapshots": [
+            {
+                "panel": 1,
+                "entities": [
+                    {"id": "hero", "position": [0.2, 0.5], "facing_vector": [1, 0]},
+                    {"id": "villain", "position": [0.8, 0.5], "facing_vector": [-1, 0]},
+                    {"id": "hero_gun", "position": [0.28, 0.5], "aim_vector": [1, 0]},
+                    {"id": "villain_gun", "position": [0.72, 0.5], "aim_vector": [-1, 0]},
+                    {"id": "crate", "position": [0.5, 0.5], "occlusion": "between hero and villain"},
+                    {"id": "basketball", "position": [0.32, 0.82], "trajectory_vector": [1, -0.85]},
+                    {"id": "hoop", "position": [0.82, 0.38]},
+                ],
+            }
+        ],
+        "constraints": [
+            {"id": "hero-aims-at-villain", "type": "aims_at", "panel": 1, "actor": "hero", "weapon": "hero_gun", "target": "villain"},
+            {"id": "villain-aims-at-hero", "type": "aims_at", "panel": 1, "actor": "villain", "weapon": "villain_gun", "target": "hero"},
+            {"id": "crate-cover-between", "type": "cover_between", "panel": 1, "actor": "hero", "cover": "crate", "threat": "villain"},
+            {"id": "ball-to-hoop", "type": "trajectory_to", "panel": 1, "object": "basketball", "target": "hoop"},
+        ],
+    }
+
+
+def plan_with_spatial_contract(contract):
+    plan = sample_plan(page_count=1, panel_count=1)
+    plan["pages"][0]["spatial_contract"] = contract
+    return plan
+
+
 def legacy_panel_plan(panel_count=2):
     panels = []
     for index in range(1, panel_count + 1):
@@ -262,6 +308,212 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Reference path is under output/", result.stderr)
             self.assertIn("cannot be used as source data", result.stderr)
+
+    def test_spatial_contract_check_accepts_aim_cover_and_trajectory_and_prompts_include_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = plan_with_spatial_contract(action_spatial_contract())
+            plan_path = root / "spatial-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            generated = generate_file(root)
+
+            check = run_cli("spatial-check", "--plan-file", str(plan_path), cwd=root)
+            self.assertIn("SPATIAL_CHECK: pass", check.stdout)
+            self.assertIn("STRUCTURED_PAGES: 1", check.stdout)
+
+            approve = run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            self.assertIn("SPATIAL_CHECK: pass (1 structured pages)", approve.stdout)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            prompt = Path(stage["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+            batch_plan = (run_dir / "batch_plan.md").read_text(encoding="utf-8")
+
+            for text in (prompt, subagent_prompt, batch_plan):
+                self.assertIn("Structured spatial contract", text)
+                self.assertIn("hero-aims-at-villain", text)
+                self.assertIn("crate-cover-between", text)
+                self.assertIn("ball-to-hoop", text)
+            self.assertIn("Rejects target-opposite aim vectors", prompt)
+
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                "--spatial-verdict",
+                "pass",
+                "--spatial-note",
+                "aim, cover, and trajectory pass",
+                cwd=root,
+            )
+            state = json.loads((run_dir / "state.json").read_text())
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            self.assertEqual(stage["status"], "inspected_pass")
+            self.assertEqual(stage["spatial_verdict"], "pass")
+            self.assertEqual(stage["spatial_note"], "aim, cover, and trajectory pass")
+
+    def test_spatial_check_rejects_action_and_landmark_contradictions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cases = []
+
+            bad_aim = action_spatial_contract()
+            bad_aim["panel_snapshots"][0]["entities"][2]["aim_vector"] = [-1, 0]
+            cases.append((plan_with_spatial_contract(bad_aim), "vector points away"))
+
+            bad_cover = action_spatial_contract()
+            bad_cover["panel_snapshots"][0]["entities"][4]["position"] = [0.2, 0.9]
+            cases.append((plan_with_spatial_contract(bad_cover), "cover is not between"))
+
+            bad_trajectory = action_spatial_contract()
+            bad_trajectory["panel_snapshots"][0]["entities"][5]["trajectory_vector"] = [-1, 0.85]
+            cases.append((plan_with_spatial_contract(bad_trajectory), "vector points away"))
+
+            landmark_plan = sample_plan(page_count=2, panel_count=1)
+            landmark_plan["pages"][0]["spatial_contract"] = {
+                "entities": [
+                    {"id": "hoop", "type": "landmark"},
+                    {"id": "gate", "type": "landmark"},
+                ],
+                "panel_snapshots": [
+                    {
+                        "panel": 1,
+                        "entities": [
+                            {"id": "hoop", "position": [0.8, 0.4]},
+                            {"id": "gate", "position": [0.2, 0.4]},
+                        ],
+                    }
+                ],
+            }
+            landmark_plan["pages"][1]["spatial_contract"] = {
+                "entities": [
+                    {"id": "hoop", "type": "landmark"},
+                    {"id": "gate", "type": "landmark"},
+                ],
+                "panel_snapshots": [
+                    {
+                        "panel": 1,
+                        "entities": [
+                            {"id": "hoop", "position": [0.1, 0.4]},
+                            {"id": "gate", "position": [0.9, 0.4]},
+                        ],
+                    }
+                ],
+                "constraints": [
+                    {
+                        "id": "keep-hoop-gate-relation",
+                        "type": "same_landmark_relation_as",
+                        "panel": 1,
+                        "reference_page": "001-page-1",
+                        "reference_panel": 1,
+                        "subject": "hoop",
+                        "anchor": "gate",
+                    }
+                ],
+            }
+            cases.append((landmark_plan, "landmark relation drift"))
+
+            for index, (plan, expected) in enumerate(cases, start=1):
+                with self.subTest(case=index):
+                    plan_path = root / f"bad-spatial-{index}.json"
+                    plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+                    result = run_cli_raw("spatial-check", "--plan-file", str(plan_path), cwd=root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("SPATIAL_CHECK: fail", result.stdout)
+                    self.assertIn(expected, result.stdout)
+
+    def test_approve_plan_blocks_failed_spatial_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            bad_contract = action_spatial_contract()
+            bad_contract["panel_snapshots"][0]["entities"][2]["aim_vector"] = [-1, 0]
+            plan = plan_with_spatial_contract(bad_contract)
+            plan_path = root / "bad-aim-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            result = run_cli_raw("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Spatial contract check failed", result.stderr)
+            state = json.loads((run_dir / "state.json").read_text())
+            self.assertFalse(state["plan_approved"])
+
+    def test_spatial_verdict_needs_rerun_blocks_inspect_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = plan_with_spatial_contract(action_spatial_contract())
+            plan_path = root / "spatial-rerun-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            generated = generate_file(root)
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            result = run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent finds spatial contradiction",
+                "--spatial-verdict",
+                "needs_rerun",
+                "--spatial-note",
+                "hero is exposed instead of behind crate",
+                cwd=root,
+            )
+
+            self.assertIn("SPATIAL_RERUN_REQUIRED", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            self.assertEqual(stage["status"], "pending")
+            self.assertTrue(stage["rerun_pending"])
+            self.assertIn("Spatial inspection needs rerun", stage["parent_note"])
+            self.assertEqual(stage["rerun_history"][-1]["spatial_verdict"], "needs_rerun")
 
     def test_legacy_flat_panels_are_converted_to_single_panel_pages(self):
         with tempfile.TemporaryDirectory() as tmp:

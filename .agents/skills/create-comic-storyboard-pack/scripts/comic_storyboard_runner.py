@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import shutil
 import sys
@@ -51,6 +52,17 @@ VALID_STATUSES = {"pending", "generation_requested", "imported", "inspected_pass
 WORKER_STATUS_VALUES = {"pass", "needs_rerun"}
 REVIEW_STATUSES = {"pending", "passed", "needs_rerun"}
 REVIEW_CLI_STATUSES = {"pass", "needs_rerun"}
+SPATIAL_VERDICT_VALUES = {"pass", "needs_rerun"}
+SPATIAL_CONSTRAINT_TYPES = {
+    "aims_at",
+    "trajectory_to",
+    "cover_between",
+    "behind_cover_from",
+    "line_of_sight_blocked",
+    "left_of",
+    "right_of",
+    "same_landmark_relation_as",
+}
 DEFAULT_PACING_NOTES = (
     "Use 3-5 panels by default with measured cinematic pacing. Use 1-2 panels for special staging such "
     "as full-page emotional beats, silence, stillness, or decisive action moments. Split pages instead "
@@ -159,6 +171,526 @@ def validate_reference_paths(references: Any) -> list[str]:
     return validated
 
 
+def panel_key(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def vector_numbers(value: Any) -> list[float] | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, dict):
+        keys = ["x", "y", "z"]
+        if "x" not in value or "y" not in value:
+            return None
+        numbers: list[float] = []
+        for key in keys:
+            if key not in value:
+                continue
+            try:
+                numbers.append(float(value[key]))
+            except (TypeError, ValueError):
+                return None
+        return numbers if len(numbers) >= 2 else None
+    if isinstance(value, (list, tuple)):
+        if len(value) < 2:
+            return None
+        numbers = []
+        for entry in value[:3]:
+            try:
+                numbers.append(float(entry))
+            except (TypeError, ValueError):
+                return None
+        return numbers
+    return None
+
+
+def vector2(value: Any) -> tuple[float, float] | None:
+    numbers = vector_numbers(value)
+    if not numbers or len(numbers) < 2:
+        return None
+    return (numbers[0], numbers[1])
+
+
+def normalized_vector(value: Any) -> Any:
+    numbers = vector_numbers(value)
+    return numbers if numbers is not None else value
+
+
+def normalize_spatial_entities(raw_entities: Any) -> list[dict[str, Any]]:
+    entities: list[dict[str, Any]] = []
+    if not raw_entities:
+        return entities
+    if isinstance(raw_entities, dict):
+        iterable = []
+        for entity_id, value in raw_entities.items():
+            if isinstance(value, dict):
+                entry = dict(value)
+                entry.setdefault("id", entity_id)
+            else:
+                entry = {"id": entity_id, "type": str(value)}
+            iterable.append(entry)
+    elif isinstance(raw_entities, list):
+        iterable = raw_entities
+    else:
+        iterable = as_list(raw_entities)
+
+    for index, raw in enumerate(iterable, start=1):
+        if isinstance(raw, dict):
+            entry = dict(raw)
+            entity_id = str(entry.get("id") or entry.get("name") or f"entity-{index}").strip()
+            entry["id"] = entity_id
+            entry["type"] = str(entry.get("type") or "").strip()
+            entry["role"] = str(entry.get("role") or "").strip()
+        else:
+            entry = {"id": str(raw).strip(), "type": "", "role": ""}
+        if entry["id"]:
+            entities.append(entry)
+    return entities
+
+
+def normalize_spatial_entity_state(raw_state: Any, index: int) -> dict[str, Any]:
+    if isinstance(raw_state, dict):
+        entry = dict(raw_state)
+    else:
+        entry = {"id": str(raw_state)}
+    entity_id = str(entry.get("id") or entry.get("entity") or entry.get("name") or f"entity-{index}").strip()
+    normalized: dict[str, Any] = {"id": entity_id}
+    position = entry.get("position")
+    if position is None:
+        position = entry.get("world_position")
+    if position is None:
+        position = entry.get("screen_position")
+    if position is not None:
+        normalized["position"] = normalized_vector(position)
+    vector_aliases = {
+        "facing_vector": ["facing_vector", "facing"],
+        "gaze_vector": ["gaze_vector", "gaze"],
+        "aim_vector": ["aim_vector", "aim"],
+        "trajectory_vector": ["trajectory_vector", "trajectory", "motion_vector", "velocity_vector"],
+    }
+    for target_field, aliases in vector_aliases.items():
+        for alias in aliases:
+            if alias in entry and entry[alias] is not None and entry[alias] != "":
+                normalized[target_field] = normalized_vector(entry[alias])
+                break
+    for field in ["visibility", "occlusion", "occluded_by", "notes"]:
+        if field in entry:
+            normalized[field] = entry[field]
+    return normalized
+
+
+def normalize_spatial_panel_snapshot(raw_snapshot: Any, index: int) -> dict[str, Any]:
+    if not isinstance(raw_snapshot, dict):
+        raise SystemExit(f"spatial_contract panel_snapshots[{index}] must be an object.")
+    snapshot = dict(raw_snapshot)
+    snapshot["panel"] = panel_key(
+        snapshot.get("panel")
+        or snapshot.get("panel_no")
+        or snapshot.get("panel_id")
+        or snapshot.get("id")
+        or index
+    )
+    raw_entities = snapshot.get("entities") or snapshot.get("entity_states") or snapshot.get("states") or []
+    if isinstance(raw_entities, dict):
+        iterable = []
+        for entity_id, raw_state in raw_entities.items():
+            if isinstance(raw_state, dict):
+                entry = dict(raw_state)
+                entry.setdefault("id", entity_id)
+            else:
+                entry = {"id": entity_id, "position": raw_state}
+            iterable.append(entry)
+    else:
+        iterable = raw_entities if isinstance(raw_entities, list) else as_list(raw_entities)
+    snapshot["entities"] = [
+        normalize_spatial_entity_state(raw_state, entity_index)
+        for entity_index, raw_state in enumerate(iterable, start=1)
+    ]
+    return snapshot
+
+
+def normalize_spatial_constraint(raw_constraint: Any, index: int) -> dict[str, Any]:
+    if isinstance(raw_constraint, dict):
+        constraint = dict(raw_constraint)
+    else:
+        constraint = {"type": str(raw_constraint)}
+    constraint["id"] = str(constraint.get("id") or f"constraint-{index}")
+    constraint["type"] = str(constraint.get("type") or constraint.get("relation") or "").strip()
+    if "panel_no" in constraint and "panel" not in constraint:
+        constraint["panel"] = constraint["panel_no"]
+    if "reference_panel_no" in constraint and "reference_panel" not in constraint:
+        constraint["reference_panel"] = constraint["reference_panel_no"]
+    return constraint
+
+
+def normalize_spatial_contract(raw_contract: Any) -> dict[str, Any]:
+    if not raw_contract:
+        return {
+            "entities": [],
+            "coordinate_space": {},
+            "panel_snapshots": [],
+            "constraints": [],
+        }
+    if not isinstance(raw_contract, dict):
+        raise SystemExit("spatial_contract must be an object when provided.")
+    coordinate_space = raw_contract.get("coordinate_space") or {}
+    if coordinate_space and not isinstance(coordinate_space, dict):
+        coordinate_space = {"description": str(coordinate_space)}
+    snapshots = raw_contract.get("panel_snapshots") or raw_contract.get("snapshots") or []
+    constraints = raw_contract.get("constraints") or []
+    return {
+        "entities": normalize_spatial_entities(raw_contract.get("entities")),
+        "coordinate_space": coordinate_space,
+        "panel_snapshots": [
+            normalize_spatial_panel_snapshot(snapshot, index)
+            for index, snapshot in enumerate(snapshots, start=1)
+        ],
+        "constraints": [
+            normalize_spatial_constraint(constraint, index)
+            for index, constraint in enumerate(constraints, start=1)
+        ],
+    }
+
+
+def spatial_contract_has_content(contract: Any) -> bool:
+    if not isinstance(contract, dict):
+        return False
+    return bool(
+        contract.get("entities")
+        or contract.get("coordinate_space")
+        or contract.get("panel_snapshots")
+        or contract.get("constraints")
+    )
+
+
+def spatial_contract_page_count(pages: list[dict[str, Any]]) -> int:
+    return sum(1 for page in pages if spatial_contract_has_content(page.get("spatial_contract")))
+
+
+def spatial_constraint_value(constraint: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        if name in constraint and constraint[name] is not None and constraint[name] != "":
+            return constraint[name]
+    return ""
+
+
+def spatial_snapshots_by_panel(contract: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
+    snapshots: dict[str, dict[str, dict[str, Any]]] = {}
+    for snapshot in contract.get("panel_snapshots", []):
+        panel = panel_key(snapshot.get("panel"))
+        entities: dict[str, dict[str, Any]] = {}
+        for state in snapshot.get("entities", []):
+            entity_id = str(state.get("id") or "")
+            if entity_id:
+                entities[entity_id] = state
+        snapshots[panel] = entities
+    return snapshots
+
+
+def constraint_panel(contract: dict[str, Any], constraint: dict[str, Any], issues: list[str], label: str) -> str:
+    panel = panel_key(spatial_constraint_value(constraint, "panel", "panel_id"))
+    snapshots = contract.get("panel_snapshots", [])
+    if panel:
+        return panel
+    if len(snapshots) == 1:
+        return panel_key(snapshots[0].get("panel"))
+    issues.append(f"{label}: needs panel when more than one panel snapshot exists.")
+    return ""
+
+
+def snapshot_state(
+    snapshots: dict[str, dict[str, dict[str, Any]]],
+    panel: str,
+    entity_id: str,
+    issues: list[str],
+    label: str,
+) -> dict[str, Any] | None:
+    if not entity_id:
+        issues.append(f"{label}: missing entity id.")
+        return None
+    if panel not in snapshots:
+        issues.append(f"{label}: unknown panel snapshot {panel}.")
+        return None
+    state = snapshots[panel].get(entity_id)
+    if state is None:
+        issues.append(f"{label}: entity {entity_id} has no state in panel {panel}.")
+        return None
+    return state
+
+
+def state_position(state: dict[str, Any] | None, issues: list[str], label: str) -> tuple[float, float] | None:
+    if not state:
+        return None
+    position = vector2(state.get("position"))
+    if position is None:
+        issues.append(f"{label}: entity {state.get('id')} needs a numeric position [x, y].")
+    return position
+
+
+def state_vector(
+    state: dict[str, Any] | None,
+    fields: list[str],
+    issues: list[str],
+    label: str,
+) -> tuple[float, float] | None:
+    if not state:
+        return None
+    for field in fields:
+        vector = vector2(state.get(field))
+        if vector is not None:
+            return vector
+    issues.append(f"{label}: entity {state.get('id')} needs one of {', '.join(fields)}.")
+    return None
+
+
+def vector_length(vector: tuple[float, float]) -> float:
+    return math.hypot(vector[0], vector[1])
+
+
+def dot_matches_direction(
+    actual: tuple[float, float] | None,
+    origin: tuple[float, float] | None,
+    target: tuple[float, float] | None,
+    issues: list[str],
+    label: str,
+    min_dot: float,
+) -> None:
+    if actual is None or origin is None or target is None:
+        return
+    expected = (target[0] - origin[0], target[1] - origin[1])
+    actual_len = vector_length(actual)
+    expected_len = vector_length(expected)
+    if actual_len == 0 or expected_len == 0:
+        issues.append(f"{label}: cannot validate a zero-length vector.")
+        return
+    dot = (actual[0] / actual_len) * (expected[0] / expected_len) + (actual[1] / actual_len) * (expected[1] / expected_len)
+    if dot < min_dot:
+        issues.append(f"{label}: vector points away from the target direction (dot={dot:.3f}, min={min_dot:.3f}).")
+
+
+def cover_between_points(
+    cover: tuple[float, float] | None,
+    actor: tuple[float, float] | None,
+    threat: tuple[float, float] | None,
+    issues: list[str],
+    label: str,
+    tolerance_ratio: float,
+) -> None:
+    if cover is None or actor is None or threat is None:
+        return
+    segment = (threat[0] - actor[0], threat[1] - actor[1])
+    segment_len = vector_length(segment)
+    if segment_len == 0:
+        issues.append(f"{label}: actor and threat positions overlap, so cover_between cannot be validated.")
+        return
+    actor_to_cover = (cover[0] - actor[0], cover[1] - actor[1])
+    projection = ((actor_to_cover[0] * segment[0]) + (actor_to_cover[1] * segment[1])) / (segment_len * segment_len)
+    perpendicular = abs(segment[0] * actor_to_cover[1] - segment[1] * actor_to_cover[0]) / segment_len
+    max_distance = segment_len * tolerance_ratio
+    if projection <= 0 or projection >= 1:
+        issues.append(f"{label}: cover is not between actor and threat.")
+    if perpendicular > max_distance:
+        issues.append(
+            f"{label}: cover is too far from the actor/threat line "
+            f"(distance={perpendicular:.3f}, max={max_distance:.3f})."
+        )
+
+
+def relation_sign(value: float, epsilon: float = 0.001) -> int:
+    if value > epsilon:
+        return 1
+    if value < -epsilon:
+        return -1
+    return 0
+
+
+def relation_between(subject: tuple[float, float], anchor: tuple[float, float]) -> tuple[int, int]:
+    return (relation_sign(subject[0] - anchor[0]), relation_sign(subject[1] - anchor[1]))
+
+
+def validate_same_landmark_relation(
+    pages_by_id: dict[str, dict[str, Any]],
+    page: dict[str, Any],
+    constraint: dict[str, Any],
+    constraint_index: int,
+    issues: list[str],
+) -> None:
+    label = f"{page['id']} spatial_contract constraint {constraint_index} ({constraint.get('type')})"
+    contract = page.get("spatial_contract", {})
+    current_panel = constraint_panel(contract, constraint, issues, label)
+    reference_panel = panel_key(spatial_constraint_value(constraint, "reference_panel", "from_panel"))
+    reference_page_id = str(spatial_constraint_value(constraint, "reference_page", "from_page") or page["id"])
+    reference_page = pages_by_id.get(reference_page_id)
+    if reference_page is None:
+        issues.append(f"{label}: unknown reference_page {reference_page_id}.")
+        return
+    reference_contract = reference_page.get("spatial_contract", {})
+    reference_snapshots = reference_contract.get("panel_snapshots", [])
+    if not reference_panel and len(reference_snapshots) == 1:
+        reference_panel = panel_key(reference_snapshots[0].get("panel"))
+    if not current_panel or not reference_panel:
+        issues.append(f"{label}: needs panel and reference_panel.")
+        return
+
+    subject = str(spatial_constraint_value(constraint, "subject", "entity", "actor") or "")
+    anchor = str(spatial_constraint_value(constraint, "anchor", "target") or "")
+    current_snapshots = spatial_snapshots_by_panel(contract)
+    reference_snapshots_by_panel = spatial_snapshots_by_panel(reference_contract)
+
+    pairs: list[tuple[str, str]] = []
+    if subject and anchor:
+        pairs.append((subject, anchor))
+    else:
+        landmark_ids = {
+            str(entity.get("id"))
+            for entity in contract.get("entities", [])
+            if str(entity.get("type", "")).lower() == "landmark"
+        }
+        reference_landmark_ids = {
+            str(entity.get("id"))
+            for entity in reference_contract.get("entities", [])
+            if str(entity.get("type", "")).lower() == "landmark"
+        }
+        common = sorted(landmark_ids & reference_landmark_ids)
+        pairs = [(left, right) for index, left in enumerate(common) for right in common[index + 1 :]]
+        if not pairs:
+            issues.append(f"{label}: needs subject/anchor or at least two shared landmark entities.")
+            return
+
+    for pair_subject, pair_anchor in pairs:
+        current_subject = state_position(
+            snapshot_state(current_snapshots, current_panel, pair_subject, issues, label),
+            issues,
+            label,
+        )
+        current_anchor = state_position(
+            snapshot_state(current_snapshots, current_panel, pair_anchor, issues, label),
+            issues,
+            label,
+        )
+        reference_subject = state_position(
+            snapshot_state(reference_snapshots_by_panel, reference_panel, pair_subject, issues, label),
+            issues,
+            label,
+        )
+        reference_anchor = state_position(
+            snapshot_state(reference_snapshots_by_panel, reference_panel, pair_anchor, issues, label),
+            issues,
+            label,
+        )
+        if not current_subject or not current_anchor or not reference_subject or not reference_anchor:
+            continue
+        current_relation = relation_between(current_subject, current_anchor)
+        reference_relation = relation_between(reference_subject, reference_anchor)
+        if current_relation != reference_relation:
+            issues.append(
+                f"{label}: landmark relation drift for {pair_subject}/{pair_anchor} "
+                f"(current={current_relation}, reference={reference_relation})."
+            )
+
+
+def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
+    issues: list[str] = []
+    pages_by_id = {page["id"]: page for page in pages}
+    for page in pages:
+        contract = page.get("spatial_contract", {})
+        if not spatial_contract_has_content(contract):
+            continue
+        entities = contract.get("entities", [])
+        entity_ids = [str(entity.get("id") or "") for entity in entities]
+        entity_id_set = {entity_id for entity_id in entity_ids if entity_id}
+        if len(entity_id_set) != len([entity_id for entity_id in entity_ids if entity_id]):
+            issues.append(f"{page['id']} spatial_contract: duplicate entity ids are not allowed.")
+        if not entity_id_set:
+            issues.append(f"{page['id']} spatial_contract: at least one entity is required when spatial_contract is present.")
+        snapshots = spatial_snapshots_by_panel(contract)
+        for snapshot in contract.get("panel_snapshots", []):
+            panel = panel_key(snapshot.get("panel"))
+            for state in snapshot.get("entities", []):
+                entity_id = str(state.get("id") or "")
+                if entity_id not in entity_id_set:
+                    issues.append(f"{page['id']} spatial_contract panel {panel}: unknown entity {entity_id}.")
+                if "position" in state and vector2(state.get("position")) is None:
+                    issues.append(f"{page['id']} spatial_contract panel {panel}: entity {entity_id} has invalid position.")
+                for field in ["facing_vector", "gaze_vector", "aim_vector", "trajectory_vector"]:
+                    if field in state and vector2(state.get(field)) is None:
+                        issues.append(f"{page['id']} spatial_contract panel {panel}: entity {entity_id} has invalid {field}.")
+
+        for index, constraint in enumerate(contract.get("constraints", []), start=1):
+            constraint_type = str(constraint.get("type") or "")
+            label = f"{page['id']} spatial_contract constraint {index} ({constraint_type or 'missing_type'})"
+            if constraint_type not in SPATIAL_CONSTRAINT_TYPES:
+                issues.append(f"{label}: unsupported constraint type.")
+                continue
+            if constraint_type == "same_landmark_relation_as":
+                validate_same_landmark_relation(pages_by_id, page, constraint, index, issues)
+                continue
+
+            panel = constraint_panel(contract, constraint, issues, label)
+            if not panel:
+                continue
+            if constraint_type == "aims_at":
+                actor_id = str(spatial_constraint_value(constraint, "actor", "source", "shooter", "from", "entity") or "")
+                target_id = str(spatial_constraint_value(constraint, "target", "to") or "")
+                vector_entity_id = str(spatial_constraint_value(constraint, "weapon", "object", "vector_entity") or actor_id)
+                actor_state = snapshot_state(snapshots, panel, actor_id, issues, label)
+                vector_state = snapshot_state(snapshots, panel, vector_entity_id, issues, label)
+                target_state = snapshot_state(snapshots, panel, target_id, issues, label)
+                origin = state_position(vector_state or actor_state, issues, label)
+                target = state_position(target_state, issues, label)
+                actual = state_vector(vector_state or actor_state, ["aim_vector", "facing_vector", "gaze_vector"], issues, label)
+                min_dot = float(constraint.get("min_dot", 0.5))
+                dot_matches_direction(actual, origin, target, issues, label, min_dot)
+            elif constraint_type == "trajectory_to":
+                object_id = str(spatial_constraint_value(constraint, "object", "projectile", "source", "entity") or "")
+                target_id = str(spatial_constraint_value(constraint, "target", "to") or "")
+                object_state = snapshot_state(snapshots, panel, object_id, issues, label)
+                target_state = snapshot_state(snapshots, panel, target_id, issues, label)
+                origin = state_position(object_state, issues, label)
+                target = state_position(target_state, issues, label)
+                actual = state_vector(object_state, ["trajectory_vector", "motion_vector", "velocity_vector"], issues, label)
+                min_dot = float(constraint.get("min_dot", 0.5))
+                dot_matches_direction(actual, origin, target, issues, label, min_dot)
+            elif constraint_type in {"cover_between", "behind_cover_from", "line_of_sight_blocked"}:
+                cover_id = str(spatial_constraint_value(constraint, "cover", "blocker", "object") or "")
+                actor_id = str(spatial_constraint_value(constraint, "actor", "subject", "protected", "target") or "")
+                threat_id = str(spatial_constraint_value(constraint, "threat", "source", "from", "enemy") or "")
+                cover_state = snapshot_state(snapshots, panel, cover_id, issues, label)
+                actor_state = snapshot_state(snapshots, panel, actor_id, issues, label)
+                threat_state = snapshot_state(snapshots, panel, threat_id, issues, label)
+                cover = state_position(cover_state, issues, label)
+                actor = state_position(actor_state, issues, label)
+                threat = state_position(threat_state, issues, label)
+                tolerance_ratio = float(constraint.get("tolerance_ratio", 0.25))
+                cover_between_points(cover, actor, threat, issues, label, tolerance_ratio)
+            elif constraint_type in {"left_of", "right_of"}:
+                subject_id = str(spatial_constraint_value(constraint, "subject", "actor", "entity") or "")
+                anchor_id = str(spatial_constraint_value(constraint, "anchor", "target", "of") or "")
+                subject_state = snapshot_state(snapshots, panel, subject_id, issues, label)
+                anchor_state = snapshot_state(snapshots, panel, anchor_id, issues, label)
+                subject = state_position(subject_state, issues, label)
+                anchor = state_position(anchor_state, issues, label)
+                tolerance = float(constraint.get("tolerance", 0.001))
+                if subject is None or anchor is None:
+                    continue
+                if constraint_type == "left_of" and not subject[0] < anchor[0] - tolerance:
+                    issues.append(f"{label}: {subject_id} is not left of {anchor_id}.")
+                if constraint_type == "right_of" and not subject[0] > anchor[0] + tolerance:
+                    issues.append(f"{label}: {subject_id} is not right of {anchor_id}.")
+    return issues
+
+
+def assert_spatial_contracts_pass(pages: list[dict[str, Any]]) -> None:
+    issues = spatial_contract_issues(pages)
+    if issues:
+        details = "\n".join(f"- {issue}" for issue in issues)
+        raise SystemExit(f"Spatial contract check failed:\n{details}")
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -193,6 +725,9 @@ def blank_stage_state() -> dict[str, Any]:
         "worker_status": "",
         "worker_note": "",
         "parent_note": "",
+        "spatial_verdict": "",
+        "spatial_note": "",
+        "spatial_checked_at": "",
         "current_rerun_correction": "",
     }
 
@@ -322,6 +857,7 @@ def normalize_state(state: dict[str, Any]) -> None:
         page.setdefault("spatial_logic_notes", "")
         page.setdefault("motion_checks", [])
         page.setdefault("must_match", [])
+        page["spatial_contract"] = normalize_spatial_contract(page.get("spatial_contract"))
         stages = page.setdefault("stages", {})
         migrate_legacy_stage_records(stages)
         for stage_id in STAGE_IDS:
@@ -530,6 +1066,8 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
             "output_path": stage.get("output_path", ""),
             "worker_status": stage.get("worker_status", ""),
             "worker_note": stage.get("worker_note", ""),
+            "spatial_verdict": stage.get("spatial_verdict", ""),
+            "spatial_note": stage.get("spatial_note", ""),
         }
     )
     stage["status"] = "pending"
@@ -539,6 +1077,9 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
     stage["worker_status"] = ""
     stage["worker_note"] = ""
     stage["parent_note"] = note
+    stage["spatial_verdict"] = ""
+    stage["spatial_note"] = ""
+    stage["spatial_checked_at"] = ""
     stage["current_rerun_correction"] = note
 
 
@@ -648,6 +1189,62 @@ def bullet_text(items: list[str], empty: str = "- none") -> str:
     return "\n".join(f"- {item}" for item in items) or empty
 
 
+def format_spatial_value(value: Any) -> str:
+    if isinstance(value, list):
+        return "[" + ", ".join(f"{item:g}" if isinstance(item, float) else str(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def spatial_entity_summary(entity: dict[str, Any]) -> str:
+    detail = f"{entity.get('id')}"
+    extra = []
+    if entity.get("type"):
+        extra.append(f"type={entity.get('type')}")
+    if entity.get("role"):
+        extra.append(f"role={entity.get('role')}")
+    if extra:
+        detail += " (" + ", ".join(extra) + ")"
+    return detail
+
+
+def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
+    contract = page.get("spatial_contract", {})
+    if not spatial_contract_has_content(contract):
+        return "- no structured spatial_contract supplied; use spatial_logic_notes, motion_checks, and must_match."
+    lines = ["- structured spatial_contract is active; treat it as a generation and inspection lock."]
+    coordinate_space = contract.get("coordinate_space") or {}
+    if coordinate_space:
+        lines.append(f"- coordinate_space: {json.dumps(coordinate_space, ensure_ascii=False, sort_keys=True)}")
+    if contract.get("entities"):
+        lines.append("- entities: " + "; ".join(spatial_entity_summary(entity) for entity in contract.get("entities", [])))
+    for snapshot in contract.get("panel_snapshots", []):
+        entity_parts = []
+        for state in snapshot.get("entities", []):
+            parts = [str(state.get("id"))]
+            for field in ["position", "facing_vector", "gaze_vector", "aim_vector", "trajectory_vector"]:
+                if field in state:
+                    parts.append(f"{field}={format_spatial_value(state[field])}")
+            if state.get("visibility"):
+                parts.append(f"visibility={state.get('visibility')}")
+            if state.get("occlusion"):
+                parts.append(f"occlusion={state.get('occlusion')}")
+            entity_parts.append(" ".join(parts))
+        lines.append(f"- panel {snapshot.get('panel')}: " + "; ".join(entity_parts))
+    for constraint in contract.get("constraints", []):
+        fields = []
+        for key, value in constraint.items():
+            if key in {"id", "type"} or value is None or value == "":
+                continue
+            fields.append(f"{key}={format_spatial_value(value)}")
+        lines.append(
+            f"- constraint {constraint.get('id')} type={constraint.get('type')}: "
+            + (", ".join(fields) if fields else "no extra fields")
+        )
+    return "\n".join(lines)
+
+
 def page_policy_items(state: dict[str, Any], page: dict[str, Any], key: str) -> list[str]:
     return merge_unique(state.get(key), page.get(key))
 
@@ -722,6 +1319,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     spatial_logic_notes = page.get("spatial_logic_notes") or "Keep character, object, prop, and environment positions physically plausible."
     motion_checks = "\n".join(f"- {entry}" for entry in as_list(page.get("motion_checks"))) or "- no impossible motion: thrown, kicked, or shot objects move in the direction implied by body pose and panel action"
     must_match = "\n".join(f"- {entry}" for entry in as_list(page.get("must_match"))) or "- preserve approved page layout, panel count, action direction, and character/object continuity"
+    spatial_contract = spatial_contract_prompt_text(page)
     prior_stage_use_requirement = (
         "Use the prior-stage image above as the required visual input / structure reference. "
         "Do not redraw the page from scratch or change the approved panel layout."
@@ -804,6 +1402,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             spatial_logic_notes,
             motion_checks,
             "",
+            "Structured spatial contract:",
+            spatial_contract,
+            "",
             "Source consistency checklist:",
             "- Keep character faces, age impression, body shape, hair, outfit, accessories, props, profile details, setting, and landmarks consistent with the approved plan and allowed sources/ references.",
             "- Preserve approved character appearance/anatomy: species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.",
@@ -852,6 +1453,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Preserves panel-to-panel and adjacent-page continuity for character/object placement, gaze, action direction, time flow, and lettering placement",
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
             "- Character/object positions, action direction, object trajectory, and cause-effect motion are physically plausible",
+            "- Enforces every Structured spatial contract entity, panel snapshot, vector, visibility, occlusion, and constraint listed above",
+            "- Rejects target-opposite aim vectors, impossible projectile trajectories, broken cover/line-of-sight blocking, and fixed landmark relation drift",
             "- No examples of impossible staging such as a basketball shot where the ball travels behind the shooter",
             "- Has no obvious anatomy, perspective, crop, object, or continuity defects",
             "",
@@ -872,6 +1475,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     character_locks = page_policy_items(state, page, "character_locks")
     visual_text_guard = page_policy_items(state, page, "visual_text_guard")
     appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
+    spatial_contract = spatial_contract_prompt_text(page)
     return "\n".join(
         [
             f"Use ${skill_name}.",
@@ -898,10 +1502,12 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             appearance_anatomy_lock,
             "Visual text guard:",
             bullet_text(visual_text_guard),
+            "Structured spatial contract:",
+            spatial_contract,
             "Current rerun correction:",
             current_rerun_correction(stage) or "- none",
             "",
-            "Use image_gen with the assigned prompt file and visual references. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and visual references. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- worker_status: pass or needs_rerun",
@@ -940,6 +1546,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
         "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, character appearance/anatomy locks, and panel/page continuity.",
         "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction.",
+        "- Structured spatial_contract entries are generation locks: runner validates plan-time entity/vector/cover/landmark constraints, and parent inspection must record spatial pass or rerun.",
         "",
     ]
     for lock in state.get("character_locks", []):
@@ -997,11 +1604,17 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  comic_effects: {page.get('comic_effects_notes') or DEFAULT_COMIC_EFFECTS_NOTES}",
                 f"  dialogue_notes: {page.get('page_dialogue_notes') or ''}",
                 f"  spatial_logic: {page.get('spatial_logic_notes') or ''}",
+                f"  spatial_contract: {'present' if spatial_contract_has_content(page.get('spatial_contract')) else 'none'}",
                 f"  dependencies: {', '.join(page.get('dependencies', [])) or 'none'}",
                 f"  stages: {stage_summary}",
                 "",
             ]
         )
+        if spatial_contract_has_content(page.get("spatial_contract")):
+            lines.append("  Structured spatial contract:")
+            for contract_line in spatial_contract_prompt_text(page).splitlines():
+                lines.append(f"    {contract_line}")
+            lines.append("")
     (run_dir / "batch_plan.md").write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -1163,6 +1776,7 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "negative_prompt": str(raw.get("negative_prompt") or ""),
         "dependencies": as_list(raw.get("dependencies")),
         "notes": str(raw.get("notes") or ""),
+        "spatial_contract": normalize_spatial_contract(raw.get("spatial_contract")),
         "panels": panels,
         "stages": build_stage_states(),
     }
@@ -1227,6 +1841,31 @@ def normalize_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return pages
 
 
+def pages_for_spatial_check(args: argparse.Namespace) -> list[dict[str, Any]]:
+    if getattr(args, "plan_json", ""):
+        try:
+            return normalize_plan(json.loads(args.plan_json))
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Invalid --plan-json: {exc}") from exc
+    if getattr(args, "plan_file", ""):
+        return normalize_plan(load_json(Path(args.plan_file)))
+    if getattr(args, "run_dir", ""):
+        return load_state(Path(args.run_dir)).get("pages", [])
+    raise SystemExit("Use --plan-file, --plan-json, or --run-dir.")
+
+
+def command_spatial_check(args: argparse.Namespace) -> None:
+    pages = pages_for_spatial_check(args)
+    issues = spatial_contract_issues(pages)
+    if issues:
+        print("SPATIAL_CHECK: fail")
+        for issue in issues:
+            print(f"- {issue}")
+        raise SystemExit(1)
+    print("SPATIAL_CHECK: pass")
+    print(f"STRUCTURED_PAGES: {spatial_contract_page_count(pages)}")
+
+
 def command_approve_plan(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
@@ -1241,6 +1880,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
         raise SystemExit("Use --plan-file or --plan-json.")
 
     pages = normalize_plan(plan)
+    assert_spatial_contracts_pass(pages)
     state["title"] = plan.get("scenario_title") or plan.get("story_title") or state.get("title")
     state["style_brief"] = str(plan.get("style_brief") or "")
     state["reading_order"] = str(plan.get("reading_order") or "right-to-left or top-to-bottom as approved")
@@ -1280,6 +1920,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
     print(f"APPROVED_PAGES: {len(pages)}")
+    print(f"SPATIAL_CHECK: pass ({spatial_contract_page_count(pages)} structured pages)")
     print(f"PLAN: {run_dir / 'approved_storyboard_plan.json'}")
     print("NEXT: comic_storyboard_runner.py next-batch --run-dir <run-dir> --limit 4")
 
@@ -1352,6 +1993,9 @@ def command_next_batch(args: argparse.Namespace) -> None:
         stage["worker_status"] = ""
         stage["worker_note"] = ""
         stage["parent_note"] = ""
+        stage["spatial_verdict"] = ""
+        stage["spatial_note"] = ""
+        stage["spatial_checked_at"] = ""
         stage["current_rerun_correction"] = rerun_correction
         prompt_path = stage_prompt_path(run_dir, page, stage_id)
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1429,8 +2073,29 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
     output = stage_output_path(run_dir, page, stage_id)
     if not output.exists():
         raise SystemExit(f"Output file does not exist: {output}")
+    spatial_note = args.spatial_note or (
+        "parent spatial contract inspection passed"
+        if spatial_contract_has_content(page.get("spatial_contract"))
+        else ""
+    )
+    if args.spatial_verdict == "needs_rerun":
+        note = args.spatial_note or args.note
+        stage["spatial_verdict"] = "needs_rerun"
+        stage["spatial_note"] = note
+        stage["spatial_checked_at"] = now_iso()
+        mark_page_stage_for_rerun(page, stage_id, f"Spatial inspection needs rerun: {note}")
+        reset_stage_review(state, stage_id, f"Stage review reset because {page['filename']} failed spatial inspection.")
+        reset_following_stage_gates(state, stage_id, f"Stage gate reset because {page['filename']} failed spatial inspection.")
+        write_batch_plan(run_dir, state)
+        save_state(run_dir, state)
+        print(f"SPATIAL_RERUN_REQUIRED: {page['filename']} {stage_id}")
+        print("NEXT: Resolve any other current items, then run next-batch.")
+        return
     stage["status"] = "inspected_pass"
     stage["parent_note"] = args.note
+    stage["spatial_verdict"] = args.spatial_verdict
+    stage["spatial_note"] = spatial_note
+    stage["spatial_checked_at"] = now_iso()
     stage["inspected_at"] = now_iso()
     stage["output_path"] = str(output)
     write_batch_plan(run_dir, state)
@@ -1630,6 +2295,12 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--output-root", default="")
     init.set_defaults(func=command_init)
 
+    spatial_check = subparsers.add_parser("spatial-check")
+    spatial_check.add_argument("--run-dir", default="")
+    spatial_check.add_argument("--plan-file", default="")
+    spatial_check.add_argument("--plan-json", default="")
+    spatial_check.set_defaults(func=command_spatial_check)
+
     approve = subparsers.add_parser("approve-plan")
     approve.add_argument("--run-dir", required=True)
     approve.add_argument("--plan-file", default="")
@@ -1656,6 +2327,8 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_pass.add_argument("--item", required=True)
     inspect_pass.add_argument("--stage", choices=STAGE_IDS, required=True)
     inspect_pass.add_argument("--note", required=True)
+    inspect_pass.add_argument("--spatial-verdict", choices=sorted(SPATIAL_VERDICT_VALUES), default="pass")
+    inspect_pass.add_argument("--spatial-note", default="")
     inspect_pass.set_defaults(func=command_inspect_pass)
 
     rerun = subparsers.add_parser("rerun")

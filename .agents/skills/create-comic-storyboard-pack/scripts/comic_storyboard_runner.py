@@ -39,8 +39,9 @@ WORKER_STATUS_VALUES = {"pass", "needs_rerun"}
 REVIEW_STATUSES = {"pending", "passed", "needs_rerun"}
 REVIEW_CLI_STATUSES = {"pass", "needs_rerun"}
 DEFAULT_PACING_NOTES = (
-    "Use 2-4 panels by default with spacious cinematic pacing. Split pages instead of "
-    "compressing emotional turns, action setup/result, gaze shifts, or quiet pauses into one crowded page."
+    "Use 3-5 panels by default with measured cinematic pacing. Use 1-2 panels for special staging such "
+    "as full-page emotional beats, silence, stillness, or decisive action moments. Split pages instead "
+    "of compressing emotional turns, action setup/result, gaze shifts, or quiet pauses into one crowded page."
 )
 DEFAULT_PANEL_SHAPE_NOTES = (
     "Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, "
@@ -389,9 +390,11 @@ def stage_instruction(stage_id: str) -> str:
     if stage_id == STORYBOARD_SKETCH_INK_STAGE:
         return (
             "Create the combined Korean comic-book page storyboard, sketch, and ink pass. Show a full "
-            "page with 2-4 panels by default, spacious cinematic pacing, experimental freeform panel "
+            "page with 3-5 panels by default, measured cinematic pacing, experimental freeform panel "
             "design, gutters or open borders where appropriate, clear reading order, speech balloon "
-            "placement, SFX placement, captions where useful, clear action blocking, and clean ink lines."
+            "placement, SFX placement, captions where useful, clear action blocking, and clean ink lines. "
+            "Use 1-2 panels for special staging such as a full-page emotion beat, silence, stillness, "
+            "or a decisive action moment."
         )
     if stage_id == FINISH_STAGE:
         return (
@@ -475,7 +478,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             prior_stage_use_requirement,
             "",
             "Page format:",
-            "Generate one complete Korean comic-book page image with 2-4 panels by default and spacious cinematic pacing. Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, open or borderless panels, inset panels, partial overlaps, and wide negative space are allowed when reading order and continuity stay clear. Avoid a uniform rectangular grid unless the user requested it or the scene clearly benefits from it.",
+            "Generate one complete Korean comic-book page image with 3-5 panels by default and measured cinematic pacing. Use 1-2 panels for special staging such as full-page emotional beats, silence, stillness, or decisive action moments. Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, open or borderless panels, inset panels, partial overlaps, and wide negative space are allowed when reading order and continuity stay clear. Avoid a uniform rectangular grid unless the user requested it or the scene clearly benefits from it.",
             "",
             "Page layout brief:",
             page.get("layout_brief") or page.get("visual_brief") or page.get("prompt") or "",
@@ -523,7 +526,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Worker inspection checklist:",
             "- Matches this exact page and stage",
-            "- Uses 2-4 panels by default with spacious cinematic pacing unless the approved plan explicitly justifies five or more panels",
+            "- Uses 3-5 panels by default with measured cinematic pacing",
+            "- Accepts and encourages 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments",
+            "- Requires explicit story justification for six or more panels",
             "- Uses experimental freeform panel design; do not reject diagonal, asymmetric, open, borderless, inset, overlapping, or negative-space layouts when reading order and continuity are clear",
             "- Rejects overcrowded pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room",
             "- Uses adapted dialogue/SFX/captions from the approved plan, not raw source dialogue by default",
@@ -560,7 +565,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Generate stages in order: storyboard_sketch_ink, finish.",
         "- Do not reserve finish until every page has passed storyboard_sketch_ink parent inspection.",
         "- Finish must use the parent-inspected storyboard_sketch_ink image as the required visual input / structure reference.",
-        "- Use 2-4 panels by default with spacious cinematic pacing; five or more panels need clear story justification.",
+        "- Use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need clear story justification.",
         "- Use experimental freeform panel design by default and avoid unintentional uniform rectangular grids.",
         "- Reserve at most four pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",

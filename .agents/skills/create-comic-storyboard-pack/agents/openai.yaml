@@ -1,4 +1,4 @@
 interface:
   display_name: "Comic Storyboard Pack"
   short_description: "Create spacious freeform comic pages"
-  default_prompt: "Use $create-comic-storyboard-pack to turn this story outline or scenario into approved Korean comic pages with spacious 2-4 panel cinematic pacing, experimental freeform panel shapes, adapted dialogue, SFX, and two verified generation stages: storyboard_sketch_ink and finish. Require stage finish review for source-data consistency and panel/page continuity before advancing. Use sources/ when no source path is specified, and do not use output/ as source data."
+  default_prompt: "Use $create-comic-storyboard-pack to turn this story outline or scenario into approved Korean comic pages with 3-5 panel measured cinematic pacing by default, 1-2 panel special staging, experimental freeform panel shapes, adapted dialogue, SFX, and two verified generation stages: storyboard_sketch_ink and finish. Require stage finish review for source-data consistency and panel/page continuity before advancing. Use sources/ when no source path is specified, and do not use output/ as source data."

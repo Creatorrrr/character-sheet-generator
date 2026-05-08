@@ -79,7 +79,7 @@ def sample_page(page_index, panel_count=3):
         "scene_refs": [f"S{page_index:02d}"],
         "layout_brief": "Three-panel cinematic Korean comic page with one wide open top panel and two asymmetric lower panels.",
         "reading_order": "top-to-bottom, left-to-right within rows",
-        "pacing_notes": "2-4 panels by default with spacious cinematic pacing.",
+        "pacing_notes": "3-5 panels by default with measured cinematic pacing.",
         "panel_shape_notes": "Use experimental freeform panel design with diagonal, asymmetric, inset, or borderless panels.",
         "negative_space_notes": "Leave wide negative space around faces, ball motion, balloons, and quiet reaction beats.",
         "page_dialogue_notes": "Adapt dialogue for comic timing; do not copy source lines verbatim.",
@@ -192,7 +192,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(first["filename"], "001-page-1.png")
             self.assertEqual(len(first["panels"]), 3)
             self.assertEqual(first["panels"][0]["adapted_dialogue"], ["각색 대사 1-1"])
-            self.assertEqual(first["pacing_notes"], "2-4 panels by default with spacious cinematic pacing.")
+            self.assertEqual(first["pacing_notes"], "3-5 panels by default with measured cinematic pacing.")
             self.assertIn("experimental freeform panel design", first["panel_shape_notes"])
             self.assertIn("wide negative space", first["negative_space_notes"])
             self.assertEqual(state["source_root"], "/Users/chasoik/Projects/character-sheet-generator/sources")
@@ -303,8 +303,10 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             prompt_path = Path(state["pages"][0]["stages"][FIRST_STAGE]["prompt_file"])
             prompt = prompt_path.read_text(encoding="utf-8")
 
-            self.assertIn("one complete Korean comic-book page image with 2-4 panels by default", prompt)
-            self.assertIn("spacious cinematic pacing", prompt)
+            self.assertIn("one complete Korean comic-book page image with 3-5 panels by default", prompt)
+            self.assertIn("measured cinematic pacing", prompt)
+            self.assertIn("Use 1-2 panels for special staging", prompt)
+            self.assertIn("Requires explicit story justification for six or more panels", prompt)
             self.assertIn("experimental freeform panel design", prompt)
             self.assertIn("Avoid a uniform rectangular grid", prompt)
             self.assertIn("unintentional uniform rectangular grids", prompt)
@@ -339,7 +341,9 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Do not use /Users/chasoik/Projects/character-sheet-generator/output", batch_plan)
             self.assertIn("Stage reviews:", batch_plan)
             self.assertIn("Stage finish review checks source consistency", batch_plan)
-            self.assertIn("2-4 panels by default", batch_plan)
+            self.assertIn("3-5 panels by default", batch_plan)
+            self.assertIn("1-2 panels for special staging", batch_plan)
+            self.assertIn("six or more panels", batch_plan)
             self.assertIn("experimental freeform panel design", batch_plan)
             self.assertIn("negative_space:", batch_plan)
 

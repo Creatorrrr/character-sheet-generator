@@ -1,6 +1,6 @@
 ---
 name: create-comic-storyboard-pack
-description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with spacious 2-4 panel page layouts, experimental freeform panel shapes, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
+description: "Turn a story outline, plot, scenario, script, scene notes, or storyboard request into approved Korean comic-book pages, then coordinate Codex image_gen creation through two verified stages: combined page storyboard/sketch/ink and tone/color/final finish. Use when the user wants manga, Korean comic, webtoon-page, comic-book, or visual-novel style pages generated from a story or scenario with 3-5 panel page layouts by default, 1-2 panel special staging, experimental freeform panel shapes, adapted dialogue, sound effects, approval gate, four-subagent parallel batches, worker inspection, parent inspection, stage finish review, source consistency checks, and panel continuity checks."
 ---
 
 # Create Comic Storyboard Pack
@@ -47,11 +47,12 @@ Ask for missing inputs only when the story outline or scenario cannot define pag
 
 Extract comic-book pages that serve the story outline or scenario, not every moment or minor beat.
 
-- Default output is one complete page image containing 2-4 panels by default, gutters or open borders, varied panel sizes, speech balloons, SFX lettering, and short captions when useful.
-- Follow a spacious cinematic Korean comic-book composition: clear reading flow, readable balloon placement, meaningful pauses, and balanced black/white or tone/color finish.
+- Default output is one complete page image containing 3-5 panels by default, gutters or open borders, varied panel sizes, speech balloons, SFX lettering, and short captions when useful.
+- Follow a measured cinematic Korean comic-book composition: clear reading flow, readable balloon placement, meaningful pauses, and balanced black/white or tone/color finish.
+- Use 1-2 panels for special staging such as a full-page emotional beat, silence, stillness, large reveal, or decisive action moment; do not treat approved 1-2 panel special staging as a failure.
 - Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, half/full-page panels, borderless or open panels, inset panels, partial overlaps, and wide negative space are allowed when reading order and continuity stay clear.
 - Avoid a generic uniform rectangular grid unless the user asks for it or the scene clearly benefits from a restrained regular layout.
-- Use five or more panels only for montage, comedy timing, quick action chains, or another clear story reason, and state that reason in the approval report.
+- Use six or more panels only for montage, comedy timing, quick action chains, or another clear story reason, and state that reason in the approval report.
 - Merge repeated beats when one page or panel can clearly cover the action, but do not over-compress pages; split pages when emotional turns, action setup/result, gaze shifts, or quiet pauses need breathing room.
 - Split pages when the reader needs a new location, time shift, major action sequence, emotional turn, reveal, or scene boundary.
 - Split panels within a page when the reader needs a new beat, reaction, reveal, action change, object insert, or timing pause.
@@ -94,9 +95,9 @@ Use this approval format:
 - 참고 제외 폴더: /Users/chasoik/Projects/character-sheet-generator/output/
 - 총 페이지 수: ...
 - 페이지당 컷 구성 기준: ...
-- 페이지 호흡/컷 밀도: 기본 2-4컷, 영화적 여백 우선
+- 페이지 호흡/컷 밀도: 기본 3-5컷 권장, 1-2컷은 특수 연출에 권장
 - 컷 형태/레이아웃 자유도: 실험적 자유형 컷 구성 허용
-- 5컷 이상 사용 사유: 해당 페이지가 있으면 명시
+- 6컷 이상 사용 사유: 해당 페이지가 있으면 명시
 
 | id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 주요 대사/SFX 각색 | 공간/동선 검수 포인트 |
 | ... |
@@ -140,7 +141,7 @@ After approval, write an approved plan and import it with the runner:
       "scene_refs": ["S01"],
       "layout_brief": "Three-panel cinematic page: one wide borderless establishing panel, one diagonal action panel, one quiet close reaction panel with breathing room.",
       "reading_order": "top-to-bottom, left-to-right within each row",
-      "pacing_notes": "2-4 panels by default; keep this page spacious and cinematic rather than dense.",
+      "pacing_notes": "3-5 panels by default; 1-2 panels are recommended for special staging such as silence, stillness, or a decisive action moment.",
       "panel_shape_notes": "Use experimental freeform composition: borderless wide opening panel, diagonal action panel, and asymmetrical closeup panel.",
       "negative_space_notes": "Leave quiet negative space around the protagonist's entrance and the final reaction.",
       "page_dialogue_notes": "Rewrite dialogue to sound tense and concise; do not copy source lines verbatim.",
@@ -261,7 +262,7 @@ State rules:
 ## Two Stage Rules
 
 1. `storyboard_sketch_ink`
-   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize 2-4 panel spacious cinematic pacing, experimental freeform panel shapes, clear reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, and ink line clarity. Reject over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room.
+   Generate the combined comic page storyboard, sketch, and ink pass. Prioritize 3-5 panel measured cinematic pacing, experimental freeform panel shapes, clear reading flow, speech/SFX placement, beat clarity, action blocking, spatial logic, clean sketch structure, and ink line clarity. Use 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments. Reject over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room.
    Stage finish review must compare every panel against approved source data and allowed `sources/` references for character, prop, profile, setting, and page-layout consistency, then check same-page and adjacent-page continuity.
 
 2. `finish`
@@ -302,7 +303,7 @@ Excluded source folder: /Users/chasoik/Projects/character-sheet-generator/output
 Prior-stage reference: <path or none>
 Relevant references: <paths or "none">
 Page text policy: include approved adapted dialogue, SFX, and short captions inside speech balloons/caption areas/SFX lettering.
-Page pacing policy: use 2-4 panels by default with spacious cinematic pacing; five or more panels need explicit story justification.
+Page pacing policy: use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need explicit story justification.
 Panel shape policy: experimental freeform panel shapes are allowed and should not be rejected when reading order and continuity are clear.
 Spatial logic policy: reject impossible positions, object trajectories, or motion direction.
 Source consistency policy: reject drift in character face/body/hair/outfit, props, profile details, setting, landmarks, or page-layout references compared with the approved plan and allowed sources/.
@@ -323,7 +324,9 @@ Inspect every imported page before marking it passed. Check:
 
 - The image is one complete comic-book page, not a single isolated panel unless the approved page has one panel.
 - The page matches the approved page id, panel count, reading order, layout brief, and current stage.
-- The page uses 2-4 panels by default with spacious cinematic pacing unless the approved plan explicitly justifies five or more panels.
+- The page uses 3-5 panels by default with measured cinematic pacing.
+- 1-2 panel pages are acceptable for approved special staging such as full-page emotion, silence, stillness, large reveal, or decisive action moments.
+- Six or more panels require explicit story justification in the approved plan.
 - Experimental freeform panels are acceptable when reading order and continuity are clear.
 - Over-compressed pages, unjustified dense panel packing, unintentional uniform rectangular grids, or pages packed with dialogue/SFX without breathing room must be rejected.
 - Speech balloons, SFX, and captions use approved adapted text and are legible.

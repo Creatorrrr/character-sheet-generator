@@ -729,6 +729,7 @@ def blank_stage_state() -> dict[str, Any]:
         "spatial_note": "",
         "spatial_checked_at": "",
         "current_rerun_correction": "",
+        "user_revision_overlays": [],
     }
 
 
@@ -800,6 +801,8 @@ def normalize_stage_review(review: dict[str, Any], stage_id: str) -> None:
 def normalize_stage_record(stage: dict[str, Any], page_id: str, stage_id: str) -> None:
     for key, value in blank_stage_state().items():
         stage.setdefault(key, value)
+    if not isinstance(stage.get("user_revision_overlays"), list):
+        stage["user_revision_overlays"] = as_list(stage.get("user_revision_overlays"))
     if stage["status"] not in VALID_STATUSES:
         raise SystemExit(f"Invalid stage status for {page_id}:{stage_id}: {stage['status']}")
 
@@ -1068,6 +1071,7 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
             "worker_note": stage.get("worker_note", ""),
             "spatial_verdict": stage.get("spatial_verdict", ""),
             "spatial_note": stage.get("spatial_note", ""),
+            "user_revision_overlays": stage.get("user_revision_overlays", []),
         }
     )
     stage["status"] = "pending"
@@ -1081,6 +1085,7 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
     stage["spatial_note"] = ""
     stage["spatial_checked_at"] = ""
     stage["current_rerun_correction"] = note
+    stage["user_revision_overlays"] = []
 
 
 def stage_instruction(stage_id: str) -> str:
@@ -1263,6 +1268,46 @@ def current_rerun_correction(stage: dict[str, Any], require_pending: bool = Fals
     return bullet_text(notes, "")
 
 
+def user_revision_overlay_lines(stage: dict[str, Any]) -> list[str]:
+    overlays = stage.get("user_revision_overlays") or []
+    if not isinstance(overlays, list):
+        return []
+    lines: list[str] = []
+    for overlay in overlays:
+        if not isinstance(overlay, dict):
+            continue
+        color_id = str(overlay.get("color_id") or overlay.get("color") or "overlay")
+        color = str(overlay.get("color") or "")
+        overlay_path = str(overlay.get("overlay_path") or "")
+        request_path = str(overlay.get("request_path") or "")
+        request = str(overlay.get("request") or overlay.get("note") or "").strip()
+        detail = f"- {color_id}"
+        if color:
+            detail += f" ({color})"
+        if overlay_path:
+            detail += f": overlay={overlay_path}"
+        if request_path:
+            detail += f"; request_file={request_path}"
+        if request:
+            detail += f"; request={request}"
+        lines.append(detail)
+    return lines
+
+
+def user_revision_overlay_prompt_text(stage: dict[str, Any]) -> str:
+    lines = user_revision_overlay_lines(stage)
+    if not lines:
+        return "- none"
+    return "\n".join(
+        [
+            "- User-painted transparent overlays are active for this rerun.",
+            "- Treat each overlay PNG as a location mask; edit only the marked area unless the matching request text says broader continuity changes are required.",
+            "- Use the color-specific request text as the correction instruction for the matching overlay color.",
+            *lines,
+        ]
+    )
+
+
 def panel_line(panel: dict[str, Any]) -> str:
     source_dialogue = "; ".join(as_list(panel.get("source_dialogue") or panel.get("dialogue"))) or "none"
     adapted_dialogue = "; ".join(as_list(panel.get("adapted_dialogue"))) or "none"
@@ -1305,6 +1350,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
     stage = stage_state(page, stage_id)
     rerun_correction = current_rerun_correction(stage)
+    revision_overlays = user_revision_overlay_prompt_text(stage)
     panel_text = "\n".join(panel_line(panel) for panel in panels) or "- no panel details supplied"
     page_dialogue_notes = page.get("page_dialogue_notes") or (
         "Adapt source dialogue to fit comic timing, mood, panel rhythm, and balloon space. "
@@ -1395,6 +1441,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Current rerun correction:",
             rerun_correction or "- none",
             "",
+            "User revision overlays:",
+            revision_overlays,
+            "",
             "Panels on this page:",
             panel_text,
             "",
@@ -1476,6 +1525,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     visual_text_guard = page_policy_items(state, page, "visual_text_guard")
     appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
     spatial_contract = spatial_contract_prompt_text(page)
+    revision_overlays = user_revision_overlay_prompt_text(stage)
     return "\n".join(
         [
             f"Use ${skill_name}.",
@@ -1506,8 +1556,14 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             spatial_contract,
             "Current rerun correction:",
             current_rerun_correction(stage) or "- none",
+            "User revision overlays:",
+            revision_overlays,
+            "Agent-driven overlay option:",
+            f"- Review overlay runner: {REPO_ROOT / '.agents' / 'skills' / 'review-image-overlays' / 'scripts' / 'review_overlay_server.py'}",
+            "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
+            "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and visual references. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- worker_status: pass or needs_rerun",
@@ -2117,6 +2173,110 @@ def command_rerun(args: argparse.Namespace) -> None:
     print("NEXT: Resolve any other current items, then run next-batch.")
 
 
+def review_manifest_path(value: Any, manifest_dir: Path) -> Path:
+    raw = str(value or "").strip()
+    if not raw:
+        raise SystemExit("Review manifest overlay entry is missing a path.")
+    path = Path(raw)
+    if not path.is_absolute():
+        path = manifest_dir / path
+    return path.resolve(strict=False)
+
+
+def require_review_artifact_under_run(path: Path, run_dir: Path, label: str) -> None:
+    if not path.exists():
+        raise SystemExit(f"{label} does not exist: {path}")
+    if not path_is_under(path, run_dir):
+        raise SystemExit(f"{label} must be under the run folder: {path}")
+
+
+def revision_overlays_from_manifest_item(item: dict[str, Any], run_dir: Path, manifest_dir: Path) -> list[dict[str, str]]:
+    overlays = item.get("overlays") or []
+    if not isinstance(overlays, list):
+        raise SystemExit("Review manifest item overlays must be a list.")
+    normalized: list[dict[str, str]] = []
+    for overlay in overlays:
+        if not isinstance(overlay, dict):
+            raise SystemExit("Review manifest overlay entries must be objects.")
+        request = str(overlay.get("request") or overlay.get("note") or "").strip()
+        request_path_value = overlay.get("request_path")
+        request_path = review_manifest_path(request_path_value, manifest_dir) if request_path_value else None
+        if request_path is not None:
+            require_review_artifact_under_run(request_path, run_dir, "Review request text file")
+            if not request:
+                request = request_path.read_text(encoding="utf-8").strip()
+        if not request:
+            raise SystemExit("Every review overlay must include non-empty request text.")
+        overlay_path = review_manifest_path(overlay.get("overlay_path"), manifest_dir)
+        require_review_artifact_under_run(overlay_path, run_dir, "Review overlay image")
+        normalized.append(
+            {
+                "color_id": str(overlay.get("color_id") or "overlay"),
+                "color": str(overlay.get("color") or ""),
+                "overlay_path": str(overlay_path),
+                "request_path": str(request_path) if request_path else "",
+                "request": request,
+            }
+        )
+    return normalized
+
+
+def command_request_revisions(args: argparse.Namespace) -> None:
+    manifest_path = Path(args.review_manifest).resolve(strict=False)
+    manifest = load_json(manifest_path)
+    run_dir_value = args.run_dir or manifest.get("run_dir")
+    if not run_dir_value:
+        raise SystemExit("Use --run-dir or provide run_dir in the review manifest.")
+    run_dir = Path(run_dir_value)
+    run_dir = run_dir.resolve(strict=False)
+    state = load_state(run_dir)
+    manifest_run_dir = manifest.get("run_dir")
+    if manifest_run_dir and Path(manifest_run_dir).resolve(strict=False) != run_dir:
+        raise SystemExit(f"Review manifest run_dir does not match --run-dir: {manifest_run_dir}")
+    stage_id = args.stage or str(manifest.get("stage") or "")
+    if stage_id not in STAGE_IDS:
+        raise SystemExit(f"Review manifest stage must be one of: {', '.join(STAGE_IDS)}")
+    items = manifest.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise SystemExit("Review manifest must contain at least one item.")
+
+    updated_pages: list[dict[str, Any]] = []
+    manifest_dir = manifest_path.parent
+    for item in items:
+        if not isinstance(item, dict):
+            raise SystemExit("Review manifest items must be objects.")
+        page_ref = item.get("filename") or item.get("page_id") or item.get("item") or ""
+        page = resolve_page(state, str(page_ref))
+        overlays = revision_overlays_from_manifest_item(item, run_dir, manifest_dir)
+        if not overlays:
+            continue
+        note_parts = []
+        for overlay in overlays:
+            note_parts.append(
+                f"{overlay['color_id']} overlay={overlay['overlay_path']} request={overlay['request']}"
+            )
+        note = f"User revision overlays from {manifest_path}: " + "; ".join(note_parts)
+        mark_page_stage_for_rerun(page, stage_id, note)
+        stage = stage_state(page, stage_id)
+        stage["user_revision_overlays"] = overlays
+        updated_pages.append(page)
+
+    if not updated_pages:
+        raise SystemExit("Review manifest did not contain any overlay revision requests.")
+    reset_stage_review(state, stage_id, "Stage review reset because user revision overlays requested reruns.")
+    reset_following_stage_gates(state, stage_id, "Stage gate reset because user revision overlays requested reruns.")
+    state.setdefault("notes", []).append(
+        f"Requested revisions for {len(updated_pages)} page(s) in {stage_id} from {manifest_path}."
+    )
+    write_batch_plan(run_dir, state)
+    save_state(run_dir, state)
+    print(f"REVISION_REQUESTED: {stage_id}")
+    print(f"MANIFEST: {manifest_path}")
+    for page in updated_pages:
+        print(f"RERUN_ITEM: {page['filename']}")
+    print("NEXT: Resolve any other current items, then run next-batch.")
+
+
 def command_stage_review(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
@@ -2337,6 +2497,12 @@ def build_parser() -> argparse.ArgumentParser:
     rerun.add_argument("--stage", choices=STAGE_IDS, required=True)
     rerun.add_argument("--note", required=True)
     rerun.set_defaults(func=command_rerun)
+
+    request_revisions = subparsers.add_parser("request-revisions")
+    request_revisions.add_argument("--run-dir", default="")
+    request_revisions.add_argument("--stage", choices=STAGE_IDS, default="")
+    request_revisions.add_argument("--review-manifest", required=True)
+    request_revisions.set_defaults(func=command_request_revisions)
 
     stage_review = subparsers.add_parser("stage-review")
     stage_review.add_argument("--run-dir", required=True)

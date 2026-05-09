@@ -886,6 +886,10 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Return only:", storyboard_subagent)
             self.assertIn("worker_status: pass or needs_rerun", storyboard_subagent)
             self.assertIn("Prior-stage reference: none", storyboard_subagent)
+            self.assertIn("Agent-driven overlay option:", storyboard_subagent)
+            self.assertIn("review_overlay_server.py", storyboard_subagent)
+            self.assertIn("create-markup", storyboard_subagent)
+            self.assertIn("include the manifest path in `worker_note`", storyboard_subagent)
 
             run_cli(
                 "import",
@@ -937,6 +941,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Stage: finish", finish_subagent)
             self.assertIn("Prior-stage reference:", finish_subagent)
             self.assertIn(str(run_dir / "01_storyboard_sketch_ink" / "001-page-1.png"), finish_subagent)
+            self.assertIn("Agent-driven overlay option:", finish_subagent)
 
     def test_imported_or_requested_pages_block_next_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1366,6 +1371,112 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             next_batch = run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             self.assertIn("002-page-2.png", next_batch.stdout)
             self.assertNotIn(f"STAGE: {FINISH_STAGE}", next_batch.stdout)
+
+    def test_request_revisions_marks_overlay_items_for_rerun_and_prompts_include_overlays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "first stage continuity pass",
+                cwd=root,
+            )
+            review_dir = run_dir / "review_overlays" / FIRST_STAGE / "manual-review"
+            review_dir.mkdir(parents=True)
+            overlay = review_dir / "001-page-1_overlay_red.png"
+            request = review_dir / "001-page-1_overlay_red.txt"
+            overlay.write_bytes(b"overlay")
+            request.write_text("Make the hand smaller but keep the panel layout.", encoding="utf-8")
+            manifest = {
+                "workflow": "review-image-overlays",
+                "run_dir": str(run_dir),
+                "stage": FIRST_STAGE,
+                "items": [
+                    {
+                        "filename": "001-page-1.png",
+                        "overlays": [
+                            {
+                                "color_id": "red",
+                                "color": "#ff3b30",
+                                "overlay_path": str(overlay),
+                                "request_path": str(request),
+                                "request": "Make the hand smaller but keep the panel layout.",
+                            }
+                        ],
+                    }
+                ],
+            }
+            manifest_path = review_dir / "revision_requests.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            result = run_cli(
+                "request-revisions",
+                "--run-dir",
+                str(run_dir),
+                "--review-manifest",
+                str(manifest_path),
+                cwd=root,
+            )
+
+            self.assertIn("REVISION_REQUESTED", result.stdout)
+            self.assertIn("001-page-1.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            self.assertEqual(stage["status"], "pending")
+            self.assertTrue(stage["rerun_pending"])
+            self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
+            self.assertEqual(state["stage_gates"][f"{FIRST_STAGE}_to_{FINISH_STAGE}"]["status"], "pending")
+            self.assertIn("user_revision_overlays", stage)
+            self.assertEqual(stage["user_revision_overlays"][0]["overlay_path"], str(overlay.resolve(strict=False)))
+
+            next_batch = run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn("001-page-1.png", next_batch.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            prompt = Path(state["pages"][0]["stages"][FIRST_STAGE]["prompt_file"]).read_text(encoding="utf-8")
+            subagent = Path(state["pages"][0]["stages"][FIRST_STAGE]["subagent_prompt_file"]).read_text(encoding="utf-8")
+            for text in (prompt, subagent):
+                self.assertIn("User revision overlays", text)
+                self.assertIn(str(overlay.resolve(strict=False)), text)
+                self.assertIn("Make the hand smaller", text)
 
     def test_finish_stage_review_required_before_workflow_complete(self):
         with tempfile.TemporaryDirectory() as tmp:

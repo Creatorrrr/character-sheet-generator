@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Image Overlays"
+  short_description: "Collect colored image revision overlays"
+  default_prompt: "Use $review-image-overlays to collect visual correction overlays for generated storyboard images. Open the browser gallery for user-painted color-coded overlays, or use create-markup with a rect/polygon coordinate JSON spec for agent-driven self-review. Save per-color overlay PNG/TXT files plus a revision_requests.json manifest for create-comic-storyboard-pack reruns."

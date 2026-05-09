@@ -81,8 +81,10 @@ Use this format:
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
 - 1단계 stage-review 통과 후 사용자 피드백을 받고 다음 단계 진행 여부 확인
+- 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
 - approve-next-stage 전에는 finish 예약 금지
 - 사용자가 중단하면 stop-after-stage로 1단계 산출물만 완료 처리
+- 사용자 또는 에이전트가 수정을 요청하면 `$review-image-overlays`로 색상별 오버레이 PNG/TXT와 `revision_requests.json`을 저장하고, `request-revisions`로 해당 페이지를 rerun 처리
 - 사용자가 승인하면 2단계: 톤/채색/마무리 finish
 - 2단계는 $create-comic-storyboard-finish subagent가 생성/1차 검수
 - 2단계는 parent-inspected storyboard_sketch_ink 이미지를 필수 입력으로 사용
@@ -230,6 +232,37 @@ python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_sketch_ink
 
 This sets `stage_gates.storyboard_sketch_ink_to_finish.status` to `pending_user_feedback`. At that point report the first-stage outputs to the user and ask whether to continue.
 
+Offer exactly these feedback choices:
+
+- Approve next stage: continue to `finish` with `approve-next-stage`.
+- Open revision UI or create agent markup: use `$review-image-overlays` to collect color-coded overlay requests.
+- Stop after stage: keep only `storyboard_sketch_ink` with `stop-after-stage`.
+
+If the user wants the revision UI:
+
+```bash
+REVIEW_SKILL_DIR=".agents/skills/review-image-overlays"
+REVIEW_RUNNER="$REVIEW_SKILL_DIR/scripts/review_overlay_server.py"
+python3 "$REVIEW_RUNNER" serve --run-dir <run-dir> --stage storyboard_sketch_ink
+```
+
+If a subagent self-check or parent inspection identifies a concrete fix without needing user painting, create a coordinate markup spec and save the same artifact format directly:
+
+```bash
+python3 "$REVIEW_RUNNER" create-markup --run-dir <run-dir> --stage storyboard_sketch_ink --spec <markup.json>
+```
+
+Use normalized coordinates by default. The markup spec supports `rect` boxes and `polygon` points, non-empty request text per mark, and optional `coordinate_space: "pixel"` for exact image pixel coordinates. The generated color-specific overlay PNG/TXT files are canonical, just like the browser UI output.
+
+After the user saves in the browser or an agent creates markup, import the manifest back into this runner:
+
+```bash
+python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_sketch_ink/<review-id>/revision_requests.json
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+```
+
+`request-revisions` resets the affected page stage to `pending`, records the color-specific overlay PNG/TXT paths and request text, resets stage-review and following gates, and injects a `User revision overlays` section into the next prompt/subagent prompt. Use the color-specific overlay files as canonical instructions; the combined overlay is only for quick visual review.
+
 If the user approves finish:
 
 ```bash
@@ -265,6 +298,8 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
 - Parent `inspect-pass --spatial-verdict needs_rerun` never marks the page passed; it routes the page back to `pending` rerun and resets stage review / following gates.
+- `request-revisions --review-manifest <revision_requests.json>` imports `$review-image-overlays` feedback, marks affected page stages `pending`/`rerun_pending`, resets stage-review and following gates, and adds overlay PNG/TXT paths plus request text to the next rerun prompt.
+- `$review-image-overlays create-markup` is valid for subagent self-verification and parent comprehensive verification when the issue can be localized with rect/polygon coordinates; it must still flow through `request-revisions`.
 - If a subagent returns `completed:null`, no final message, or no generated path, do not invent an import path. Route the page to `rerun`.
 - Rerun resets the relevant stage review and any following stage gate.
 
@@ -303,5 +338,5 @@ After each batch or gate, report in Korean:
 - 단계 마무리 검수 결과: ...
 - 다음 단계 사용자 피드백 게이트: pending_user_feedback | approved | stopped
 - 보완 대상 페이지: ...
-- 다음 결정: ...
+- 다음 결정: approve-next-stage로 finish 진행 | $review-image-overlays로 수정 UI 열기/에이전트 마킹 생성 | stop-after-stage로 종료
 ```

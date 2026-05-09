@@ -25,9 +25,10 @@ Read the prompt file before generation.
 
 - Use Codex built-in `image_gen` exactly once for the blocking page image.
 - Generate one complete page image with the approved panel count and reading order.
-- Draw each character, object, and environment element as a quick rough pen sketch, roughly the level of detail possible in about 5 seconds per entity.
+- Draw each important character, object, and environment element as a quick rough pen sketch, roughly the level of detail possible in about 3 seconds per entity.
 - Make the rough form recognizable enough to identify the entity category and action: e.g. crouching person, standing person, gun, ball, hoop, low cover, wall, doorway, vehicle, tree, table, or landmark.
 - Keep the drawing loose and schematic: simple gesture poses, blocky object contours, rough environmental silhouettes, shadow masses, and minimal landmark outlines are enough.
+- Simplify or omit unimportant props/background elements when they are not needed for the spatial contract, action readability, cover/occlusion, landmark continuity, or page composition.
 - Add clear lines, arrows, vector marks, relation lines, sight/aim lines, trajectory arrows, and occlusion/cover markers so positions, directions, and spatial relationships remain inspectable.
 - Do not render detailed faces, anatomy, costume detail, texture, dialogue, SFX, captions, labels, typography, polished ink, tone/color, or final art.
 - Semantic labels must not be drawn into the image. Put meanings in the sibling `*_desc.md`.

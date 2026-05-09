@@ -38,11 +38,11 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Do not design panels just to make `spatial_contract` easy to draw. Do not turn action pages into tactical diagrams or place character/object coordinates at the center of page design unless the story itself calls for a diagram-like page.
 - Include page-level layout notes, panel-level composition/viewpoint notes, and optional `narrative_plan` fields such as `story_function`, `reader_experience`, `pacing_intent`, and `composition_intent`.
 - Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and `must_match`.
-- For action or staging where direction, cover, line of sight, object trajectory, landmark continuity, or page-to-page state continuity matters, include a structured `spatial_contract` after the page/panel design. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, temporal state fields, and machine-checkable constraints before generation.
+- For action or staging where direction, line of sight, moving-object path, visibility/occlusion, landmark continuity, or page-to-page state continuity matters, include a structured `spatial_contract` after the page/panel design. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, temporal state fields, and machine-checkable constraints before generation.
 - Use `spatial_contract_extraction` to record that the contract was derived from `narrative_plan_and_panels`, why it is being verified, the validation focus, and `must_not_override_page_design: true`.
-- Use `spatial_contract.entities[].blocking_symbol` to predefine the quick blocking mark for important characters, objects, cover, landmarks, and motion markers. Prefer a recognizable 3-second rough form or silhouette plus any needed fallback symbol, not a meaningless geometric mark alone. Unimportant props/background elements may be simplified or omitted when they are not needed for story readability, action readability, spatial contract verification, cover/occlusion, landmark continuity, or page composition.
+- Use `spatial_contract.entities[].blocking_symbol` to predefine the quick blocking mark for important characters, objects, occluding elements, landmarks, and motion markers. Prefer a recognizable 3-second rough form or silhouette plus any needed fallback symbol, not a meaningless geometric mark alone. Unimportant props/background elements may be simplified or omitted when they are not needed for story readability, action readability, spatial contract verification, visibility/occlusion, landmark continuity, or page composition.
 - Use `spatial_contract.panel_snapshots[].entities[]` fields such as `pose`, `cover`, `visibility`, `occlusion`, `location_anchor`, `held_props`, and `state_tags` when state continuity matters.
-- Use `spatial_contract.constraints` for relations such as `aims_at`, `trajectory_to`, `cover_between`, `behind_cover_from`, `line_of_sight_blocked`, `left_of`, `right_of`, `same_landmark_relation_as`, `same_cover_as`, `state_persists_from`, `occlusion_persists_from`, `allowed_transition`, and `requires_cause`. Treat failures as validation blockers before approval and rerun causes after image inspection, without letting the contract replace the approved narrative/page design.
+- Use `spatial_contract.constraints` for general relation checks such as directional alignment (`aims_at`), movement path toward a destination (`trajectory_to`), occluding-element placement (`cover_between`, `behind_cover_from`), visibility/line-of-sight blocking (`line_of_sight_blocked`), left/right or landmark relation continuity (`left_of`, `right_of`, `same_landmark_relation_as`, `same_cover_as`), state continuity (`state_persists_from`, `occlusion_persists_from`), approved transitions (`allowed_transition`), and required causes (`requires_cause`). Treat failures as validation blockers before approval and rerun causes after image inspection, without letting the contract replace the approved narrative/page design.
 - Include character appearance/anatomy locks in `character_locks` or `must_match`: approved species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.
 - Unless the plan or source explicitly approves a one-eyed, asymmetric, non-human, or otherwise unusual structure, treat missing/extra/merged eyes, one-eyed appearance for a two-eyed character, missing/extra limbs or fingers, changed species/body type, broken joints, and broken body proportions as rerun causes.
 - Preserve source scene references such as `S01`, `S02-S04`, or the user's own scene names.
@@ -77,7 +77,7 @@ Use this format:
 - 캐릭터 외형/해부 고정 조건(appearance/anatomy): 종족/신체 구조, 얼굴 구조, 눈 개수/배치, 손/손가락/팔/다리 개수, 실루엣, 체형 비율, 자세. 예: 두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 하며, 외눈 캐릭터처럼 보이면 rerun.
 - 이미지 내 문자 방지 조건(visual_text_guard): ...
 - 페이지/컷 구성 원칙: 먼저 시나리오, 감정선, 액션 리듬, 독자 시선, 컷 밀도, 여백, 디테일/강약/효과선 중심으로 만화 페이지를 설계함
-- 구조화 공간/시간 계약(spatial_contract): 페이지 구성 이후 추출하는 검수 레이어. 총구/시선/투사체/엄폐/랜드마크/상태 유지 관계가 중요한 컷은 승인 전 벡터, 관계, 시간적 상태 검증을 통과해야 하지만, spatial_contract가 컷 설계의 목적이 되어서는 안 됨
+- 구조화 공간/시간 계약(spatial_contract): 페이지 구성 이후 추출하는 검수 레이어. 방향/시선/이동체 경로/가림 요소/랜드마크/상태 유지 관계가 중요한 컷은 승인 전 벡터, 관계, 시간적 상태 검증을 통과해야 하지만, spatial_contract가 컷 설계의 목적이 되어서는 안 됨
 
 | id | 파일명 | 장면 | 만화적 장면 목적 | 독자 경험/감정 리듬 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/상태유지/spatial_contract 검수 포인트 |
 | ... |
@@ -85,7 +85,7 @@ Use this format:
 승인 후 진행 방식:
 - 1단계: 만화 페이지 러프 블로킹 + 공간 검수 보조 storyboard_blocking
 - 각 페이지는 $create-comic-storyboard-blocking subagent가 생성/1차 검수
-- 1단계 이미지는 먼저 승인된 만화 페이지의 패널 구도, 장면 리듬, 독자 시선 흐름을 보존한다. 중요한 캐릭터/오브젝트/환경 1개당 펜으로 3초 정도 빠르게 그린 수준의 러프 형체를 사용하고, 사람/총/공/골대/엄폐물/벽/문/차량/랜드마크처럼 무엇인지 알아볼 수 있어야 한다. 위치/방향/벡터/관계 선, 화살표, 시선/조준선, 궤적선, 엄폐/가림 표시는 검수에 필요한 만큼만 추가한다. 중요하지 않은 소품/배경 요소는 스토리 판독, 액션 판독, 엄폐/가림, 랜드마크 연속성, 페이지 구성에 필요하지 않으면 단순화하거나 생략한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
+- 1단계 이미지는 먼저 승인된 만화 페이지의 패널 구도, 장면 리듬, 독자 시선 흐름을 보존한다. 중요한 캐릭터/오브젝트/환경 1개당 펜으로 3초 정도 빠르게 그린 수준의 러프 형체를 사용하고, 사람/손에 든 물체/움직이는 물체/기준 랜드마크/가림 요소/벽/문/차량/가구/소품처럼 무엇인지 알아볼 수 있어야 한다. 위치/방향/벡터/관계 선, 화살표, 시선/방향선, 이동 궤적선, 가림/차단 표시는 검수에 필요한 만큼만 추가한다. 중요하지 않은 소품/배경 요소는 스토리 판독, 액션 판독, 가림/차단, 랜드마크 연속성, 페이지 구성에 필요하지 않으면 단순화하거나 생략한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
 - 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json`과 1단계 산출물을 사용자에게 보고하고, sketch/ink 진행 여부를 반드시 별도로 확인
@@ -123,14 +123,14 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
   "visual_text_guard": ["no arbitrary text on buildings, books, flags, labels, or panel corners"],
   "pages": [
     {
-      "id": "001-gym-arrival",
-      "filename": "001-gym-arrival.png",
+      "id": "001-corridor-arrival",
+      "filename": "001-corridor-arrival.png",
       "page_no": 1,
       "scene_refs": ["S01"],
       "layout_brief": "Three-panel cinematic page with a wide establishing panel, diagonal action panel, and close reaction panel.",
       "narrative_plan": {
-        "story_function": "Establish the protagonist's arrival and the quiet gym mood.",
-        "reader_experience": "The reader feels a calm setup before the action begins.",
+        "story_function": "Establish the protagonist's arrival and the quiet corridor mood.",
+        "reader_experience": "The reader feels a calm setup before the important movement begins.",
         "pacing_intent": "One wide breath, one movement beat, one reaction beat.",
         "composition_intent": "Design a readable comic page first; spatial validation is extracted afterward."
       },
@@ -142,18 +142,18 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
       "detail_density_notes": "Detail focal characters, props, hands, and faces; simplify low-priority background.",
       "visual_emphasis_notes": "Use stronger line weight and contrast on the focal beat.",
       "comic_effects_notes": "Use effect lines only where they clarify action, emotion, impact, speed, or eye guidance.",
-      "spatial_logic_notes": "Hoop remains on far wall; ball moves toward the hoop.",
-      "motion_checks": ["ball trajectory follows hand release toward target"],
+      "spatial_logic_notes": "Exit marker remains on the far wall; the rolling object moves toward the marker.",
+      "motion_checks": ["moving object path follows the approved direction toward the landmark"],
       "must_match": [
         "three readable panels",
-        "no impossible ball direction",
+        "no impossible moving-object direction",
         "two-eyed characters must not look one-eyed unless explicitly approved"
       ],
       "spatial_contract_extraction": {
         "derived_from": "narrative_plan_and_panels",
-        "verification_purpose": "Validate object trajectory, landmark relation, and state continuity after the comic page design is chosen.",
+        "verification_purpose": "Validate moving-object path, landmark relation, visibility/occlusion, and state continuity after the comic page design is chosen.",
         "must_not_override_page_design": true,
-        "focus": ["basketball trajectory", "hoop landmark relation", "protagonist state continuity"]
+        "focus": ["moving object path", "exit marker landmark relation", "occluding element placement", "protagonist state continuity"]
       },
       "spatial_contract": {
         "coordinate_space": {
@@ -167,20 +167,32 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
           {
             "id": "protagonist",
             "type": "character",
-            "role": "shooter",
-            "blocking_symbol": {"shape": "rough_gesture_silhouette", "tone": "loose black line", "meaning": "protagonist 3-second shooter pose"}
+            "role": "main subject",
+            "blocking_symbol": {"shape": "rough_gesture_silhouette", "tone": "loose black line", "meaning": "protagonist 3-second standing pose"}
           },
           {
-            "id": "basketball",
+            "id": "rolling_object",
             "type": "object",
-            "role": "projectile",
-            "blocking_symbol": {"shape": "small_rough_ball", "tone": "hollow", "meaning": "basketball projectile"}
+            "role": "moving object",
+            "blocking_symbol": {"shape": "small_rough_box_on_wheels", "tone": "hollow", "meaning": "small rolling object"}
           },
           {
-            "id": "hoop",
+            "id": "exit_marker",
             "type": "landmark",
-            "role": "target",
-            "blocking_symbol": {"shape": "rough_hoop_and_backboard", "tone": "gray outline", "meaning": "basketball hoop/rim target"}
+            "role": "destination landmark",
+            "blocking_symbol": {"shape": "rough_wall_marker", "tone": "gray outline", "meaning": "far-wall destination marker"}
+          },
+          {
+            "id": "folding_screen",
+            "type": "object",
+            "role": "occluding element",
+            "blocking_symbol": {"shape": "rough_vertical_screen", "tone": "gray block", "meaning": "partial visual barrier"}
+          },
+          {
+            "id": "window_light",
+            "type": "landmark",
+            "role": "visibility source",
+            "blocking_symbol": {"shape": "rough_bright_window", "tone": "light outline", "meaning": "background light source"}
           }
         ],
         "panel_snapshots": [
@@ -191,40 +203,43 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
                 "id": "protagonist",
                 "position": [0.25, 0.68],
                 "facing_vector": [1, -0.15],
-                "pose": "jump-shot release",
+                "pose": "standing and looking down the corridor",
                 "cover": "none",
                 "visibility": "visible",
                 "occlusion": "none",
-                "location_anchor": "left key area",
+                "location_anchor": "near corridor entrance",
                 "held_props": [],
-                "state_tags": ["shooting"]
+                "state_tags": ["watching"]
               },
-              {"id": "basketball", "position": [0.34, 0.55], "trajectory_vector": [1, -0.2], "state_tags": ["released"]},
-              {"id": "hoop", "position": [0.82, 0.36], "location_anchor": "far wall"}
+              {"id": "rolling_object", "position": [0.34, 0.62], "trajectory_vector": [1, -0.1], "state_tags": ["moving"]},
+              {"id": "exit_marker", "position": [0.82, 0.36], "location_anchor": "far wall"},
+              {"id": "folding_screen", "position": [0.50, 0.58], "occlusion": "between protagonist and window_light"},
+              {"id": "window_light", "position": [0.75, 0.58], "location_anchor": "right wall"}
             ]
           }
         ],
         "constraints": [
-          {"id": "ball-to-hoop", "type": "trajectory_to", "panel": 1, "object": "basketball", "target": "hoop"},
-          {"id": "hoop-right-of-protagonist", "type": "right_of", "panel": 1, "subject": "hoop", "anchor": "protagonist"},
+          {"id": "rolling-object-to-exit-marker", "type": "trajectory_to", "panel": 1, "object": "rolling_object", "target": "exit_marker"},
+          {"id": "exit-marker-right-of-protagonist", "type": "right_of", "panel": 1, "subject": "exit_marker", "anchor": "protagonist"},
+          {"id": "screen-between-protagonist-and-window-light", "type": "cover_between", "panel": 1, "actor": "protagonist", "cover": "folding_screen", "source": "window_light"},
           {
             "id": "protagonist-state-carries-from-prior-panel",
             "type": "state_persists_from",
             "panel": 1,
             "entity": "protagonist",
-            "reference_page": "001-gym-arrival",
+            "reference_page": "001-corridor-arrival",
             "reference_panel": 1,
             "state_fields": ["cover", "visibility", "location_anchor"]
           },
           {
-            "id": "approved-shot-release-transition",
+            "id": "approved-rolling-transition",
             "type": "allowed_transition",
-            "entity": "basketball",
-            "from_page": "001-gym-arrival",
+            "entity": "rolling_object",
+            "from_page": "001-corridor-arrival",
             "from_panel": 1,
-            "to_page": "001-gym-arrival",
+            "to_page": "001-corridor-arrival",
             "to_panel": 1,
-            "cause_page": "001-gym-arrival",
+            "cause_page": "001-corridor-arrival",
             "cause_panel": 1
           }
         ]
@@ -232,15 +247,15 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
       "panels": [
         {
           "panel_no": 1,
-          "beat": "The protagonist enters the empty gym.",
-          "visual_brief": "Wide establishing panel of a quiet indoor court.",
+          "beat": "The protagonist enters the quiet corridor.",
+          "visual_brief": "Wide establishing panel of a quiet interior passage.",
           "characters": ["protagonist"],
-          "action": "Standing near the entrance, looking toward the hoop.",
-          "composition": "door frame foreground, hoop in distance",
+          "action": "Standing near the entrance, watching a small rolling object move toward the far marker.",
+          "composition": "entrance frame foreground, destination marker in distance",
           "source_dialogue": ["It's quiet in here."],
           "adapted_dialogue": ["...조용하네."],
           "sfx": ["끼익"],
-          "caption": ["방과 후, 체육관."],
+          "caption": ["늦은 오후, 복도."],
           "speech_balloon": "small balloon near protagonist, not covering face",
           "sfx_placement": "near opening door"
         }
@@ -275,7 +290,7 @@ python3 "$RUNNER" spatial-preview --plan-file <approved-plan.json>
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
 ```
 
-`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite aim vectors, impossible projectile trajectories, missing cover between actor/threat, fixed-landmark relation drift, cover/state persistence drift, and missing allowed-transition causes fail before any generation is reserved. This validation checks the approved comic page design; it must not become the driver for page or panel composition. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
+`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite direction vectors, impossible moving-object paths, missing occluding elements between related subjects/sources, fixed-landmark relation drift, visibility/occlusion or state persistence drift, and missing allowed-transition causes fail before any generation is reserved. This validation checks the approved comic page design; it must not become the driver for page or panel composition. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
 
 `spatial-preview` writes a read-only static HTML diagram for human inspection of `spatial_contract` positions, vectors, cover/line-of-sight relations, landmark/state continuity constraints, and the current `spatial-check` pass/fail issues. Use `--plan-file`, `--plan-json --output <html>`, or `--run-dir`; the default output is `<plan-stem>_spatial_preview.html` for plan files or `<run-dir>/spatial_contract_preview.html` for approved runs.
 
@@ -448,7 +463,7 @@ Inspect every imported page before marking it passed. Check page id, stage, pane
 
 For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, meaningless pure-symbol blocking that makes entities impossible to identify, over-detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
 
-When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, temporal state field, and constraint. Reject target-opposite aim vectors, projectile paths that do not move toward the target, cover that is not between actor and threat, exposed characters that were specified as hidden behind cover, broken line-of-sight blocking, left/right relation flips, fixed landmark relation drift, low cover turning into a building wall without cause, and pose/cover/location/held-prop/state-tag drift without an `allowed_transition`. Record the result with `--spatial-verdict` and `--spatial-note`.
+When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, temporal state field, and constraint. Reject target-opposite direction vectors, moving-object paths that do not move toward the approved destination, occluding elements that are not between the required subjects/sources, subjects that were specified as hidden but appear exposed, broken line-of-sight blocking, left/right relation flips, fixed landmark relation drift, a partial occluding element turning into a different barrier without cause, and pose/cover/location/held-prop/state-tag drift without an `allowed_transition`. Record the result with `--spatial-verdict` and `--spatial-note`.
 
 Character appearance/anatomy is an independent reject criterion, not just a technical-quality note. Unless explicitly approved by the plan or source, rerun pages with missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.
 

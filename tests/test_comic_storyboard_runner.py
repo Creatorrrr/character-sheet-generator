@@ -93,9 +93,9 @@ def make_blocking_description(root, run_dir, item):
                 f"# {stem}_desc",
                 "",
                 "## Symbol Legend",
-                "- hero circle: character marker",
-                "- square: object or cover marker",
-                "- arrow: facing, aim, or trajectory vector",
+                "- character circle: character marker",
+                "- square: object or occlusion marker",
+                "- arrow: facing, direction, or movement vector",
                 "- silhouette/shadow: visibility and occlusion marker",
                 "- entities: " + (", ".join(entity_ids) or "none"),
                 "",
@@ -132,22 +132,22 @@ def sample_page(page_index, panel_count=3):
                 "scene_refs": [f"S{page_index:02d}"],
                 "beat": f"Story beat {page_index}-{panel_index}",
                 "visual_brief": f"Comic panel visual brief {page_index}-{panel_index}",
-                "setting": "school gym",
+                "setting": "station corridor",
                 "characters": ["main character"],
-                "action": "shoots the basketball toward the hoop",
-                "composition": "subject in foreground with hoop in background",
+                "action": "guides a rolling suitcase toward the exit marker",
+                "composition": "subject in foreground with exit marker in background",
                 "source_dialogue": [f"raw line {page_index}-{panel_index}"],
                 "adapted_dialogue": [f"각색 대사 {page_index}-{panel_index}"],
                 "sfx": ["휙"],
-                "caption": ["방과 후 체육관"],
+                "caption": ["늦은 오후 복도"],
                 "speech_balloon": "small balloon near the speaker",
-                "sfx_placement": "near the moving basketball",
-                "detail_density_notes": "detail the hand, ball, hoop rim, and face; simplify the far wall",
-                "visual_emphasis_notes": "use stronger line weight on the shooter and ball, lighter background lines",
-                "comic_effects_notes": "speed lines follow the ball toward the hoop and focus lines guide the eye to the rim",
-                "spatial_logic_notes": "ball travels from hand toward hoop",
-                "motion_checks": ["basketball moves toward hoop, not behind shooter"],
-                "must_match": ["hoop stays on far wall"],
+                "sfx_placement": "near the moving suitcase",
+                "detail_density_notes": "detail the hand, suitcase wheel, exit marker, and face; simplify the far wall",
+                "visual_emphasis_notes": "use stronger line weight on the traveler and suitcase, lighter background lines",
+                "comic_effects_notes": "motion lines follow the suitcase toward the marker and focus lines guide the eye to the destination",
+                "spatial_logic_notes": "suitcase travels from hand toward exit marker",
+                "motion_checks": ["rolling suitcase moves toward exit marker, not away from the path"],
+                "must_match": ["exit marker stays on far wall"],
                 "prompt": f"Generate comic panel {page_index}-{panel_index}",
             }
         )
@@ -160,13 +160,13 @@ def sample_page(page_index, panel_count=3):
         "reading_order": "top-to-bottom, left-to-right within rows",
         "pacing_notes": "3-5 panels by default with measured cinematic pacing.",
         "panel_shape_notes": "Use experimental freeform panel design with diagonal, asymmetric, inset, or borderless panels.",
-        "negative_space_notes": "Leave wide negative space around faces, ball motion, balloons, and quiet reaction beats.",
-        "detail_density_notes": "Keep the shooter, ball, hoop, and hand details crisp; simplify distant bleachers.",
-        "visual_emphasis_notes": "Strongest visual emphasis goes to the shot release and final reaction closeup.",
-        "comic_effects_notes": "Use speed lines on the ball, subtle focus lines toward the hoop, and small impact lines on rim contact.",
+        "negative_space_notes": "Leave wide negative space around faces, object motion, balloons, and quiet reaction beats.",
+        "detail_density_notes": "Keep the traveler, suitcase, exit marker, and hand details crisp; simplify distant walls.",
+        "visual_emphasis_notes": "Strongest visual emphasis goes to the guided movement and final reaction closeup.",
+        "comic_effects_notes": "Use motion lines on the suitcase, subtle focus lines toward the exit marker, and small contact lines near the wheels.",
         "page_dialogue_notes": "Adapt dialogue for comic timing; do not copy source lines verbatim.",
-        "spatial_logic_notes": "Hoop remains on far wall; ball moves toward hoop after release.",
-        "motion_checks": ["basketball shot trajectory follows the hand release toward the hoop"],
+        "spatial_logic_notes": "Exit marker remains on far wall; suitcase moves toward exit marker after release.",
+        "motion_checks": ["rolling suitcase path follows the hand release toward the exit marker"],
         "must_match": ["multi-panel comic page", "legible balloons and SFX"],
         "panels": panels,
         "references": [],
@@ -176,7 +176,7 @@ def sample_page(page_index, panel_count=3):
 
 def sample_plan(page_count=5, panel_count=3):
     return {
-        "scenario_title": "Gym Story",
+        "scenario_title": "Corridor Story",
         "style_brief": "clean cinematic Korean comic style",
         "reading_order": "top-to-bottom, left-to-right within rows",
         "pages": [sample_page(index, panel_count=panel_count) for index in range(1, page_count + 1)],
@@ -192,33 +192,35 @@ def action_spatial_contract():
             "y_axis": "down",
         },
         "entities": [
-            {"id": "hero", "type": "character", "role": "protected shooter"},
-            {"id": "villain", "type": "character", "role": "opponent"},
-            {"id": "hero_gun", "type": "object", "role": "hero weapon"},
-            {"id": "villain_gun", "type": "object", "role": "villain weapon"},
-            {"id": "crate", "type": "object", "role": "cover"},
-            {"id": "basketball", "type": "object", "role": "projectile"},
-            {"id": "hoop", "type": "landmark", "role": "target"},
+            {"id": "guide", "type": "character", "role": "main subject"},
+            {"id": "observer", "type": "character", "role": "attention target"},
+            {"id": "pointer_object", "type": "object", "role": "held direction cue"},
+            {"id": "observer_gaze", "type": "object", "role": "gaze direction cue"},
+            {"id": "screen", "type": "object", "role": "occluding element"},
+            {"id": "rolling_suitcase", "type": "object", "role": "moving object"},
+            {"id": "exit_marker", "type": "landmark", "role": "destination landmark"},
+            {"id": "window_light", "type": "landmark", "role": "visibility source"},
         ],
         "panel_snapshots": [
             {
                 "panel": 1,
                 "entities": [
-                    {"id": "hero", "position": [0.2, 0.5], "facing_vector": [1, 0]},
-                    {"id": "villain", "position": [0.8, 0.5], "facing_vector": [-1, 0]},
-                    {"id": "hero_gun", "position": [0.28, 0.5], "aim_vector": [1, 0]},
-                    {"id": "villain_gun", "position": [0.72, 0.5], "aim_vector": [-1, 0]},
-                    {"id": "crate", "position": [0.5, 0.5], "occlusion": "between hero and villain"},
-                    {"id": "basketball", "position": [0.32, 0.82], "trajectory_vector": [1, -0.85]},
-                    {"id": "hoop", "position": [0.82, 0.38]},
+                    {"id": "guide", "position": [0.2, 0.5], "facing_vector": [1, 0]},
+                    {"id": "observer", "position": [0.8, 0.5], "facing_vector": [-1, 0]},
+                    {"id": "pointer_object", "position": [0.28, 0.5], "aim_vector": [1, 0]},
+                    {"id": "observer_gaze", "position": [0.72, 0.5], "aim_vector": [-1, 0]},
+                    {"id": "screen", "position": [0.5, 0.5], "occlusion": "between guide and window_light"},
+                    {"id": "rolling_suitcase", "position": [0.32, 0.82], "trajectory_vector": [1, -0.85]},
+                    {"id": "exit_marker", "position": [0.82, 0.38]},
+                    {"id": "window_light", "position": [0.85, 0.5]},
                 ],
             }
         ],
         "constraints": [
-            {"id": "hero-aims-at-villain", "type": "aims_at", "panel": 1, "actor": "hero", "weapon": "hero_gun", "target": "villain"},
-            {"id": "villain-aims-at-hero", "type": "aims_at", "panel": 1, "actor": "villain", "weapon": "villain_gun", "target": "hero"},
-            {"id": "crate-cover-between", "type": "cover_between", "panel": 1, "actor": "hero", "cover": "crate", "threat": "villain"},
-            {"id": "ball-to-hoop", "type": "trajectory_to", "panel": 1, "object": "basketball", "target": "hoop"},
+            {"id": "pointer-directed-to-observer", "type": "aims_at", "panel": 1, "actor": "guide", "object": "pointer_object", "target": "observer"},
+            {"id": "observer-gaze-to-guide", "type": "aims_at", "panel": 1, "actor": "observer", "object": "observer_gaze", "target": "guide"},
+            {"id": "screen-between-guide-and-window", "type": "cover_between", "panel": 1, "actor": "guide", "cover": "screen", "source": "window_light"},
+            {"id": "suitcase-to-exit-marker", "type": "trajectory_to", "panel": 1, "object": "rolling_suitcase", "target": "exit_marker"},
         ],
     }
 
@@ -229,12 +231,12 @@ def plan_with_spatial_contract(contract):
     return plan
 
 
-def temporal_cover_plan(current_cover="building_wall", include_allowed_transition=False, cause_panel=1):
+def temporal_cover_plan(current_cover="tall_partition", include_allowed_transition=False, cause_panel=1):
     plan = sample_plan(page_count=2, panel_count=1)
     shared_entities = [
-        {"id": "hero", "type": "character", "role": "covered actor"},
-        {"id": "low_cover", "type": "object", "role": "seated-height cover"},
-        {"id": "building_wall", "type": "landmark", "role": "wall cover"},
+        {"id": "guide", "type": "character", "role": "partly occluded subject"},
+        {"id": "floor_partition", "type": "object", "role": "waist-height occluding element"},
+        {"id": "tall_partition", "type": "landmark", "role": "full-height occluding landmark"},
     ]
     plan["pages"][0]["spatial_contract"] = {
         "entities": shared_entities,
@@ -243,36 +245,36 @@ def temporal_cover_plan(current_cover="building_wall", include_allowed_transitio
                 "panel": 1,
                 "entities": [
                     {
-                        "id": "hero",
+                        "id": "guide",
                         "position": [0.3, 0.65],
                         "pose": "crouching",
-                        "cover": "low_cover",
-                        "visibility": "hidden_from_enemy",
-                        "occlusion": "covered_by_low_cover",
-                        "location_anchor": "behind_low_cover",
-                        "held_props": ["pistol"],
-                        "state_tags": ["under_cover"],
+                        "cover": "floor_partition",
+                        "visibility": "partly_hidden_from_viewer",
+                        "occlusion": "occluded_by_floor_partition",
+                        "location_anchor": "behind_floor_partition",
+                        "held_props": ["folder"],
+                        "state_tags": ["partly_obscured"],
                     },
-                    {"id": "low_cover", "position": [0.42, 0.65]},
-                    {"id": "building_wall", "position": [0.9, 0.6]},
+                    {"id": "floor_partition", "position": [0.42, 0.65]},
+                    {"id": "tall_partition", "position": [0.9, 0.6]},
                 ],
             }
         ],
     }
     constraints = [
         {
-            "id": "hero-same-cover",
+            "id": "guide-same-occluder",
             "type": "same_cover_as",
             "panel": 1,
-            "entity": "hero",
+            "entity": "guide",
             "reference_page": "001-page-1",
             "reference_panel": 1,
         },
         {
-            "id": "hero-state-persists",
+            "id": "guide-state-persists",
             "type": "state_persists_from",
             "panel": 1,
-            "entity": "hero",
+            "entity": "guide",
             "reference_page": "001-page-1",
             "reference_panel": 1,
             "state_fields": ["pose", "cover", "location_anchor", "held_props", "state_tags"],
@@ -281,9 +283,9 @@ def temporal_cover_plan(current_cover="building_wall", include_allowed_transitio
     if include_allowed_transition:
         constraints.append(
             {
-                "id": "hero-cover-change-cause",
+                "id": "guide-occluder-change-cause",
                 "type": "allowed_transition",
-                "entity": "hero",
+                "entity": "guide",
                 "from_page": "001-page-1",
                 "from_panel": 1,
                 "to_page": "002-page-2",
@@ -299,18 +301,18 @@ def temporal_cover_plan(current_cover="building_wall", include_allowed_transitio
                 "panel": 1,
                 "entities": [
                     {
-                        "id": "hero",
+                        "id": "guide",
                         "position": [0.84, 0.62],
                         "pose": "standing",
                         "cover": current_cover,
-                        "visibility": "hidden_from_enemy",
-                        "occlusion": f"covered_by_{current_cover}",
+                        "visibility": "partly_hidden_from_viewer",
+                        "occlusion": f"occluded_by_{current_cover}",
                         "location_anchor": f"behind_{current_cover}",
-                        "held_props": ["pistol"],
-                        "state_tags": ["under_cover"],
+                        "held_props": ["folder"],
+                        "state_tags": ["partly_obscured"],
                     },
-                    {"id": "low_cover", "position": [0.42, 0.65]},
-                    {"id": "building_wall", "position": [0.9, 0.6]},
+                    {"id": "floor_partition", "position": [0.42, 0.65]},
+                    {"id": "tall_partition", "position": [0.9, 0.6]},
                 ],
             }
         ],
@@ -338,9 +340,9 @@ def init_run(root):
     result = run_cli(
         "init",
         "--title",
-        "Gym Story",
+        "Corridor Story",
         "--scenario-summary",
-        "A short gym scene.",
+        "A short corridor scene.",
         "--output-root",
         str(root / "output"),
         cwd=root,
@@ -569,10 +571,10 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(first["pacing_notes"], "3-5 panels by default with measured cinematic pacing.")
             self.assertIn("experimental freeform panel design", first["panel_shape_notes"])
             self.assertIn("wide negative space", first["negative_space_notes"])
-            self.assertIn("shooter, ball, hoop", first["detail_density_notes"])
-            self.assertIn("shot release", first["visual_emphasis_notes"])
-            self.assertIn("speed lines", first["comic_effects_notes"])
-            self.assertIn("hand, ball, hoop rim", first["panels"][0]["detail_density_notes"])
+            self.assertIn("traveler, suitcase, exit marker", first["detail_density_notes"])
+            self.assertIn("guided movement", first["visual_emphasis_notes"])
+            self.assertIn("motion lines", first["comic_effects_notes"])
+            self.assertIn("hand, suitcase wheel, exit marker", first["panels"][0]["detail_density_notes"])
             self.assertIn("stronger line weight", first["panels"][0]["visual_emphasis_notes"])
             self.assertIn("focus lines", first["panels"][0]["comic_effects_notes"])
             self.assertEqual(state["source_root"], "/Users/chasoik/Projects/character-sheet-generator/sources")
@@ -629,10 +631,10 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
 
             for text in (prompt, subagent_prompt, batch_plan):
                 self.assertIn("Structured spatial contract", text)
-                self.assertIn("hero-aims-at-villain", text)
-                self.assertIn("crate-cover-between", text)
-                self.assertIn("ball-to-hoop", text)
-            self.assertIn("Rejects target-opposite aim vectors", prompt)
+                self.assertIn("pointer-directed-to-observer", text)
+                self.assertIn("screen-between-guide-and-window", text)
+                self.assertIn("suitcase-to-exit-marker", text)
+            self.assertIn("Rejects target-opposite direction vectors", prompt)
 
             run_cli(
                 "import",
@@ -663,14 +665,14 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--spatial-verdict",
                 "pass",
                 "--spatial-note",
-                "aim, cover, and trajectory pass",
+                "direction, occlusion, and movement-path pass",
                 cwd=root,
             )
             state = json.loads((run_dir / "state.json").read_text())
             stage = state["pages"][0]["stages"][FIRST_STAGE]
             self.assertEqual(stage["status"], "inspected_pass")
             self.assertEqual(stage["spatial_verdict"], "pass")
-            self.assertEqual(stage["spatial_note"], "aim, cover, and trajectory pass")
+            self.assertEqual(stage["spatial_note"], "direction, occlusion, and movement-path pass")
 
     def test_narrative_first_spatial_contract_metadata_is_preserved_and_prompted_first(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -679,16 +681,16 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             plan = plan_with_spatial_contract(action_spatial_contract())
             page = plan["pages"][0]
             page["narrative_plan"] = {
-                "story_function": "The page sells the reversal beat before explaining tactical geometry.",
-                "reader_experience": "Reader should feel the interruption first, then understand cover logic.",
+                "story_function": "The page sells the reversal beat before explaining spatial relation logic.",
+                "reader_experience": "Reader should feel the interruption first, then understand occlusion logic.",
                 "pacing_intent": "One held reaction beat before the action resumes.",
-                "composition_intent": "Cinematic comic composition, not a tactical diagram.",
+                "composition_intent": "Cinematic comic composition, not a spatial diagram.",
             }
             page["spatial_contract_extraction"] = {
                 "derived_from": "narrative_plan_and_panels",
-                "verification_purpose": "Check aim, cover, and trajectory after the page design is chosen.",
+                "verification_purpose": "Check direction, occlusion, and movement path after the page design is chosen.",
                 "must_not_override_page_design": True,
-                "focus": ["aim direction", "cover between combatants", "ball trajectory"],
+                "focus": ["direction alignment", "occluding element placement", "moving object path"],
             }
             plan_path = root / "narrative-first-plan.json"
             plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
@@ -742,7 +744,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
 
             bad_cover = action_spatial_contract()
             bad_cover["panel_snapshots"][0]["entities"][4]["position"] = [0.2, 0.9]
-            cases.append((plan_with_spatial_contract(bad_cover), "cover is not between"))
+            cases.append((plan_with_spatial_contract(bad_cover), "occluding element is not between"))
 
             bad_trajectory = action_spatial_contract()
             bad_trajectory["panel_snapshots"][0]["entities"][5]["trajectory_vector"] = [-1, 0.85]
@@ -751,14 +753,14 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             landmark_plan = sample_plan(page_count=2, panel_count=1)
             landmark_plan["pages"][0]["spatial_contract"] = {
                 "entities": [
-                    {"id": "hoop", "type": "landmark"},
+                    {"id": "exit_marker", "type": "landmark"},
                     {"id": "gate", "type": "landmark"},
                 ],
                 "panel_snapshots": [
                     {
                         "panel": 1,
                         "entities": [
-                            {"id": "hoop", "position": [0.8, 0.4]},
+                            {"id": "exit_marker", "position": [0.8, 0.4]},
                             {"id": "gate", "position": [0.2, 0.4]},
                         ],
                     }
@@ -766,26 +768,26 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             }
             landmark_plan["pages"][1]["spatial_contract"] = {
                 "entities": [
-                    {"id": "hoop", "type": "landmark"},
+                    {"id": "exit_marker", "type": "landmark"},
                     {"id": "gate", "type": "landmark"},
                 ],
                 "panel_snapshots": [
                     {
                         "panel": 1,
                         "entities": [
-                            {"id": "hoop", "position": [0.1, 0.4]},
+                            {"id": "exit_marker", "position": [0.1, 0.4]},
                             {"id": "gate", "position": [0.9, 0.4]},
                         ],
                     }
                 ],
                 "constraints": [
                     {
-                        "id": "keep-hoop-gate-relation",
+                        "id": "keep-exit-marker-gate-relation",
                         "type": "same_landmark_relation_as",
                         "panel": 1,
                         "reference_page": "001-page-1",
                         "reference_panel": 1,
-                        "subject": "hoop",
+                        "subject": "exit_marker",
                         "anchor": "gate",
                     }
                 ],
@@ -833,9 +835,9 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("SPATIAL_CHECK: pass", result.stdout)
             html = preview_path.read_text(encoding="utf-8")
             self.assertIn("001-page-1.png", html)
-            self.assertIn("hero-aims-at-villain", html)
-            self.assertIn("crate-cover-between", html)
-            self.assertIn("ball-to-hoop", html)
+            self.assertIn("pointer-directed-to-observer", html)
+            self.assertIn("screen-between-guide-and-window", html)
+            self.assertIn("suitcase-to-exit-marker", html)
             self.assertIn("spatial-check: pass", html)
 
     def test_spatial_preview_generates_html_when_spatial_check_fails(self):
@@ -871,8 +873,8 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertTrue(preview_path.exists())
             self.assertIn(f"SPATIAL_PREVIEW: {preview_path}", result.stdout)
             html = preview_path.read_text(encoding="utf-8")
-            self.assertIn("Gym Story", html)
-            self.assertIn("hero-aims-at-villain", html)
+            self.assertIn("Corridor Story", html)
+            self.assertIn("pointer-directed-to-observer", html)
 
     def test_spatial_preview_plan_json_requires_output(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -958,7 +960,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--spatial-verdict",
                 "needs_rerun",
                 "--spatial-note",
-                "hero is exposed instead of behind crate",
+                "subject is exposed instead of behind screen",
                 cwd=root,
             )
 
@@ -1111,7 +1113,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("3 seconds of effort per entity", prompt)
             self.assertIn("recognizable enough to identify the entity and action", prompt)
             self.assertIn("Simplify or omit unimportant props/background elements", prompt)
-            self.assertIn("sight/aim lines, trajectory arrows, cover/occlusion", prompt)
+            self.assertIn("sight/direction lines, movement-path arrows, visibility/occlusion", prompt)
             self.assertIn("meaningless pure-symbol blocking", prompt)
             self.assertIn("Semantic labels belong only in the *_desc.md", prompt)
             self.assertIn("measured cinematic pacing", prompt)
@@ -1134,9 +1136,9 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("storyboard_blocking must render no text", prompt)
             self.assertIn("각색 대사 1-1", prompt)
             self.assertIn("휙", prompt)
-            self.assertIn("ball moves toward hoop after release", prompt)
-            self.assertIn("basketball moves toward hoop, not behind shooter", prompt)
-            self.assertIn("No examples of impossible staging", prompt)
+            self.assertIn("suitcase moves toward exit marker after release", prompt)
+            self.assertIn("rolling suitcase moves toward exit marker, not away from the path", prompt)
+            self.assertIn("No impossible staging", prompt)
             self.assertIn("Source consistency checklist:", prompt)
             self.assertIn("Panel and page continuity checklist:", prompt)
 
@@ -2670,7 +2672,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "--worker-status",
                 "needs_rerun",
                 "--worker-note",
-                "worker sees impossible ball trajectory",
+                "worker sees impossible moving-object path",
                 cwd=root,
             )
 

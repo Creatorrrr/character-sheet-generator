@@ -552,17 +552,17 @@ def cover_between_points(
     segment = (threat[0] - actor[0], threat[1] - actor[1])
     segment_len = vector_length(segment)
     if segment_len == 0:
-        issues.append(f"{label}: actor and threat positions overlap, so cover_between cannot be validated.")
+        issues.append(f"{label}: subject and source positions overlap, so cover_between cannot be validated.")
         return
     actor_to_cover = (cover[0] - actor[0], cover[1] - actor[1])
     projection = ((actor_to_cover[0] * segment[0]) + (actor_to_cover[1] * segment[1])) / (segment_len * segment_len)
     perpendicular = abs(segment[0] * actor_to_cover[1] - segment[1] * actor_to_cover[0]) / segment_len
     max_distance = segment_len * tolerance_ratio
     if projection <= 0 or projection >= 1:
-        issues.append(f"{label}: cover is not between actor and threat.")
+        issues.append(f"{label}: occluding element is not between subject and source.")
     if perpendicular > max_distance:
         issues.append(
-            f"{label}: cover is too far from the actor/threat line "
+            f"{label}: occluding element is too far from the subject/source line "
             f"(distance={perpendicular:.3f}, max={max_distance:.3f})."
         )
 
@@ -2274,13 +2274,13 @@ def stage_instruction(stage_id: str) -> str:
             "important character, object, and environment element as a loose pen sketch at roughly 3 seconds "
             "of effort per entity: recognizable enough to identify the entity category and action, but not polished. "
             "Use simple gesture poses, rough object contours, environmental silhouettes, shadow masses, and "
-            "minimal landmark outlines. Add arrows, vectors, sight/aim lines, trajectory marks, cover marks, "
-            "occlusion marks, and relation lines only where needed to inspect the spatial validation overlay. "
+            "minimal landmark outlines. Add arrows, vectors, sight/direction lines, movement-path marks, "
+            "visibility/occlusion marks, and relation lines only where needed to inspect the spatial validation overlay. "
             "Simplify or omit unimportant props/background elements when they are not needed for story readability, "
-            "action readability, cover/occlusion, landmark continuity, or page composition. Do not render detailed "
+            "action readability, visibility/occlusion, landmark continuity, or page composition. Do not render detailed "
             "faces, anatomy, costume detail, texture, dialogue, SFX, typography, polished ink, tone/color, or final art. "
             "The image should remain readable as a rough comic page rather than a tactical diagram, while still making "
-            "entity positions, facing, gaze/aim/trajectory vectors, cover, occlusion, visibility, and panel-to-panel "
+            "entity positions, facing, gaze/direction/movement vectors, visibility, occlusion, and panel-to-panel "
             "state continuity easy to inspect. "
             "Also write the required *_desc.md beside the image with symbol legend, panel spatial map, "
             "constraint check, and temporal continuity check sections. Keep the required section headings "
@@ -2497,7 +2497,7 @@ def spatial_contract_extraction_prompt_text(page: dict[str, Any]) -> str:
         lines.extend(
             [
                 "- derived_from: narrative_plan_and_panels",
-                "- verification_purpose: validate spatial, temporal, aim, cover, line-of-sight, trajectory, landmark, and state continuity contradictions inside the approved page design.",
+                "- verification_purpose: validate spatial, temporal, direction, visibility/occlusion, line-of-sight, movement-path, landmark, and state continuity contradictions inside the approved page design.",
                 "- must_not_override_page_design: true",
             ]
         )
@@ -2654,11 +2654,11 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Preserve the page's scenario beat, panel composition, pacing, reader eye flow, and comic readability first. "
             "For each important character, object, and environment element, draw a quick pen-sketch form at about "
             "3 seconds of effort per entity, recognizable enough to identify the entity and action: e.g. crouching person, "
-            "standing person, gun, ball, hoop, low cover, wall, doorway, vehicle, table, tree, or landmark. "
+            "standing person, held object, moving object, destination landmark, occluding element, wall, doorway, vehicle, table, tree, or landmark. "
             "Use loose gesture poses, blocky object contours, rough environmental silhouettes, shadow masses, and "
-            "minimal landmark outlines. Add validation marks only where needed: arrows, sight/aim lines, trajectory "
-            "arrows, cover/occlusion markers, and relation lines. Simplify or omit unimportant props/background elements "
-            "when they are not needed for story readability, action readability, cover/occlusion, landmark continuity, "
+            "minimal landmark outlines. Add validation marks only where needed: arrows, sight/direction lines, movement-path "
+            "arrows, visibility/occlusion markers, and relation lines. Simplify or omit unimportant props/background elements "
+            "when they are not needed for story readability, action readability, visibility/occlusion, landmark continuity, "
             "or page composition. "
             "Do not render detailed faces, anatomy, costume detail, texture, dialogue, "
             "SFX, captions, labels, typography, polished ink, tone/color, or final art. Semantic labels belong only in the *_desc.md."
@@ -2691,8 +2691,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
         )
     negative = page.get("negative_prompt") or (
         "low resolution, watermark, random logo, unrelated captions, garbled lettering, unreadable "
-        "speech balloons, duplicated limbs, broken perspective, impossible object motion, ball moving "
-        "opposite the throw or shot, inconsistent character design, inconsistent setting, wrong costume, "
+        "speech balloons, duplicated limbs, broken perspective, impossible object motion, moving object traveling "
+        "opposite the approved or implied path, inconsistent character design, inconsistent setting, wrong costume, "
         "cropped key action, blurry subject, over-smoothed AI texture."
     )
     negative_terms = merge_unique(
@@ -2829,10 +2829,10 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Preserves source-data consistency for characters, props, profiles, locations, and page-layout references",
             "- Preserves panel-to-panel and adjacent-page continuity for character/object placement, gaze, action direction, time flow, and lettering placement",
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
-            "- Character/object positions, action direction, object trajectory, and cause-effect motion are physically plausible",
+            "- Character/object positions, action direction, moving-object path, and cause-effect motion are physically plausible",
             "- Enforces every Structured spatial contract entity, panel snapshot, vector, visibility, occlusion, and constraint listed above as validation constraints unless they contradict the approved narrative/page design",
-            "- Rejects target-opposite aim vectors, impossible projectile trajectories, broken cover/line-of-sight blocking, fixed landmark relation drift, and temporal state drift without an allowed_transition cause",
-            "- No examples of impossible staging such as a basketball shot where the ball travels behind the shooter",
+            "- Rejects target-opposite direction vectors, impossible moving-object paths, broken visibility/occlusion or line-of-sight blocking, fixed landmark relation drift, and temporal state drift without an allowed_transition cause",
+            "- No impossible staging such as a moving object traveling away from its approved destination or implied path",
             "- Has no obvious anatomy, perspective, crop, object, or continuity defects",
             "",
             "Negative prompt:",
@@ -2951,7 +2951,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
         "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, character appearance/anatomy locks, and panel/page continuity.",
         "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction inside the approved comic page design.",
-        "- Structured spatial_contract entries are validation constraints unless they contradict the approved narrative/page design: runner validates plan-time entity/vector/cover/landmark/temporal constraints, and parent inspection must record spatial pass or rerun.",
+        "- Structured spatial_contract entries are validation constraints unless they contradict the approved narrative/page design: runner validates plan-time entity/vector/visibility/landmark/temporal constraints, and parent inspection must record spatial pass or rerun.",
         "",
     ]
     for lock in state.get("character_locks", []):

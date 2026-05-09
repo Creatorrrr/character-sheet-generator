@@ -225,6 +225,74 @@ def action_spatial_contract():
     }
 
 
+def tactical_cover_contract(
+    *,
+    include_no_line=True,
+    screen_box=None,
+    grok_pose="distant behind APC, does not fire",
+    grok_aim_vector=None,
+):
+    grok_state = {
+        "id": "grok",
+        "position": [0.2, 0.5],
+        "pose": grok_pose,
+        "cover": "apc",
+        "visibility": "tiny side-edge peek",
+        "occlusion": "APC hides body",
+    }
+    if grok_aim_vector is not None:
+        grok_state["aim_vector"] = grok_aim_vector
+    constraints = [
+        {
+            "id": "grok-behind-apc-from-gipi",
+            "type": "behind_cover_from",
+            "panel": 1,
+            "actor": "grok",
+            "threat": "gipi",
+            "viewpoint_entity": "gipi",
+            "cover": "apc",
+            "allowed_exposure": ["side_edge_peek_only", "weapon_edge_only"],
+            "forbidden_exposure": ["torso_visible", "above_roofline"],
+        }
+    ]
+    if screen_box is not None:
+        constraints[0]["screen_box"] = screen_box
+    if include_no_line:
+        constraints.append(
+            {
+                "id": "grok-no-fire-line",
+                "type": "no_line_of_fire",
+                "panel": 1,
+                "source": "grok",
+                "target": "gipi",
+            }
+        )
+    return {
+        "coordinate_space": {
+            "type": "panel_screen_2d",
+            "origin": "top_left",
+            "x_axis": "right",
+            "y_axis": "down",
+        },
+        "entities": [
+            {"id": "grok", "type": "character", "role": "support pressure"},
+            {"id": "gipi", "type": "character", "role": "viewpoint threat"},
+            {"id": "apc", "type": "cover", "role": "grok_cover"},
+        ],
+        "panel_snapshots": [
+            {
+                "panel": 1,
+                "entities": [
+                    grok_state,
+                    {"id": "gipi", "position": [0.8, 0.5], "pose": "behind rubble"},
+                    {"id": "apc", "position": [0.5, 0.5]},
+                ],
+            }
+        ],
+        "constraints": constraints,
+    }
+
+
 def plan_with_spatial_contract(contract):
     plan = sample_plan(page_count=1, panel_count=1)
     plan["pages"][0]["spatial_contract"] = contract
@@ -748,6 +816,112 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(stage["status"], "inspected_pass")
             self.assertEqual(stage["spatial_verdict"], "pass")
             self.assertEqual(stage["spatial_note"], "direction, occlusion, and movement-path pass")
+
+    def test_viewpoint_cover_and_no_fire_constraints_are_prompted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = plan_with_spatial_contract(
+                tactical_cover_contract(screen_box=[0.44, 0.2, 0.12, 0.6])
+            )
+            plan_path = root / "viewpoint-cover-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            prompt = Path(stage["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+
+            for text in (prompt, subagent_prompt):
+                self.assertIn("reader POV is insufficient", text)
+                self.assertIn("threat viewpoint", text)
+                self.assertIn("from gipi's line of fire", text)
+                self.assertIn("forbidden_exposure", text)
+                self.assertIn("do not draw dashed/aim/pressure line", text)
+
+    def test_spatial_contract_screen_box_must_intersect_cover_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            valid_path = root / "valid-screen-box-plan.json"
+            valid_path.write_text(
+                json.dumps(
+                    plan_with_spatial_contract(
+                        tactical_cover_contract(screen_box=[0.44, 0.2, 0.12, 0.6])
+                    ),
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            valid = run_cli("spatial-check", "--plan-file", str(valid_path), cwd=root)
+            self.assertIn("SPATIAL_CHECK: pass", valid.stdout)
+
+            invalid_path = root / "invalid-screen-box-plan.json"
+            invalid_path.write_text(
+                json.dumps(
+                    plan_with_spatial_contract(
+                        tactical_cover_contract(screen_box=[0.05, 0.8, 0.1, 0.1])
+                    ),
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            invalid = run_cli_raw("spatial-check", "--plan-file", str(invalid_path), cwd=root)
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("screen_box does not intersect", invalid.stdout)
+
+    def test_non_firing_spatial_contract_requires_no_line_of_fire(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            invalid_path = root / "missing-no-line-plan.json"
+            invalid_path.write_text(
+                json.dumps(
+                    plan_with_spatial_contract(tactical_cover_contract(include_no_line=False)),
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+            invalid = run_cli_raw("spatial-check", "--plan-file", str(invalid_path), cwd=root)
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("non-firing spatial cue requires a no_line_of_fire constraint", invalid.stdout)
+
+            valid_path = root / "with-no-line-plan.json"
+            valid_path.write_text(
+                json.dumps(
+                    plan_with_spatial_contract(tactical_cover_contract(include_no_line=True)),
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            valid = run_cli("spatial-check", "--plan-file", str(valid_path), cwd=root)
+            self.assertIn("SPATIAL_CHECK: pass", valid.stdout)
+
+    def test_no_line_of_fire_and_not_aims_at_reject_target_vectors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = plan_with_spatial_contract(
+                tactical_cover_contract(include_no_line=True, grok_aim_vector=[1, 0])
+            )
+            plan["pages"][0]["spatial_contract"]["constraints"].append(
+                {
+                    "id": "grok-not-aiming-at-gipi",
+                    "type": "not_aims_at",
+                    "panel": 1,
+                    "actor": "grok",
+                    "target": "gipi",
+                    "max_dot": 0.2,
+                }
+            )
+            plan_path = root / "negative-aim-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            result = run_cli_raw("spatial-check", "--plan-file", str(plan_path), cwd=root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("forbidden vector points toward the target", result.stdout)
 
     def test_narrative_first_spatial_contract_metadata_is_preserved_and_prompted_first(self):
         with tempfile.TemporaryDirectory() as tmp:

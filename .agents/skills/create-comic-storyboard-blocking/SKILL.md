@@ -33,11 +33,14 @@ Read the prompt file before generation. Attach every listed required image path 
 - Keep the drawing loose and schematic: simple gesture poses, blocky object contours, rough environmental silhouettes, shadow masses, and minimal landmark outlines are enough.
 - Simplify or omit unimportant props/background elements when they are not needed for story readability, action readability, cover/occlusion, landmark continuity, or page composition.
 - Add clear lines, arrows, vector marks, relation lines, sight/aim lines, trajectory arrows, and occlusion/cover markers only where needed so positions, directions, and spatial relationships remain inspectable.
+- Draw relation lines only for actual approved aim, line of fire, line of sight, movement, or trajectory paths. Do not draw a dashed line, pressure line, projectile, sight line, or aim vector for a `no_line_of_fire` or `not_aims_at` constraint; show non-firing pressure through placement, cover silhouette, reaction, and blocked sight instead.
 - Do not render detailed faces, anatomy, costume detail, texture, dialogue, SFX, captions, labels, typography, polished ink, tone/color, or final art.
 - Do not turn the page into a pure tactical diagram unless the approved page design explicitly calls for a diagram-like page.
 - Semantic labels must not be drawn into the image. Put meanings in the sibling `*_desc.md`.
 - Make positions, facing/gaze/aim vectors, trajectories, cover relationships, line of sight, visibility, occlusion, and location anchors easy to inspect.
 - Preserve every `spatial_contract` entity id, panel snapshot, vector, visibility/occlusion state, and constraint as a validation overlay, not as the driver of composition.
+- For `behind_cover_from` and `line_of_sight_blocked`, place the actor behind the named cover from the `viewpoint_entity` or threat line of fire/line of sight. Reader-side "behind" is insufficient.
+- Respect `allowed_exposure` and `forbidden_exposure`: only the allowed peek area may show, and listed forbidden exposure such as torso visibility, above-roofline exposure, or open-field exposure is a failure.
 - Preserve temporal fields from the prompt: `pose`, `cover`, `visibility`, `occlusion`, `location_anchor`, `held_props`, and `state_tags`, unless an approved `allowed_transition` and cause reference permit a change.
 
 ## Description File
@@ -60,7 +63,7 @@ Keep the required heading text exactly as shown above. Write all body text under
 
 ## Worker Inspection
 
-After generation and description writing, inspect both files before returning. Mark `needs_rerun` when the blocking image or description fails the prompt, omits required entities/constraints, contradicts a vector/cover/visibility/occlusion relation, introduces unsupported temporal drift, becomes a tactical diagram instead of a rough comic page, or contains detailed/final-art rendering.
+After generation and description writing, inspect both files before returning. Mark `needs_rerun` when the blocking image or description fails the prompt, omits required entities/constraints, contradicts a vector/cover/visibility/occlusion relation, treats reader POV as enough for `behind_cover_from`, shows any listed `forbidden_exposure`, draws a line/projectile/aim vector that violates `no_line_of_fire` or `not_aims_at`, introduces unsupported temporal drift, becomes a tactical diagram instead of a rough comic page, or contains detailed/final-art rendering.
 
 If this page is marked as the stage-level anchor, self-inspect the blocking level especially strictly: it must stay rough, readable, and non-final while setting a reliable reference level for later pages.
 

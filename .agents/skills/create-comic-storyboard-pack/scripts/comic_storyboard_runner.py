@@ -104,6 +104,8 @@ SPATIAL_CONSTRAINT_TYPES = {
     "cover_between",
     "behind_cover_from",
     "line_of_sight_blocked",
+    "no_line_of_fire",
+    "not_aims_at",
     "left_of",
     "right_of",
     "same_landmark_relation_as",
@@ -113,6 +115,18 @@ SPATIAL_CONSTRAINT_TYPES = {
     "allowed_transition",
     "requires_cause",
 }
+NON_FIRING_CUES = (
+    "not_firing",
+    "not firing",
+    "does not fire",
+    "do not fire",
+    "doesn't fire",
+    "not fire",
+    "발사하지",
+    "쏘지 않",
+    "존재만으로 압박",
+    "support_pressure",
+)
 BLOCKING_DESCRIPTION_HEADINGS = [
     "## Symbol Legend",
     "## Panel Spatial Map",
@@ -280,6 +294,34 @@ def vector2(value: Any) -> tuple[float, float] | None:
     return (numbers[0], numbers[1])
 
 
+def rect4(value: Any) -> tuple[float, float, float, float] | None:
+    if isinstance(value, str):
+        parts = [part.strip() for part in re.split(r"[, ]+", value.strip()) if part.strip()]
+        if len(parts) < 4:
+            return None
+        try:
+            numbers = [float(part) for part in parts[:4]]
+        except ValueError:
+            return None
+    elif isinstance(value, (list, tuple)):
+        if len(value) < 4:
+            return None
+        numbers = []
+        for entry in value[:4]:
+            try:
+                numbers.append(float(entry))
+            except (TypeError, ValueError):
+                return None
+    else:
+        return None
+    if not all(math.isfinite(number) for number in numbers):
+        return None
+    x, y, width, height = numbers
+    if width <= 0 or height <= 0:
+        return None
+    return (x, y, width, height)
+
+
 def normalized_vector(value: Any) -> Any:
     numbers = vector_numbers(value)
     return numbers if numbers is not None else value
@@ -351,6 +393,7 @@ def normalize_spatial_entity_state(raw_state: Any, index: int) -> dict[str, Any]
         "location_anchor",
         "held_props",
         "state_tags",
+        "screen_box",
         "notes",
     ]:
         if field in entry:
@@ -545,6 +588,97 @@ def dot_matches_direction(
     dot = (actual[0] / actual_len) * (expected[0] / expected_len) + (actual[1] / actual_len) * (expected[1] / expected_len)
     if dot < min_dot:
         issues.append(f"{label}: vector points away from the target direction (dot={dot:.3f}, min={min_dot:.3f}).")
+
+
+def dot_exceeds_forbidden_direction(
+    actual: tuple[float, float] | None,
+    origin: tuple[float, float] | None,
+    target: tuple[float, float] | None,
+    issues: list[str],
+    label: str,
+    max_dot: float,
+) -> None:
+    if actual is None or origin is None or target is None:
+        return
+    expected = (target[0] - origin[0], target[1] - origin[1])
+    actual_len = vector_length(actual)
+    expected_len = vector_length(expected)
+    if actual_len == 0 or expected_len == 0:
+        return
+    dot = (actual[0] / actual_len) * (expected[0] / expected_len) + (actual[1] / actual_len) * (expected[1] / expected_len)
+    if dot > max_dot:
+        issues.append(f"{label}: forbidden vector points toward the target (dot={dot:.3f}, max={max_dot:.3f}).")
+
+
+def point_in_rect(point: tuple[float, float], rect: tuple[float, float, float, float]) -> bool:
+    x, y, width, height = rect
+    return x <= point[0] <= x + width and y <= point[1] <= y + height
+
+
+def orientation(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
+    return (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+
+
+def on_segment(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> bool:
+    return (
+        min(a[0], c[0]) <= b[0] <= max(a[0], c[0])
+        and min(a[1], c[1]) <= b[1] <= max(a[1], c[1])
+    )
+
+
+def segments_intersect(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    q1: tuple[float, float],
+    q2: tuple[float, float],
+    epsilon: float = 1e-9,
+) -> bool:
+    o1 = orientation(p1, p2, q1)
+    o2 = orientation(p1, p2, q2)
+    o3 = orientation(q1, q2, p1)
+    o4 = orientation(q1, q2, p2)
+    if o1 * o2 < 0 and o3 * o4 < 0:
+        return True
+    if abs(o1) <= epsilon and on_segment(p1, q1, p2):
+        return True
+    if abs(o2) <= epsilon and on_segment(p1, q2, p2):
+        return True
+    if abs(o3) <= epsilon and on_segment(q1, p1, q2):
+        return True
+    if abs(o4) <= epsilon and on_segment(q1, p2, q2):
+        return True
+    return False
+
+
+def segment_intersects_rect(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    rect: tuple[float, float, float, float],
+) -> bool:
+    if point_in_rect(start, rect) or point_in_rect(end, rect):
+        return True
+    x, y, width, height = rect
+    corners = [
+        (x, y),
+        (x + width, y),
+        (x + width, y + height),
+        (x, y + height),
+    ]
+    edges = list(zip(corners, [*corners[1:], corners[0]]))
+    return any(segments_intersect(start, end, edge_start, edge_end) for edge_start, edge_end in edges)
+
+
+def cover_screen_box_between(
+    screen_box: tuple[float, float, float, float] | None,
+    actor: tuple[float, float] | None,
+    threat: tuple[float, float] | None,
+    issues: list[str],
+    label: str,
+) -> None:
+    if screen_box is None or actor is None or threat is None:
+        return
+    if not segment_intersects_rect(actor, threat, screen_box):
+        issues.append(f"{label}: screen_box does not intersect the actor/threat line.")
 
 
 def cover_between_points(
@@ -924,6 +1058,19 @@ def validate_requires_cause(
         issues.append(f"{label}: requires_cause points to a missing cause panel ({cause_page}:{cause_panel}).")
 
 
+def contains_non_firing_cue(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(contains_non_firing_cue(entry) for entry in value.values())
+    if isinstance(value, list):
+        return any(contains_non_firing_cue(entry) for entry in value)
+    text = str(value or "").lower()
+    return any(cue in text for cue in NON_FIRING_CUES)
+
+
+def has_no_line_of_fire_constraint(contract: dict[str, Any]) -> bool:
+    return any(str(constraint.get("type") or "") == "no_line_of_fire" for constraint in contract.get("constraints", []))
+
+
 def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
     issues: list[str] = []
     pages_by_id = page_lookup_aliases(pages)
@@ -939,6 +1086,16 @@ def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
         if not entity_id_set:
             issues.append(f"{page['id']} spatial_contract: at least one entity is required when spatial_contract is present.")
         snapshots = spatial_snapshots_by_panel(contract)
+        non_firing_payload = {
+            "narrative_plan": page.get("narrative_plan"),
+            "spatial_logic_notes": page.get("spatial_logic_notes"),
+            "motion_checks": page.get("motion_checks"),
+            "must_match": page.get("must_match"),
+            "panels": page.get("panels"),
+            "panel_snapshots": contract.get("panel_snapshots"),
+        }
+        if contains_non_firing_cue(non_firing_payload) and not has_no_line_of_fire_constraint(contract):
+            issues.append(f"{page['id']} spatial_contract: non-firing spatial cue requires a no_line_of_fire constraint.")
         for snapshot in contract.get("panel_snapshots", []):
             panel = panel_key(snapshot.get("panel"))
             for state in snapshot.get("entities", []):
@@ -947,6 +1104,8 @@ def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
                     issues.append(f"{page['id']} spatial_contract panel {panel}: unknown entity {entity_id}.")
                 if "position" in state and vector2(state.get("position")) is None:
                     issues.append(f"{page['id']} spatial_contract panel {panel}: entity {entity_id} has invalid position.")
+                if "screen_box" in state and rect4(state.get("screen_box")) is None:
+                    issues.append(f"{page['id']} spatial_contract panel {panel}: entity {entity_id} has invalid screen_box.")
                 for field in ["facing_vector", "gaze_vector", "aim_vector", "trajectory_vector"]:
                     if field in state and vector2(state.get(field)) is None:
                         issues.append(f"{page['id']} spatial_contract panel {panel}: entity {entity_id} has invalid {field}.")
@@ -1038,8 +1197,29 @@ def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
                 cover = state_position(cover_state, issues, label)
                 actor = state_position(actor_state, issues, label)
                 threat = state_position(threat_state, issues, label)
-                tolerance_ratio = float(constraint.get("tolerance_ratio", 0.25))
-                cover_between_points(cover, actor, threat, issues, label, tolerance_ratio)
+                constraint_has_screen_box = "screen_box" in constraint
+                screen_box = rect4(spatial_constraint_value(constraint, "screen_box"))
+                if constraint_has_screen_box and screen_box is None:
+                    issues.append(f"{label}: invalid screen_box.")
+                elif screen_box is None and cover_state:
+                    screen_box = rect4(cover_state.get("screen_box"))
+                if screen_box is not None:
+                    cover_screen_box_between(screen_box, actor, threat, issues, label)
+                else:
+                    tolerance_ratio = float(constraint.get("tolerance_ratio", 0.25))
+                    cover_between_points(cover, actor, threat, issues, label, tolerance_ratio)
+            elif constraint_type in {"no_line_of_fire", "not_aims_at"}:
+                source_id = str(spatial_constraint_value(constraint, "source", "actor", "from", "entity") or "")
+                target_id = str(spatial_constraint_value(constraint, "target", "to") or "")
+                vector_entity_id = str(spatial_constraint_value(constraint, "weapon", "object", "vector_entity") or source_id)
+                source_state = snapshot_state(snapshots, panel, source_id, issues, label)
+                vector_state = snapshot_state(snapshots, panel, vector_entity_id, issues, label)
+                target_state = snapshot_state(snapshots, panel, target_id, issues, label)
+                origin = state_position(vector_state or source_state, issues, label)
+                target = state_position(target_state, issues, label)
+                actual = state_vector(vector_state or source_state, ["aim_vector", "facing_vector", "gaze_vector", "trajectory_vector"], [], label)
+                max_dot = float(constraint.get("max_dot", 0.2))
+                dot_exceeds_forbidden_direction(actual, origin, target, issues, label, max_dot)
             elif constraint_type in {"left_of", "right_of"}:
                 subject_id = str(spatial_constraint_value(constraint, "subject", "actor", "entity") or "")
                 anchor_id = str(spatial_constraint_value(constraint, "anchor", "target", "of") or "")
@@ -2703,6 +2883,61 @@ def spatial_entity_summary(entity: dict[str, Any]) -> str:
     return detail
 
 
+def constraint_prompt_guard_lines(constraint: dict[str, Any]) -> list[str]:
+    constraint_id = str(constraint.get("id") or "")
+    constraint_type = str(constraint.get("type") or "")
+    lines: list[str] = []
+    if constraint_type in {"behind_cover_from", "line_of_sight_blocked"} or constraint.get("viewpoint_entity"):
+        actor = str(spatial_constraint_value(constraint, "actor", "subject", "protected", "target") or "actor")
+        threat = str(spatial_constraint_value(constraint, "threat", "source", "from", "enemy") or "")
+        viewpoint = str(spatial_constraint_value(constraint, "viewpoint_entity", "viewpoint", "from_viewpoint") or threat or "threat")
+        cover = str(spatial_constraint_value(constraint, "cover", "blocker", "object") or "cover")
+        relation = "line of fire"
+        if constraint_type == "line_of_sight_blocked":
+            relation = "line of sight"
+        lines.append(
+            f"- cover viewpoint guard {constraint_id}: {actor} must be behind {cover} "
+            f"from {viewpoint}'s {relation} / threat viewpoint; reader POV is insufficient."
+        )
+        if constraint.get("allowed_exposure"):
+            lines.append(
+                f"- cover exposure guard {constraint_id}: "
+                f"allowed_exposure={format_spatial_value(constraint.get('allowed_exposure'))}."
+            )
+        if constraint.get("forbidden_exposure"):
+            lines.append(
+                f"- cover exposure guard {constraint_id}: "
+                f"forbidden_exposure={format_spatial_value(constraint.get('forbidden_exposure'))}; "
+                "reject the page if any forbidden exposure is visible."
+            )
+    if constraint_type == "no_line_of_fire":
+        source = str(spatial_constraint_value(constraint, "source", "actor", "from", "entity") or "source")
+        target = str(spatial_constraint_value(constraint, "target", "to") or "target")
+        lines.append(
+            f"- no-line guard {constraint_id}: {source} must not fire at {target}; "
+            "do not draw dashed/aim/pressure line, projectile, sight line, or firing vector "
+            f"from {source} to {target}. Use placement, occlusion, reaction, or cover silhouette instead."
+        )
+    if constraint_type == "not_aims_at":
+        actor = str(spatial_constraint_value(constraint, "actor", "source", "from", "entity") or "actor")
+        target = str(spatial_constraint_value(constraint, "target", "to") or "target")
+        lines.append(
+            f"- negative aim guard {constraint_id}: {actor} must not aim, gaze, or point a weapon/vector "
+            f"at {target}; reject target-facing vectors."
+        )
+    if constraint_type == "trajectory_to":
+        origin_entity = spatial_constraint_value(constraint, "origin_entity", "from_entity")
+        destination_entity = spatial_constraint_value(constraint, "destination_entity", "to_entity")
+        if origin_entity or destination_entity:
+            lines.append(
+                f"- trajectory endpoint guard {constraint_id}: "
+                f"origin_entity={format_spatial_value(origin_entity or 'unspecified')}, "
+                f"destination_entity={format_spatial_value(destination_entity or 'unspecified')}; "
+                "the path must visibly read from origin to destination."
+            )
+    return lines
+
+
 def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
     contract = page.get("spatial_contract", {})
     if not spatial_contract_has_content(contract):
@@ -2728,6 +2963,7 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
                 "trajectory_vector",
                 "pose",
                 "cover",
+                "screen_box",
                 "location_anchor",
                 "held_props",
                 "state_tags",
@@ -2750,6 +2986,7 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
             f"- constraint {constraint.get('id')} type={constraint.get('type')}: "
             + (", ".join(fields) if fields else "no extra fields")
         )
+        lines.extend(constraint_prompt_guard_lines(constraint))
     return "\n".join(lines)
 
 
@@ -3133,6 +3370,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
             "- Character/object positions, action direction, moving-object path, and cause-effect motion are physically plausible",
             "- Enforces every Structured spatial contract entity, panel snapshot, vector, visibility, occlusion, and constraint listed above as validation constraints unless they contradict the approved narrative/page design",
+            "- For behind_cover_from and line_of_sight_blocked, cover must read from the named threat/viewpoint line of fire or line of sight; reader-side behind is not sufficient",
+            "- Reject forbidden_exposure violations such as torso_visible, above_roofline, or open_field when listed; only allowed_exposure may peek past cover",
+            "- For no_line_of_fire and not_aims_at, reject firing vectors, dashed pressure/aim lines, projectiles, sight lines, gaze, or weapon direction that points from source/actor to target",
             "- Rejects target-opposite direction vectors, impossible moving-object paths, broken visibility/occlusion or line-of-sight blocking, fixed landmark relation drift, and temporal state drift without an allowed_transition cause",
             "- No impossible staging such as a moving object traveling away from its approved destination or implied path",
             "- Has no obvious anatomy, perspective, crop, object, or continuity defects",
@@ -3218,7 +3458,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint as a validation overlay, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint as a validation overlay, threat/viewpoint-based cover, forbidden_exposure, no_line_of_fire/not_aims_at negative constraints, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- description path when stage is storyboard_blocking",

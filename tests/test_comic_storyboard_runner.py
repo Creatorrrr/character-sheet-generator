@@ -390,6 +390,30 @@ def approve_finish_stage(root, run_dir, note="user approved finish"):
     )
 
 
+def approve_sketch_ink_stage(root, run_dir, note="user approved sketch/ink"):
+    state = json.loads((run_dir / "state.json").read_text())
+    gate = state["stage_gates"][f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}"]
+    if gate.get("status") == "approved":
+        return
+    feedback_request = feedback_request_for(run_dir, BLOCKING_STAGE, SKETCH_INK_STAGE)
+    return run_cli(
+        "approve-next-stage",
+        "--run-dir",
+        str(run_dir),
+        "--from-stage",
+        BLOCKING_STAGE,
+        "--to-stage",
+        SKETCH_INK_STAGE,
+        "--feedback-request",
+        str(feedback_request),
+        "--feedback-choice",
+        "approve_sketch_ink",
+        "--note",
+        note,
+        cwd=root,
+    )
+
+
 def feedback_request_for(run_dir, from_stage=SKETCH_INK_STAGE, to_stage=FINISH_STAGE):
     state = json.loads((run_dir / "state.json").read_text())
     gate = state["stage_gates"][f"{from_stage}_to_{to_stage}"]
@@ -415,7 +439,9 @@ def ensure_stage_review_passed(root, run_dir, stage_id, note="stage review pass"
     if stage_is_complete(state, stage_id):
         return
     if stage_id == SKETCH_INK_STAGE:
-        ensure_stage_review_passed(root, run_dir, BLOCKING_STAGE, note="blocking continuity pass")
+        if BLOCKING_STAGE in state.get("target_stages", []):
+            ensure_stage_review_passed(root, run_dir, BLOCKING_STAGE, note="blocking continuity pass")
+            approve_sketch_ink_stage(root, run_dir)
     generated = generate_file(root, name=f"{stage_id}-generated.png", data=f"{stage_id} generated".encode())
     while True:
         state = json.loads((run_dir / "state.json").read_text())
@@ -520,6 +546,8 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
             self.assertEqual(state["stage_reviews"][SKETCH_INK_STAGE]["status"], "pending")
             self.assertEqual(state["stage_reviews"][FINISH_STAGE]["status"], "pending")
+            self.assertEqual(state["stage_gates"][f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}"]["status"], "pending")
+            self.assertEqual(state["stage_gates"][f"{SKETCH_INK_STAGE}_to_{FINISH_STAGE}"]["status"], "pending")
 
     def test_approve_plan_normalizes_pages_and_nested_panels(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -552,6 +580,10 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(set(first["stages"].keys()), set(STAGE_ORDER))
             self.assertEqual(first["stages"][FIRST_STAGE]["status"], "pending")
             self.assertEqual(set(state["stage_reviews"].keys()), set(STAGE_ORDER))
+            self.assertEqual(
+                set(state["stage_gates"].keys()),
+                {f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}", f"{SKETCH_INK_STAGE}_to_{FINISH_STAGE}"},
+            )
             self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
             self.assertTrue((run_dir / "approved_storyboard_plan.json").exists())
             self.assertTrue((run_dir / "batch_plan.md").exists())
@@ -1242,6 +1274,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("description path when stage is storyboard_blocking", storyboard_subagent)
 
             ensure_stage_review_passed(root, run_dir, BLOCKING_STAGE, note="blocking pass")
+            approve_sketch_ink_stage(root, run_dir)
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             state = json.loads((run_dir / "state.json").read_text())
             sketch_stage = state["pages"][0]["stages"][SKETCH_INK_STAGE]
@@ -1429,6 +1462,12 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "source consistency and panel continuity pass",
                 cwd=root,
             )
+            gate_blocked = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            self.assertIn("USER_FEEDBACK_REQUIRED: storyboard_blocking -> storyboard_sketch_ink", gate_blocked.stdout)
+            self.assertIn("FEEDBACK_CHOICES: approve_sketch_ink | open_overlay_ui | stop_after_stage", gate_blocked.stdout)
+            self.assertNotIn("BATCH_ID:", gate_blocked.stdout)
+
+            approve_sketch_ink_stage(root, run_dir)
             sketch = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
             self.assertIn(f"STAGE: {SKETCH_INK_STAGE}", sketch.stdout)
             self.assertIn("ITEM: 001-page-1.png", sketch.stdout)
@@ -1442,6 +1481,73 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             finish = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
             self.assertIn(f"STAGE: {FINISH_STAGE}", finish.stdout)
             self.assertEqual(finish.stdout.count("ITEM: "), 4)
+
+    def test_blocking_stage_review_creates_feedback_request_and_blocks_sketch_until_approved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                BLOCKING_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                BLOCKING_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            review = run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                BLOCKING_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "blocking spatial and temporal continuity pass",
+                cwd=root,
+            )
+
+            self.assertIn("USER_FEEDBACK_REQUIRED: storyboard_blocking -> storyboard_sketch_ink", review.stdout)
+            feedback_request = feedback_request_for(run_dir, BLOCKING_STAGE, SKETCH_INK_STAGE)
+            self.assertTrue(feedback_request.exists())
+            request = json.loads(feedback_request.read_text(encoding="utf-8"))
+            self.assertEqual(request["from_stage"], BLOCKING_STAGE)
+            self.assertEqual(request["to_stage"], SKETCH_INK_STAGE)
+            self.assertEqual(request["choices"][0]["id"], "approve_sketch_ink")
+
+            blocked = run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn("USER_FEEDBACK_REQUIRED: storyboard_blocking -> storyboard_sketch_ink", blocked.stdout)
+            self.assertIn("FEEDBACK_CHOICES: approve_sketch_ink | open_overlay_ui | stop_after_stage", blocked.stdout)
+            self.assertNotIn("BATCH_ID:", blocked.stdout)
+
+            approve_sketch_ink_stage(root, run_dir)
+            sketch = run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn(f"STAGE: {SKETCH_INK_STAGE}", sketch.stdout)
+            self.assertIn("001-page-1.png", sketch.stdout)
 
     def test_stage_review_pass_creates_feedback_request_and_note_only_approval_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1491,6 +1597,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "first stage continuity pass",
                 cwd=root,
             )
+            approve_sketch_ink_stage(root, run_dir)
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             run_cli(
                 "import",
@@ -1797,8 +1904,9 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("TARGET_STAGES: storyboard_blocking", status.stdout)
             self.assertIn("COMPLETE: true", status.stdout)
             state = json.loads((run_dir / "state.json").read_text())
-            gate = state["stage_gates"][f"{SKETCH_INK_STAGE}_to_{FINISH_STAGE}"]
-            self.assertEqual(gate["status"], "pending")
+            gate = state["stage_gates"][f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}"]
+            self.assertEqual(gate["status"], "stopped")
+            self.assertEqual(gate["feedback_choice"], "stop_after_stage")
 
     def test_finish_prompt_uses_first_stage_image_as_required_input(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2076,6 +2184,9 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(stage["status"], "pending")
             self.assertTrue(stage["rerun_pending"])
             self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
+            self.assertEqual(state["stage_gates"][f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}"]["status"], "pending")
+            self.assertEqual(state["stage_gates"][f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}"]["feedback_request"], "")
+            self.assertEqual(state["stage_gates"][f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}"]["feedback_choice"], "")
             self.assertEqual(state["stage_gates"][f"{SKETCH_INK_STAGE}_to_{FINISH_STAGE}"]["status"], "pending")
             self.assertEqual(state["stage_gates"][f"{SKETCH_INK_STAGE}_to_{FINISH_STAGE}"]["feedback_request"], "")
             self.assertEqual(state["stage_gates"][f"{SKETCH_INK_STAGE}_to_{FINISH_STAGE}"]["feedback_choice"], "")

@@ -54,14 +54,34 @@ STAGE_SKILL_NAMES = {
     FINISH_STAGE: "create-comic-storyboard-finish",
 }
 STAGE_GATE_STATUSES = {"pending", "pending_user_feedback", "approved", "stopped"}
+FEEDBACK_CHOICE_APPROVE_SKETCH_INK = "approve_sketch_ink"
 FEEDBACK_CHOICE_APPROVE_FINISH = "approve_finish"
 FEEDBACK_CHOICE_OPEN_OVERLAY_UI = "open_overlay_ui"
 FEEDBACK_CHOICE_STOP_AFTER_STAGE = "stop_after_stage"
 FEEDBACK_CHOICES = {
+    FEEDBACK_CHOICE_APPROVE_SKETCH_INK,
     FEEDBACK_CHOICE_APPROVE_FINISH,
     FEEDBACK_CHOICE_OPEN_OVERLAY_UI,
     FEEDBACK_CHOICE_STOP_AFTER_STAGE,
 }
+TRANSITIONS = [
+    {
+        "from_stage": STORYBOARD_BLOCKING_STAGE,
+        "to_stage": STORYBOARD_SKETCH_INK_STAGE,
+        "approve_choice": FEEDBACK_CHOICE_APPROVE_SKETCH_INK,
+        "approve_label": "Approve sketch/ink stage",
+        "approve_note_placeholder": "<user approved sketch/ink>",
+        "pending_note": "storyboard_blocking stage-review passed; user feedback is required before sketch/ink.",
+    },
+    {
+        "from_stage": STORYBOARD_SKETCH_INK_STAGE,
+        "to_stage": FINISH_STAGE,
+        "approve_choice": FEEDBACK_CHOICE_APPROVE_FINISH,
+        "approve_label": "Approve finish stage",
+        "approve_note_placeholder": "<user approved finish>",
+        "pending_note": "storyboard_sketch_ink stage-review passed; user feedback is required before finish.",
+    },
+]
 PASS_STATUSES = {"inspected_pass", "complete"}
 CURRENT_STATUSES = {"generation_requested", "imported"}
 VALID_STATUSES = {"pending", "generation_requested", "imported", "inspected_pass", "complete"}
@@ -1092,6 +1112,46 @@ def stage_gate_key(from_stage: str, to_stage: str) -> str:
     return f"{from_stage}_to_{to_stage}"
 
 
+def stage_transition(from_stage: str, to_stage: str) -> dict[str, Any] | None:
+    for transition in TRANSITIONS:
+        if transition["from_stage"] == from_stage and transition["to_stage"] == to_stage:
+            return transition
+    return None
+
+
+def transition_after_stage(stage_id: str) -> dict[str, Any] | None:
+    for transition in TRANSITIONS:
+        if transition["from_stage"] == stage_id:
+            return transition
+    return None
+
+
+def transition_before_stage(stage_id: str) -> dict[str, Any] | None:
+    for transition in TRANSITIONS:
+        if transition["to_stage"] == stage_id:
+            return transition
+    return None
+
+
+def transition_gate_key(transition: dict[str, Any]) -> str:
+    return stage_gate_key(transition["from_stage"], transition["to_stage"])
+
+
+def transition_feedback_choices_text(transition: dict[str, Any]) -> str:
+    return f"{transition['approve_choice']} | {FEEDBACK_CHOICE_OPEN_OVERLAY_UI} | {FEEDBACK_CHOICE_STOP_AFTER_STAGE}"
+
+
+def transition_required_before_stage(state: dict[str, Any], stage_id: str) -> dict[str, Any] | None:
+    transition = transition_before_stage(stage_id)
+    if transition is None:
+        return None
+    if transition["from_stage"] in target_stages(state):
+        return transition
+    if stage_id == FINISH_STAGE:
+        return transition
+    return None
+
+
 def blank_stage_gate() -> dict[str, Any]:
     return {
         "status": "pending",
@@ -1105,7 +1165,7 @@ def blank_stage_gate() -> dict[str, Any]:
 
 
 def build_stage_gates() -> dict[str, dict[str, Any]]:
-    return {stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE): blank_stage_gate()}
+    return {transition_gate_key(transition): blank_stage_gate() for transition in TRANSITIONS}
 
 
 def normalize_stage_gates(state: dict[str, Any]) -> None:
@@ -1452,11 +1512,11 @@ def reset_stage_review(state: dict[str, Any], stage_id: str, note: str) -> None:
 
 
 def reset_following_stage_gates(state: dict[str, Any], stage_id: str, note: str) -> None:
-    if stage_id in {STORYBOARD_BLOCKING_STAGE, STORYBOARD_SKETCH_INK_STAGE}:
-        gate = state.setdefault("stage_gates", {}).setdefault(
-            stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE),
-            blank_stage_gate(),
-        )
+    stage_index = STAGE_IDS.index(stage_id)
+    for transition in TRANSITIONS:
+        if STAGE_IDS.index(transition["from_stage"]) < stage_index:
+            continue
+        gate = state.setdefault("stage_gates", {}).setdefault(transition_gate_key(transition), blank_stage_gate())
         gate["status"] = "pending"
         gate["note"] = note
         gate["updated_at"] = now_iso()
@@ -1507,6 +1567,9 @@ def build_feedback_request(
     created_at: str,
 ) -> dict[str, Any]:
     gate_key = stage_gate_key(from_stage, to_stage)
+    transition = stage_transition(from_stage, to_stage)
+    if transition is None:
+        raise SystemExit(f"Unsupported stage transition: {from_stage} -> {to_stage}")
     review = state.get("stage_reviews", {}).get(from_stage, blank_stage_review())
     return {
         "workflow": WORKFLOW,
@@ -1525,13 +1588,13 @@ def build_feedback_request(
         "outputs": transition_feedback_outputs(state, run_dir, from_stage),
         "choices": [
             {
-                "id": FEEDBACK_CHOICE_APPROVE_FINISH,
-                "label": "Approve finish stage",
+                "id": transition["approve_choice"],
+                "label": transition["approve_label"],
                 "next_command": (
                     "comic_storyboard_runner.py approve-next-stage "
                     f"--run-dir {run_dir} --from-stage {from_stage} --to-stage {to_stage} "
                     f"--feedback-request {feedback_request_path(run_dir, from_stage, to_stage)} "
-                    f"--feedback-choice {FEEDBACK_CHOICE_APPROVE_FINISH} --note \"<user approved finish>\""
+                    f"--feedback-choice {transition['approve_choice']} --note \"{transition['approve_note_placeholder']}\""
                 ),
             },
             {
@@ -1547,7 +1610,7 @@ def build_feedback_request(
                 "label": "Stop after current stage",
                 "next_command": (
                     "comic_storyboard_runner.py stop-after-stage "
-                    f"--run-dir {run_dir} --stage {from_stage} --note \"<user stops before finish>\""
+                    f"--run-dir {run_dir} --stage {from_stage} --note \"<user stops after {from_stage}>\""
                 ),
             },
         ],
@@ -1569,7 +1632,7 @@ def feedback_request_markdown(request: dict[str, Any]) -> str:
         f"- note: {request.get('stage_review', {}).get('note', '')}",
         f"- issues: {'; '.join(as_list(request.get('stage_review', {}).get('issues'))) or 'none'}",
         "",
-        "First-stage outputs:",
+        "Stage outputs:",
     ]
     for output in outputs:
         lines.append(f"- {output.get('filename', '')}: {output.get('output_path', '')}")
@@ -1634,8 +1697,12 @@ def assert_valid_feedback_approval(
     run_dir: Path,
     gate: dict[str, Any],
 ) -> Path:
-    if args.feedback_choice != FEEDBACK_CHOICE_APPROVE_FINISH:
-        raise SystemExit("approve-next-stage requires --feedback-choice approve_finish.")
+    transition = stage_transition(args.from_stage, args.to_stage)
+    if transition is None:
+        raise SystemExit(f"Unsupported stage transition: {args.from_stage} -> {args.to_stage}")
+    approve_choice = transition["approve_choice"]
+    if args.feedback_choice != approve_choice:
+        raise SystemExit(f"approve-next-stage requires --feedback-choice {approve_choice}.")
     if gate.get("status") != "pending_user_feedback":
         raise SystemExit(
             "approve-next-stage requires the stage gate to be pending_user_feedback. "
@@ -1659,8 +1726,8 @@ def assert_valid_feedback_approval(
     if expected_created_at and request.get("created_at") != expected_created_at:
         raise SystemExit("Invalid feedback request: created_at does not match the active stage gate request.")
     choices = {choice.get("id") for choice in request.get("choices", [])}
-    if FEEDBACK_CHOICE_APPROVE_FINISH not in choices:
-        raise SystemExit("Invalid feedback request: approve_finish choice is missing.")
+    if approve_choice not in choices:
+        raise SystemExit(f"Invalid feedback request: {approve_choice} choice is missing.")
     return request_path
 
 
@@ -2714,31 +2781,30 @@ def command_next_batch(args: argparse.Namespace) -> None:
     limit = min(max(args.limit, 1), 4)
     selected = candidates[:limit]
     assert_required_prior_stage_outputs_exist(state, run_dir, selected, stage_id)
-    if stage_id == FINISH_STAGE and not transition_gate_allows(state, STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE):
-        gate = state.get("stage_gates", {}).get(
-            stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE),
-            blank_stage_gate(),
-        )
+    required_transition = transition_required_before_stage(state, stage_id)
+    if required_transition and not transition_gate_allows(
+        state,
+        required_transition["from_stage"],
+        required_transition["to_stage"],
+    ):
+        gate = state.get("stage_gates", {}).get(transition_gate_key(required_transition), blank_stage_gate())
         request_path = gate.get("feedback_request", "")
         if gate.get("status") == "pending":
             written_request_path = mark_transition_waiting_for_feedback(
                 state,
                 run_dir,
-                STORYBOARD_SKETCH_INK_STAGE,
-                FINISH_STAGE,
-                "storyboard_sketch_ink passed; user feedback is required before finish.",
+                required_transition["from_stage"],
+                required_transition["to_stage"],
+                required_transition["pending_note"],
             )
             write_batch_plan(run_dir, state)
             save_state(run_dir, state)
-            gate = state.get("stage_gates", {}).get(
-                stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE),
-                blank_stage_gate(),
-            )
+            gate = state.get("stage_gates", {}).get(transition_gate_key(required_transition), blank_stage_gate())
             request_path = str(written_request_path or gate.get("feedback_request", ""))
-        print("USER_FEEDBACK_REQUIRED: storyboard_sketch_ink -> finish")
+        print(f"USER_FEEDBACK_REQUIRED: {required_transition['from_stage']} -> {required_transition['to_stage']}")
         print(f"GATE_STATUS: {gate.get('status', 'pending_user_feedback')}")
         print(f"FEEDBACK_REQUEST: {request_path or gate.get('feedback_request', '')}")
-        print("FEEDBACK_CHOICES: approve_finish | open_overlay_ui | stop_after_stage")
+        print(f"FEEDBACK_CHOICES: {transition_feedback_choices_text(required_transition)}")
         command_status(args)
         return
     batch_id = f"batch-{len(state.get('batches', [])) + 1:03d}"
@@ -3014,6 +3080,7 @@ def command_stage_review(args: argparse.Namespace) -> None:
     issues = as_list(args.issue)
     rerun_items = as_list(args.rerun_item)
     feedback_request = None
+    transition = None
 
     if args.status == "pass":
         if rerun_items:
@@ -3022,13 +3089,14 @@ def command_stage_review(args: argparse.Namespace) -> None:
         review["note"] = args.note
         review["issues"] = issues
         review["reviewed_at"] = now_iso()
-        if stage_id == STORYBOARD_SKETCH_INK_STAGE:
+        transition = transition_after_stage(stage_id)
+        if transition and transition["to_stage"] in target_stages(state):
             feedback_request = mark_transition_waiting_for_feedback(
                 state,
                 run_dir,
-                STORYBOARD_SKETCH_INK_STAGE,
-                FINISH_STAGE,
-                "storyboard_sketch_ink stage-review passed; user feedback is required before finish.",
+                transition["from_stage"],
+                transition["to_stage"],
+                transition["pending_note"],
             )
     elif args.status == "needs_rerun":
         if not rerun_items:
@@ -3051,10 +3119,10 @@ def command_stage_review(args: argparse.Namespace) -> None:
     save_state(run_dir, state)
     print(f"STAGE_REVIEW: {stage_id}")
     print(f"STATUS: {review['status']}")
-    if feedback_request:
-        print(f"USER_FEEDBACK_REQUIRED: {STORYBOARD_SKETCH_INK_STAGE} -> {FINISH_STAGE}")
+    if feedback_request and transition:
+        print(f"USER_FEEDBACK_REQUIRED: {transition['from_stage']} -> {transition['to_stage']}")
         print(f"FEEDBACK_REQUEST: {feedback_request}")
-        print("FEEDBACK_CHOICES: approve_finish | open_overlay_ui | stop_after_stage")
+        print(f"FEEDBACK_CHOICES: {transition_feedback_choices_text(transition)}")
     if rerun_items:
         for item in rerun_items:
             print(f"RERUN_ITEM: {item}")
@@ -3096,11 +3164,9 @@ def command_stop_after_stage(args: argparse.Namespace) -> None:
         raise SystemExit(f"Cannot stop after {args.stage} until that stage is complete.")
     stop_index = STAGE_IDS.index(args.stage)
     state["target_stages"] = STAGE_IDS[: stop_index + 1]
-    if args.stage == STORYBOARD_SKETCH_INK_STAGE:
-        gate = state.setdefault("stage_gates", {}).setdefault(
-            stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE),
-            blank_stage_gate(),
-        )
+    transition = transition_after_stage(args.stage)
+    if transition:
+        gate = state.setdefault("stage_gates", {}).setdefault(transition_gate_key(transition), blank_stage_gate())
         gate["status"] = "stopped"
         gate["note"] = args.note
         gate["updated_at"] = now_iso()
@@ -3275,7 +3341,11 @@ def build_parser() -> argparse.ArgumentParser:
     approve_next.add_argument("--from-stage", choices=STAGE_IDS, required=True)
     approve_next.add_argument("--to-stage", choices=STAGE_IDS, required=True)
     approve_next.add_argument("--feedback-request", required=True)
-    approve_next.add_argument("--feedback-choice", choices=[FEEDBACK_CHOICE_APPROVE_FINISH], required=True)
+    approve_next.add_argument(
+        "--feedback-choice",
+        choices=[transition["approve_choice"] for transition in TRANSITIONS],
+        required=True,
+    )
     approve_next.add_argument("--note", required=True)
     approve_next.set_defaults(func=command_approve_next_stage)
 

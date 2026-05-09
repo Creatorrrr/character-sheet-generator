@@ -84,11 +84,14 @@ Use this format:
 - 1단계 이미지는 동그라미/네모/세모/선/화살표/실루엣/그림자만 사용하고, 같은 이름의 `<page_stem>_desc.md`를 반드시 작성
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
-- 1단계 stage-review 통과 후 2단계: 스케치/펜선 storyboard_sketch_ink
+- 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json`과 1단계 산출물을 사용자에게 보고하고, sketch/ink 진행 여부를 반드시 별도로 확인
+- blocking 사용자 피드백 게이트 선택지: 그대로 sketch/ink 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_sketch_ink`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
+- approve-next-stage 전에는 storyboard_sketch_ink 예약 금지. `stage-review`, `approve-next-stage`, sketch/ink `next-batch`를 같은 병렬 실행이나 같은 사용자 응답 없이 연속 실행하지 않는다.
+- 사용자가 승인하면 2단계: 스케치/펜선 storyboard_sketch_ink
 - 2단계는 $create-comic-storyboard-sketch-ink subagent가 parent-inspected blocking 이미지와 `*_desc.md`를 필수 입력으로 사용
 - 2단계 모든 페이지 부모 검수와 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_sketch_ink_to_finish.json`과 2단계 산출물을 사용자에게 보고하고, finish 진행 여부를 반드시 별도로 확인
-- 처음 페이지 계획 승인과 2단계 이후 finish 승인은 별개의 승인이다. 초기 "승인"을 finish 진행 승인으로 재사용하지 않는다.
-- 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_finish`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
+- 처음 페이지 계획 승인, blocking 이후 sketch/ink 승인, 2단계 이후 finish 승인은 모두 별개의 승인이다. 초기 "승인"이나 blocking 승인을 다음 단계 승인으로 재사용하지 않는다.
+- sketch/ink 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_finish`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
 - approve-next-stage 전에는 finish 예약 금지. `stage-review`, `approve-next-stage`, finish `next-batch`를 같은 병렬 실행이나 같은 사용자 응답 없이 연속 실행하지 않는다.
 - 사용자가 중단하면 stop-after-stage로 스케치/펜선 산출물까지만 완료 처리
 - 사용자 또는 에이전트가 수정을 요청하면 `$review-image-overlays`로 색상별 오버레이 PNG/TXT와 `revision_requests.json`을 저장하고, `request-revisions`로 해당 페이지를 rerun 처리
@@ -282,10 +285,46 @@ After every page in `storyboard_blocking` passes parent inspection:
 
 ```bash
 python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_blocking --status pass --note "<blocking spatial/temporal continuity pass>"
+```
+
+This sets `stage_gates.storyboard_blocking_to_storyboard_sketch_ink.status` to `pending_user_feedback` and writes:
+
+```text
+<run-dir>/feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json
+<run-dir>/feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.md
+```
+
+At that point report the blocking-stage image/desc outputs and the feedback request path to the user, then wait for the user's explicit next-stage choice. Do not reserve sketch/ink with `next-batch` until `approve-next-stage` has consumed the runner-generated feedback request.
+
+Offer exactly these feedback choices:
+
+- Approve next stage: continue to `storyboard_sketch_ink` with `approve-next-stage --feedback-request <json> --feedback-choice approve_sketch_ink`.
+- Open revision UI or create agent markup: use `$review-image-overlays` against `--stage storyboard_blocking` to collect color-coded overlay requests.
+- Stop after stage: keep only `storyboard_blocking` with `stop-after-stage`.
+
+If the user approves sketch/ink:
+
+```bash
+python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_blocking --to-stage storyboard_sketch_ink --feedback-request <run-dir>/feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json --feedback-choice approve_sketch_ink --note "<user approved sketch/ink>"
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 ```
 
-The next batch is `storyboard_sketch_ink`. Import/inspect it the same way, except no `--description` is used:
+If the user wants the blocking revision UI:
+
+```bash
+REVIEW_SKILL_DIR=".agents/skills/review-image-overlays"
+REVIEW_RUNNER="$REVIEW_SKILL_DIR/scripts/review_overlay_server.py"
+python3 "$REVIEW_RUNNER" serve --run-dir <run-dir> --stage storyboard_blocking
+```
+
+Import blocking revision overlays the same way as later stages:
+
+```bash
+python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_blocking/<review-id>/revision_requests.json
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+```
+
+The approved next batch is `storyboard_sketch_ink`. Import/inspect it the same way, except no `--description` is used:
 
 ```bash
 python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
@@ -368,6 +407,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 - `target_stages` defaults to `["storyboard_blocking", "storyboard_sketch_ink", "finish"]`.
 - Existing already-approved legacy states keep their recorded `target_stages`; they are not force-migrated into blocking.
 - `storyboard_blocking` must finish parent inspection and stage-review before default `storyboard_sketch_ink` reservation.
+- `storyboard_sketch_ink` also requires `approve-next-stage` with the active runner-generated `storyboard_blocking_to_storyboard_sketch_ink` feedback request and `--feedback-choice approve_sketch_ink`; blocking stage-review pass alone is not enough.
 - `storyboard_blocking` imports require `--description <desc.md>`, and the runner validates required headings plus all active entity/constraint ids.
 - `storyboard_sketch_ink` must finish parent inspection and stage-review before `finish`.
 - `finish` also requires `approve-next-stage` with the active runner-generated feedback request and `--feedback-choice approve_finish`; stage-review pass or parent-only note is not enough.
@@ -420,8 +460,8 @@ After each batch or gate, report in Korean:
 - 이미지 내 문자 방지 검수: ...
 - 공간/동선/상태유지 검수: ...
 - 단계 마무리 검수 결과: ...
-- 다음 단계 사용자 피드백 게이트: pending_user_feedback | approved | stopped
-- 피드백 요청 파일: <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json
+- 다음 단계 사용자 피드백 게이트: storyboard_blocking_to_storyboard_sketch_ink 또는 storyboard_sketch_ink_to_finish = pending_user_feedback | approved | stopped
+- 피드백 요청 파일: <run-dir>/feedback_requests/<from_stage>_to_<to_stage>.json
 - 보완 대상 페이지: ...
-- 다음 결정: approve-next-stage --feedback-request ... --feedback-choice approve_finish로 finish 진행 | $review-image-overlays로 수정 UI 열기/에이전트 마킹 생성 | stop-after-stage로 종료
+- 다음 결정: approve-next-stage --feedback-request ... --feedback-choice approve_sketch_ink 또는 approve_finish로 다음 단계 진행 | $review-image-overlays로 수정 UI 열기/에이전트 마킹 생성 | stop-after-stage로 종료
 ```

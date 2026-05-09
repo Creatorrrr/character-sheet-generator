@@ -48,7 +48,7 @@ Write the Markdown description file exactly at the assigned description path. It
 ## Temporal Continuity Check
 ```
 
-The description must mention every active `spatial_contract.entities[].id` and every named constraint id. Use plain text to explain each symbol's meaning, each panel's spatial map, every constraint result, and temporal continuity status.
+Keep the required heading text exactly as shown above. Write all body text under those headings in Korean, while preserving every entity id and constraint id verbatim. The description must mention every active `spatial_contract.entities[].id` and every named constraint id. Use plain Korean text to explain each symbol's meaning, each panel's spatial map, every constraint result, and temporal continuity status.
 
 ## Worker Inspection
 

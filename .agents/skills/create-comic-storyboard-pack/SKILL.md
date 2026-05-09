@@ -81,7 +81,7 @@ Use this format:
 승인 후 진행 방식:
 - 1단계: 공간 검증용 콘티 storyboard_blocking
 - 각 페이지는 $create-comic-storyboard-blocking subagent가 생성/1차 검수
-- 1단계 이미지는 동그라미/네모/세모/선/화살표/실루엣/그림자만 사용하고, 같은 이름의 `<page_stem>_desc.md`를 반드시 작성
+- 1단계 이미지는 동그라미/네모/세모/선/화살표/실루엣/그림자만 사용하고, 같은 이름의 `<page_stem>_desc.md`를 반드시 작성. `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
 - 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json`과 1단계 산출물을 사용자에게 보고하고, sketch/ink 진행 여부를 반드시 별도로 확인
@@ -408,7 +408,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 - Existing already-approved legacy states keep their recorded `target_stages`; they are not force-migrated into blocking.
 - `storyboard_blocking` must finish parent inspection and stage-review before default `storyboard_sketch_ink` reservation.
 - `storyboard_sketch_ink` also requires `approve-next-stage` with the active runner-generated `storyboard_blocking_to_storyboard_sketch_ink` feedback request and `--feedback-choice approve_sketch_ink`; blocking stage-review pass alone is not enough.
-- `storyboard_blocking` imports require `--description <desc.md>`, and the runner validates required headings plus all active entity/constraint ids.
+- `storyboard_blocking` imports require `--description <desc.md>`, and the runner validates required headings plus all active entity/constraint ids. Required heading text stays fixed, but the description body must be written in Korean.
 - `storyboard_sketch_ink` must finish parent inspection and stage-review before `finish`.
 - `finish` also requires `approve-next-stage` with the active runner-generated feedback request and `--feedback-choice approve_finish`; stage-review pass or parent-only note is not enough.
 - `stop-after-stage` changes the completion target to the requested completed stage.
@@ -427,7 +427,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 
 Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, structured `spatial_contract` compliance, temporal continuity, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
 
-For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, missing entity ids, missing constraint ids, detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
+For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
 
 When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, temporal state field, and constraint. Reject target-opposite aim vectors, projectile paths that do not move toward the target, cover that is not between actor and threat, exposed characters that were specified as hidden behind cover, broken line-of-sight blocking, left/right relation flips, fixed landmark relation drift, low cover turning into a building wall without cause, and pose/cover/location/held-prop/state-tag drift without an `allowed_transition`. Record the result with `--spatial-verdict` and `--spatial-note`.
 

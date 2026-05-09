@@ -1772,7 +1772,8 @@ def stage_instruction(stage_id: str) -> str:
             "tone/color, or final art. The image should make entity positions, facing, gaze/aim/trajectory "
             "vectors, cover, occlusion, visibility, and panel-to-panel state continuity easy to inspect. "
             "Also write the required *_desc.md beside the image with symbol legend, panel spatial map, "
-            "constraint check, and temporal continuity check sections."
+            "constraint check, and temporal continuity check sections. Keep the required section headings "
+            "exactly as specified, but write the description body text in Korean."
         )
     if stage_id == STORYBOARD_SKETCH_INK_STAGE:
         return (
@@ -2081,7 +2082,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     if stage_id == STORYBOARD_BLOCKING_STAGE:
         prior_stage_use_requirement = (
             "No prior-stage image is used for storyboard_blocking. Generate an abstract text-free spatial "
-            "blocking image from the approved plan and write the required *_desc.md beside it."
+            "blocking image from the approved plan and write the required *_desc.md beside it. "
+            "Keep required headings exactly as specified, but write the description body text in Korean."
         )
         page_format_instruction = (
             "Generate one complete abstract comic-page blocking image with the approved panel count and reading order. "
@@ -2227,7 +2229,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Worker inspection checklist:",
             "- Matches this exact page and stage",
             "- For storyboard_blocking, uses only simplified symbols, silhouettes, shadows, arrows, and relation lines; rejects detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
-            "- For storyboard_blocking, writes the required *_desc.md with Symbol Legend, Panel Spatial Map, Constraint Check, and Temporal Continuity Check sections",
+            "- For storyboard_blocking, writes the required *_desc.md with Symbol Legend, Panel Spatial Map, Constraint Check, and Temporal Continuity Check sections; heading text stays exact, and body explanation is Korean",
             "- For storyboard_sketch_ink, uses the parent-inspected storyboard_blocking image and *_desc.md as required spatial/temporal references",
             "- For finish, preserves the inspected sketch/ink image while still respecting the blocking *_desc.md spatial/temporal locks",
             "- Uses 3-5 panels by default with measured cinematic pacing",
@@ -2319,7 +2321,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. For storyboard_blocking, use image_gen exactly once and write the *_desc.md beside the image. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. For storyboard_blocking, use image_gen exactly once and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- description path when stage is storyboard_blocking",

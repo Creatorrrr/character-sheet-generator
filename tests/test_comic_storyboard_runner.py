@@ -982,6 +982,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
 
             self.assertIn("one complete abstract comic-page blocking image", prompt)
             self.assertIn("Assigned blocking description:", prompt)
+            self.assertIn("write the description body text in Korean", prompt)
             self.assertIn("Use only circles, squares, triangles, lines, arrows, silhouettes, shadows", prompt)
             self.assertIn("Semantic labels belong only in the *_desc.md", prompt)
             self.assertIn("measured cinematic pacing", prompt)
@@ -1271,6 +1272,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Stage: storyboard_blocking", storyboard_subagent)
             self.assertIn("Assigned description path:", storyboard_subagent)
             self.assertIn("image_gen exactly once", storyboard_subagent)
+            self.assertIn("write the description body text in Korean", storyboard_subagent)
             self.assertIn("description path when stage is storyboard_blocking", storyboard_subagent)
 
             ensure_stage_review_passed(root, run_dir, BLOCKING_STAGE, note="blocking pass")

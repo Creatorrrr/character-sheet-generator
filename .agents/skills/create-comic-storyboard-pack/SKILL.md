@@ -21,7 +21,7 @@ Use Codex built-in `image_gen` only through one subagent per reserved page. Do n
 
 If the user does not specify a save folder, create `output/<slug>-comic-storyboard-pack-YYYYMMDD-HHMMSS/` under `/Users/chasoik/Projects/character-sheet-generator/output/`.
 
-Save `scenario.md`, `state.json`, `approved_storyboard_plan.json`, `batch_plan.md`, prompt files, subagent prompt files, generated stage images, blocking `*_desc.md` files, worker notes, parent inspection notes, and stage-review state under that run folder.
+Save `scenario.md`, `state.json`, `proposed_storyboard_plan.json`, `approved_storyboard_plan.json`, proposed/approved spatial-preview HTML files, `batch_plan.md`, prompt files, subagent prompt files, generated stage images, blocking `*_desc.md` files, worker notes, parent inspection notes, and stage-review state under that run folder.
 
 If the user does not specify source/reference paths, use `/Users/chasoik/Projects/character-sheet-generator/sources/`. Do not use `/Users/chasoik/Projects/character-sheet-generator/output/` or any `output/` subtree as source/reference data. Current-run generated images may be used only as prior-stage workflow references after parent inspection.
 
@@ -67,6 +67,8 @@ Record original lines as `source_dialogue` and comic lines as `adapted_dialogue`
 
 Before generation, present the proposed page list in Korean and wait for explicit approval.
 
+After drafting the proposed page plan and before presenting the approval request, save it as `<run-dir>/proposed_storyboard_plan.json`. If any page has `spatial_contract`, run `spatial-preview` against that proposed plan and include the generated HTML path plus `SPATIAL_CHECK` status and issue count in the approval request. If `spatial-preview` reports `SPATIAL_CHECK: fail`, revise the plan until the issues are resolved before asking for generation approval, unless the user explicitly asked to inspect a failing draft. If no page has structured `spatial_contract`, state that no spatial-preview HTML was generated.
+
 Use this format:
 
 ```text
@@ -84,6 +86,8 @@ Use this format:
 - 이미지 내 문자 방지 조건(visual_text_guard): ...
 - 페이지/컷 구성 원칙: 먼저 시나리오, 감정선, 액션 리듬, 독자 시선, 컷 밀도, 여백, 디테일/강약/효과선 중심으로 만화 페이지를 설계함
 - 구조화 공간/시간 계약(spatial_contract): 페이지 구성 이후 추출하는 검수 레이어. 방향/시선/이동체 경로/가림 요소/랜드마크/상태 유지 관계가 중요한 컷은 승인 전 벡터, 관계, 시간적 상태 검증을 통과해야 하지만, spatial_contract가 컷 설계의 목적이 되어서는 안 됨
+- 승인 전 공간 검수 미리보기(spatial-preview HTML): <run-dir>/proposed_storyboard_plan_spatial_preview.html | 구조화 spatial_contract 없음
+- 승인 전 공간 검수 결과(spatial-check): pass/fail, structured pages: ..., issues: ...
 
 | id | 파일명 | 장면 | 만화적 장면 목적 | 독자 경험/감정 리듬 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/상태유지/spatial_contract 검수 포인트 |
 | ... |
@@ -293,9 +297,11 @@ Initialize and approve:
 ```bash
 python3 "$RUNNER" init --title "<story/scenario title>" --scenario <story-or-scenario-file>
 python3 "$RUNNER" status --run-dir <run-dir>
-python3 "$RUNNER" spatial-check --plan-file <approved-plan.json>
-python3 "$RUNNER" spatial-preview --plan-file <approved-plan.json>
-python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
+# Before presenting the approval request, save the proposed plan under the run folder.
+python3 "$RUNNER" spatial-check --plan-file <run-dir>/proposed_storyboard_plan.json
+python3 "$RUNNER" spatial-preview --plan-file <run-dir>/proposed_storyboard_plan.json
+# After explicit user approval, approve the same plan or the user-revised plan.
+python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <run-dir>/proposed_storyboard_plan.json
 ```
 
 `approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite direction vectors, forbidden firing/aim vectors, impossible moving-object paths, missing occluding elements between related subjects/sources, cover `screen_box` misses, non-firing pressure without `no_line_of_fire`, fixed-landmark relation drift, visibility/occlusion or state persistence drift, and missing allowed-transition causes fail before any generation is reserved. This validation checks the approved comic page design; it must not become the driver for page or panel composition. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.

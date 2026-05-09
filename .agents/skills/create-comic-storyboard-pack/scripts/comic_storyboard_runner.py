@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import math
 import re
@@ -32,7 +33,7 @@ STAGES = [
         "id": STORYBOARD_BLOCKING_STAGE,
         "label": "storyboard blocking",
         "dir": "01_storyboard_blocking",
-        "purpose": "rough spatial/temporal blocking page using quick recognizable 3-second forms plus vectors, arrows, and relation lines",
+        "purpose": "rough comic-page blocking that preserves story rhythm first and adds spatial validation marks only where needed",
     },
     {
         "id": STORYBOARD_SKETCH_INK_STAGE,
@@ -148,6 +149,7 @@ DEFAULT_APPEARANCE_ANATOMY_NEGATIVE_TERMS = (
     "explicitly approved, missing limbs, extra limbs, missing fingers, extra fingers, merged fingers, changed "
     "species, changed body type, broken joints, broken body proportions"
 )
+SPATIAL_VALIDATION_OVERLAY_NOTE = "spatial_contract is a validation overlay, not a page or composition driver."
 
 
 def now_iso() -> str:
@@ -166,6 +168,14 @@ def as_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value]
     return [str(value)]
+
+
+def normalize_optional_object(value: Any, field_name: str) -> dict[str, Any]:
+    if value is None or value == "":
+        return {}
+    if not isinstance(value, dict):
+        raise SystemExit(f"{field_name} must be an object when provided.")
+    return dict(value)
 
 
 def merge_unique(*values: Any) -> list[str]:
@@ -1046,6 +1056,495 @@ def assert_spatial_contracts_pass(pages: list[dict[str, Any]]) -> None:
         raise SystemExit(f"Spatial contract check failed:\n{details}")
 
 
+def escape_html(value: Any) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def preview_issue_map(pages: list[dict[str, Any]], issues: list[str]) -> dict[str, list[str]]:
+    mapped = {str(page.get("id")): [] for page in pages}
+    for issue in issues:
+        assigned = False
+        for page in pages:
+            page_id = str(page.get("id") or "")
+            aliases = {
+                page_id,
+                str(page.get("filename") or ""),
+                Path(str(page.get("filename") or "")).stem,
+            }
+            if any(alias and (issue == alias or issue.startswith(alias + " ")) for alias in aliases):
+                mapped.setdefault(page_id, []).append(issue)
+                assigned = True
+                break
+        if not assigned:
+            mapped.setdefault("_global", []).append(issue)
+    return mapped
+
+
+def build_spatial_preview_model(pages: list[dict[str, Any]], issues: list[str]) -> dict[str, Any]:
+    issue_map = preview_issue_map(pages, issues)
+    return {
+        "title": "Spatial contract preview",
+        "source": "",
+        "status": "fail" if issues else "pass",
+        "issues": issues,
+        "issue_map": issue_map,
+        "page_count": len(pages),
+        "structured_page_count": spatial_contract_page_count(pages),
+        "pages": pages,
+    }
+
+
+def preview_clamp(value: float, minimum: float = 2.0, maximum: float = 98.0) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def preview_point(state: dict[str, Any] | None) -> tuple[float, float] | None:
+    if not state:
+        return None
+    position = vector2(state.get("position"))
+    if position is None:
+        return None
+    return (preview_clamp(position[0] * 100.0), preview_clamp(position[1] * 100.0))
+
+
+def preview_arrow_end(origin: tuple[float, float], vector: tuple[float, float], length: float) -> tuple[float, float]:
+    vector_len = vector_length(vector)
+    if vector_len == 0:
+        return origin
+    return (
+        preview_clamp(origin[0] + (vector[0] / vector_len) * length),
+        preview_clamp(origin[1] + (vector[1] / vector_len) * length),
+    )
+
+
+def preview_entity_classes(entity: dict[str, Any]) -> str:
+    entity_type = slugify(str(entity.get("type") or "entity"), "entity")
+    role = slugify(str(entity.get("role") or ""), "")
+    classes = ["entity", f"entity-{entity_type}"]
+    if "cover" in role:
+        classes.append("entity-cover")
+    return " ".join(classes)
+
+
+def preview_state_title(entity: dict[str, Any], state: dict[str, Any]) -> str:
+    details = [
+        f"id={state.get('id')}",
+        f"type={entity.get('type') or 'unknown'}",
+    ]
+    if entity.get("role"):
+        details.append(f"role={entity.get('role')}")
+    for field in [
+        "position",
+        "facing_vector",
+        "gaze_vector",
+        "aim_vector",
+        "trajectory_vector",
+        "pose",
+        "cover",
+        "visibility",
+        "occlusion",
+        "location_anchor",
+        "held_props",
+        "state_tags",
+    ]:
+        if field in state:
+            details.append(f"{field}={format_spatial_value(state[field])}")
+    return "; ".join(details)
+
+
+def preview_constraint_title(constraint: dict[str, Any]) -> str:
+    fields = [
+        f"{key}={format_spatial_value(value)}"
+        for key, value in constraint.items()
+        if value is not None and value != ""
+    ]
+    return ", ".join(fields)
+
+
+def preview_constraint_state(
+    states: dict[str, dict[str, Any]],
+    constraint: dict[str, Any],
+    *names: str,
+) -> dict[str, Any] | None:
+    entity_id = str(spatial_constraint_value(constraint, *names) or "")
+    return states.get(entity_id)
+
+
+def render_preview_line(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    css_class: str,
+    title: str,
+    marker: bool = False,
+) -> str:
+    marker_attr = ' marker-end="url(#arrow)"' if marker else ""
+    return (
+        f'<line class="{css_class}" x1="{start[0]:.2f}" y1="{start[1]:.2f}" '
+        f'x2="{end[0]:.2f}" y2="{end[1]:.2f}"{marker_attr}>'
+        f"<title>{escape_html(title)}</title></line>"
+    )
+
+
+def render_spatial_preview_relations(
+    contract: dict[str, Any],
+    snapshot: dict[str, Any],
+    states: dict[str, dict[str, Any]],
+) -> list[str]:
+    lines: list[str] = []
+    panel = panel_key(snapshot.get("panel"))
+    for constraint in contract.get("constraints", []):
+        constraint_type = str(constraint.get("type") or "")
+        constraint_panel_value = panel_key(spatial_constraint_value(constraint, "panel", "panel_id"))
+        if constraint_panel_value and constraint_panel_value != panel:
+            continue
+        title = preview_constraint_title(constraint)
+        if constraint_type == "aims_at":
+            actor_state = preview_constraint_state(states, constraint, "actor", "source", "shooter", "from", "entity")
+            vector_state = preview_constraint_state(states, constraint, "weapon", "object", "vector_entity") or actor_state
+            target_state = preview_constraint_state(states, constraint, "target", "to")
+            origin = preview_point(vector_state)
+            target = preview_point(target_state)
+            if origin and target:
+                lines.append(render_preview_line(origin, target, "relation relation-aim", title, marker=True))
+        elif constraint_type == "trajectory_to":
+            object_state = preview_constraint_state(states, constraint, "object", "projectile", "source", "entity")
+            target_state = preview_constraint_state(states, constraint, "target", "to")
+            origin = preview_point(object_state)
+            target = preview_point(target_state)
+            if origin and target:
+                lines.append(render_preview_line(origin, target, "relation relation-trajectory", title, marker=True))
+        elif constraint_type in {"cover_between", "behind_cover_from", "line_of_sight_blocked"}:
+            actor_state = preview_constraint_state(states, constraint, "actor", "subject", "protected", "target")
+            threat_state = preview_constraint_state(states, constraint, "threat", "source", "from", "enemy")
+            cover_state = preview_constraint_state(states, constraint, "cover", "blocker", "object")
+            actor = preview_point(actor_state)
+            threat = preview_point(threat_state)
+            cover = preview_point(cover_state)
+            if actor and threat:
+                lines.append(render_preview_line(actor, threat, "relation relation-cover-line", title))
+            if actor and threat and cover:
+                midpoint = ((actor[0] + threat[0]) / 2.0, (actor[1] + threat[1]) / 2.0)
+                lines.append(render_preview_line(cover, midpoint, "relation relation-cover-anchor", title))
+        elif constraint_type in {"left_of", "right_of"}:
+            subject_state = preview_constraint_state(states, constraint, "subject", "actor", "entity")
+            subject = preview_point(subject_state)
+            if subject:
+                label = "&lt;" if constraint_type == "left_of" else "&gt;"
+                lines.append(
+                    f'<text class="relation-label" x="{subject[0]:.2f}" y="{preview_clamp(subject[1] - 6):.2f}">'
+                    f"{label}<title>{escape_html(title)}</title></text>"
+                )
+    return lines
+
+
+def render_spatial_preview_vectors(states: dict[str, dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    vector_fields = [
+        ("facing_vector", "vector vector-facing", 10.0),
+        ("gaze_vector", "vector vector-gaze", 12.0),
+        ("aim_vector", "vector vector-aim", 16.0),
+        ("trajectory_vector", "vector vector-trajectory", 18.0),
+    ]
+    for state in states.values():
+        origin = preview_point(state)
+        if not origin:
+            continue
+        for field, css_class, length in vector_fields:
+            vector = vector2(state.get(field))
+            if vector is None:
+                continue
+            end = preview_arrow_end(origin, vector, length)
+            title = f"{state.get('id')} {field}={format_spatial_value(state.get(field))}"
+            lines.append(render_preview_line(origin, end, css_class, title, marker=True))
+    return lines
+
+
+def render_spatial_preview_entities(
+    contract: dict[str, Any],
+    states: dict[str, dict[str, Any]],
+) -> list[str]:
+    elements: list[str] = []
+    entities = {str(entity.get("id") or ""): entity for entity in contract.get("entities", [])}
+    for entity_id, state in states.items():
+        point = preview_point(state)
+        if not point:
+            continue
+        entity = entities.get(entity_id, {"id": entity_id, "type": "entity", "role": ""})
+        classes = preview_entity_classes(entity)
+        title = preview_state_title(entity, state)
+        label = escape_html(entity_id)
+        x, y = point
+        if str(entity.get("type") or "").lower() == "landmark":
+            shape = (
+                f'<polygon points="{x:.2f},{y - 4.8:.2f} {x + 4.8:.2f},{y:.2f} '
+                f'{x:.2f},{y + 4.8:.2f} {x - 4.8:.2f},{y:.2f}" />'
+            )
+        elif "cover" in str(entity.get("role") or "").lower() or str(entity.get("type") or "").lower() in {"object", "prop"}:
+            shape = f'<rect x="{x - 4.5:.2f}" y="{y - 4.5:.2f}" width="9" height="9" rx="1.5" />'
+        else:
+            shape = f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4.7" />'
+        elements.append(
+            f'<g class="{classes}"><title>{escape_html(title)}</title>{shape}'
+            f'<text class="entity-label" x="{preview_clamp(x + 6, 0, 100):.2f}" y="{preview_clamp(y + 2, 0, 100):.2f}">{label}</text></g>'
+        )
+    return elements
+
+
+def render_spatial_preview_snapshot(page: dict[str, Any], snapshot: dict[str, Any]) -> str:
+    contract = page.get("spatial_contract", {})
+    panel = panel_key(snapshot.get("panel"))
+    states = {
+        str(state.get("id") or ""): state
+        for state in snapshot.get("entities", [])
+        if str(state.get("id") or "")
+    }
+    relation_lines = render_spatial_preview_relations(contract, snapshot, states)
+    vector_lines = render_spatial_preview_vectors(states)
+    entity_elements = render_spatial_preview_entities(contract, states)
+    panel_title = f"{page.get('filename')} panel {panel}"
+    body = "\n".join([*relation_lines, *vector_lines, *entity_elements])
+    return f"""
+<section class="panel-preview">
+  <div class="panel-title">Panel {escape_html(panel)}</div>
+  <svg class="spatial-svg" viewBox="0 0 100 100" role="img" aria-label="{escape_html(panel_title)}">
+    <defs>
+      <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 z" />
+      </marker>
+    </defs>
+    <rect class="panel-bg" x="1" y="1" width="98" height="98" rx="3" />
+    {body}
+  </svg>
+</section>"""
+
+
+def render_spatial_preview_entity_legend(page: dict[str, Any]) -> str:
+    contract = page.get("spatial_contract", {})
+    rows = []
+    for entity in contract.get("entities", []):
+        blocking_symbol = entity.get("blocking_symbol")
+        rows.append(
+            "<tr>"
+            f"<td><code>{escape_html(entity.get('id') or '')}</code></td>"
+            f"<td>{escape_html(entity.get('type') or '')}</td>"
+            f"<td>{escape_html(entity.get('role') or '')}</td>"
+            f"<td>{escape_html(format_spatial_value(blocking_symbol) if blocking_symbol else '')}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append('<tr><td colspan="4" class="empty">No entities.</td></tr>')
+    return "\n".join(rows)
+
+
+def render_spatial_preview_constraint_list(page: dict[str, Any]) -> str:
+    contract = page.get("spatial_contract", {})
+    items = []
+    cross_panel_types = {
+        "same_landmark_relation_as",
+        "same_cover_as",
+        "state_persists_from",
+        "occlusion_persists_from",
+        "allowed_transition",
+        "requires_cause",
+    }
+    for constraint in contract.get("constraints", []):
+        css_class = "constraint cross-panel" if constraint.get("type") in cross_panel_types else "constraint"
+        items.append(
+            f'<li class="{css_class}"><code>{escape_html(constraint.get("id") or "")}</code> '
+            f'<span>{escape_html(constraint.get("type") or "")}</span>'
+            f'<small>{escape_html(preview_constraint_title(constraint))}</small></li>'
+        )
+    if not items:
+        items.append('<li class="empty">No constraints.</li>')
+    return "\n".join(items)
+
+
+def render_spatial_preview_page(page: dict[str, Any], issues: list[str]) -> str:
+    contract = page.get("spatial_contract", {})
+    issue_items = "\n".join(f"<li>{escape_html(issue)}</li>" for issue in issues)
+    if not issue_items:
+        issue_items = '<li class="empty">No spatial-check issues.</li>'
+    if not spatial_contract_has_content(contract):
+        snapshots = '<p class="empty">No structured spatial_contract supplied.</p>'
+    elif not contract.get("panel_snapshots"):
+        snapshots = '<p class="empty">No panel_snapshots supplied.</p>'
+    else:
+        snapshots = "\n".join(render_spatial_preview_snapshot(page, snapshot) for snapshot in contract.get("panel_snapshots", []))
+    return f"""
+<article class="page-card" id="page-{escape_html(page.get('id') or '')}">
+  <header class="page-card-header">
+    <div>
+      <h2>{escape_html(page.get('filename') or page.get('id') or '')}</h2>
+      <p>{escape_html(page.get('layout_brief') or '')}</p>
+    </div>
+    <span class="issue-badge {'has-issues' if issues else ''}">{len(issues)} issue(s)</span>
+  </header>
+  <div class="page-grid">
+    <div class="panel-grid">{snapshots}</div>
+    <aside class="legend">
+      <h3>Entities</h3>
+      <table>
+        <thead><tr><th>id</th><th>type</th><th>role</th><th>blocking_symbol</th></tr></thead>
+        <tbody>{render_spatial_preview_entity_legend(page)}</tbody>
+      </table>
+      <h3>Constraints</h3>
+      <ul class="constraint-list">{render_spatial_preview_constraint_list(page)}</ul>
+      <h3>Issues</h3>
+      <ul class="issue-list">{issue_items}</ul>
+    </aside>
+  </div>
+</article>"""
+
+
+def render_spatial_preview_html(model: dict[str, Any]) -> str:
+    pages = model.get("pages", [])
+    issue_map = model.get("issue_map", {})
+    page_nav = []
+    page_cards = []
+    for page in pages:
+        page_id = str(page.get("id") or "")
+        page_issues = issue_map.get(page_id, [])
+        page_nav.append(
+            f'<a href="#page-{escape_html(page_id)}"><span>{escape_html(page.get("filename") or page_id)}</span>'
+            f'<strong class="{"has-issues" if page_issues else ""}">{len(page_issues)}</strong></a>'
+        )
+        page_cards.append(render_spatial_preview_page(page, page_issues))
+    all_issues = "\n".join(f"<li>{escape_html(issue)}</li>" for issue in model.get("issues", []))
+    if not all_issues:
+        all_issues = '<li class="empty">No spatial-check issues.</li>'
+    nav = "\n".join(page_nav) or '<span class="empty">No pages.</span>'
+    cards = "\n".join(page_cards) or '<p class="empty">No pages to preview.</p>'
+    status_class = "status-fail" if model.get("status") == "fail" else "status-pass"
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape_html(model.get('title') or 'Spatial contract preview')}</title>
+  <style>
+    :root {{ color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    body {{ margin: 0; background: #f5f6f8; color: #17202a; }}
+    header.app-header {{ position: sticky; top: 0; z-index: 5; background: #ffffff; border-bottom: 1px solid #d8dee8; padding: 14px 18px; }}
+    h1 {{ margin: 0 0 8px; font-size: 20px; }}
+    h2 {{ margin: 0; font-size: 17px; }}
+    h3 {{ margin: 16px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #526071; }}
+    p {{ margin: 4px 0 0; color: #526071; }}
+    code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }}
+    .summary {{ display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }}
+    .pill {{ border: 1px solid #cbd5e1; border-radius: 999px; padding: 4px 9px; font-size: 13px; background: #f8fafc; }}
+    .status-pass {{ color: #166534; background: #ecfdf3; border-color: #bbf7d0; }}
+    .status-fail {{ color: #991b1b; background: #fef2f2; border-color: #fecaca; }}
+    .layout {{ display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 18px; padding: 18px; }}
+    nav {{ position: sticky; top: 86px; align-self: start; background: #ffffff; border: 1px solid #d8dee8; border-radius: 8px; padding: 10px; }}
+    nav a {{ display: flex; justify-content: space-between; gap: 8px; color: #17202a; text-decoration: none; padding: 8px; border-radius: 6px; font-size: 13px; }}
+    nav a:hover {{ background: #f1f5f9; }}
+    nav strong {{ min-width: 22px; text-align: center; border-radius: 999px; background: #e2e8f0; }}
+    nav strong.has-issues, .issue-badge.has-issues {{ background: #fee2e2; color: #991b1b; }}
+    .global-issues, .page-card {{ background: #ffffff; border: 1px solid #d8dee8; border-radius: 8px; margin-bottom: 18px; overflow: hidden; }}
+    .global-issues {{ padding: 12px 14px; }}
+    .page-card-header {{ display: flex; justify-content: space-between; gap: 12px; padding: 13px 14px; border-bottom: 1px solid #e5eaf1; }}
+    .issue-badge {{ height: fit-content; border-radius: 999px; padding: 4px 9px; background: #e2e8f0; font-size: 13px; white-space: nowrap; }}
+    .page-grid {{ display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 14px; padding: 14px; }}
+    .panel-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; align-items: start; }}
+    .panel-preview {{ border: 1px solid #d8dee8; border-radius: 8px; background: #fbfcfe; padding: 10px; }}
+    .panel-title {{ font-weight: 700; font-size: 13px; margin-bottom: 8px; }}
+    .spatial-svg {{ width: 100%; aspect-ratio: 1 / 1; border: 1px solid #e2e8f0; background: #ffffff; }}
+    .panel-bg {{ fill: #fbfdff; stroke: #cbd5e1; stroke-width: .55; }}
+    .relation {{ fill: none; stroke-width: .8; stroke-dasharray: 3 2; opacity: .85; }}
+    .relation-aim {{ stroke: #dc2626; }}
+    .relation-trajectory {{ stroke: #2563eb; }}
+    .relation-cover-line {{ stroke: #475569; }}
+    .relation-cover-anchor {{ stroke: #16a34a; stroke-dasharray: 1.5 1.5; }}
+    .vector {{ stroke-width: 1.2; fill: none; }}
+    .vector-facing {{ stroke: #64748b; }}
+    .vector-gaze {{ stroke: #7c3aed; }}
+    .vector-aim {{ stroke: #ef4444; }}
+    .vector-trajectory {{ stroke: #0ea5e9; }}
+    marker path {{ fill: #334155; }}
+    .entity circle, .entity rect, .entity polygon {{ stroke: #111827; stroke-width: .65; fill: #fef08a; }}
+    .entity-character circle {{ fill: #fde68a; }}
+    .entity-object rect, .entity-cover rect {{ fill: #bbf7d0; }}
+    .entity-landmark polygon {{ fill: #bfdbfe; }}
+    .entity-label, .relation-label {{ font-size: 3.4px; paint-order: stroke; stroke: #ffffff; stroke-width: .8px; fill: #111827; }}
+    .legend {{ border-left: 1px solid #e5eaf1; padding-left: 14px; min-width: 0; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+    th, td {{ border-bottom: 1px solid #e5eaf1; padding: 6px 5px; vertical-align: top; text-align: left; word-break: break-word; }}
+    .constraint-list, .issue-list {{ margin: 0; padding-left: 18px; font-size: 13px; }}
+    .constraint-list li {{ margin-bottom: 8px; }}
+    .constraint-list small {{ display: block; color: #526071; word-break: break-word; }}
+    .cross-panel span {{ background: #ede9fe; color: #5b21b6; border-radius: 999px; padding: 1px 6px; }}
+    .empty {{ color: #6b7280; font-size: 13px; }}
+    @media (max-width: 980px) {{
+      .layout {{ grid-template-columns: 1fr; }}
+      nav {{ position: static; }}
+      .page-grid {{ grid-template-columns: 1fr; }}
+      .legend {{ border-left: 0; border-top: 1px solid #e5eaf1; padding: 12px 0 0; }}
+    }}
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <h1>{escape_html(model.get('title') or 'Spatial contract preview')}</h1>
+    <div class="summary">
+      <span class="pill">source: {escape_html(model.get('source') or 'unknown')}</span>
+      <span class="pill">pages: {escape_html(model.get('page_count'))}</span>
+      <span class="pill">structured pages: {escape_html(model.get('structured_page_count'))}</span>
+      <span class="pill {status_class}">spatial-check: {escape_html(model.get('status'))}</span>
+    </div>
+  </header>
+  <div class="layout">
+    <nav aria-label="Pages">{nav}</nav>
+    <main>
+      <section class="global-issues">
+        <h2>Spatial-check Issues</h2>
+        <ul class="issue-list">{all_issues}</ul>
+      </section>
+      {cards}
+    </main>
+  </div>
+</body>
+</html>"""
+
+
+def spatial_preview_title(args: argparse.Namespace) -> str:
+    if getattr(args, "plan_json", ""):
+        try:
+            plan = json.loads(args.plan_json)
+        except json.JSONDecodeError:
+            return "Spatial contract preview"
+        return str(plan.get("scenario_title") or plan.get("story_title") or "Spatial contract preview")
+    if getattr(args, "plan_file", ""):
+        plan = load_json(Path(args.plan_file))
+        return str(plan.get("scenario_title") or plan.get("story_title") or Path(args.plan_file).stem)
+    if getattr(args, "run_dir", ""):
+        state = load_state(Path(args.run_dir))
+        return str(state.get("title") or "Spatial contract preview")
+    return "Spatial contract preview"
+
+
+def spatial_preview_source(args: argparse.Namespace) -> str:
+    if getattr(args, "plan_json", ""):
+        return "inline plan-json"
+    if getattr(args, "plan_file", ""):
+        return str(Path(args.plan_file))
+    if getattr(args, "run_dir", ""):
+        return str(Path(args.run_dir))
+    return ""
+
+
+def spatial_preview_output_path(args: argparse.Namespace) -> Path:
+    if getattr(args, "output", ""):
+        return Path(args.output)
+    if getattr(args, "plan_json", ""):
+        raise SystemExit("spatial-preview with --plan-json requires --output <html>.")
+    if getattr(args, "plan_file", ""):
+        plan_path = Path(args.plan_file)
+        return plan_path.with_name(f"{plan_path.stem}_spatial_preview.html")
+    if getattr(args, "run_dir", ""):
+        return Path(args.run_dir) / "spatial_contract_preview.html"
+    raise SystemExit("Use --plan-file, --plan-json, or --run-dir.")
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -1266,6 +1765,10 @@ def normalize_state(state: dict[str, Any]) -> None:
         page.setdefault("detail_density_notes", DEFAULT_DETAIL_DENSITY_NOTES)
         page.setdefault("visual_emphasis_notes", DEFAULT_VISUAL_EMPHASIS_NOTES)
         page.setdefault("comic_effects_notes", DEFAULT_COMIC_EFFECTS_NOTES)
+        page["narrative_plan"] = normalize_optional_object(page.get("narrative_plan"), "narrative_plan")
+        page["spatial_contract_extraction"] = normalize_optional_object(
+            page.get("spatial_contract_extraction"), "spatial_contract_extraction"
+        )
         page.setdefault("spatial_logic_notes", "")
         page.setdefault("motion_checks", [])
         page.setdefault("must_match", [])
@@ -1766,16 +2269,19 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
 def stage_instruction(stage_id: str) -> str:
     if stage_id == STORYBOARD_BLOCKING_STAGE:
         return (
-            "Create the rough storyboard blocking page for spatial and temporal verification. Draw each "
+            "Create the rough comic-page blocking from the approved narrative page design. Preserve panel "
+            "composition, story rhythm, reader eye flow, character action, and emotional beat first. Draw each "
             "important character, object, and environment element as a loose pen sketch at roughly 3 seconds "
             "of effort per entity: recognizable enough to identify the entity category and action, but not polished. "
-            "Use simple gesture poses, rough object contours, environmental silhouettes, shadow masses, "
-            "minimal landmark outlines, and clear arrows/vector/relation marks. Simplify or omit unimportant "
-            "props/background elements when they are not needed for the spatial contract, action readability, "
-            "cover/occlusion, landmark continuity, or page composition. Do not render detailed faces, "
-            "anatomy, costume detail, texture, dialogue, SFX, typography, polished ink, tone/color, or final art. "
-            "The image should make entity positions, facing, gaze/aim/trajectory vectors, cover, occlusion, "
-            "visibility, and panel-to-panel state continuity easy to inspect. "
+            "Use simple gesture poses, rough object contours, environmental silhouettes, shadow masses, and "
+            "minimal landmark outlines. Add arrows, vectors, sight/aim lines, trajectory marks, cover marks, "
+            "occlusion marks, and relation lines only where needed to inspect the spatial validation overlay. "
+            "Simplify or omit unimportant props/background elements when they are not needed for story readability, "
+            "action readability, cover/occlusion, landmark continuity, or page composition. Do not render detailed "
+            "faces, anatomy, costume detail, texture, dialogue, SFX, typography, polished ink, tone/color, or final art. "
+            "The image should remain readable as a rough comic page rather than a tactical diagram, while still making "
+            "entity positions, facing, gaze/aim/trajectory vectors, cover, occlusion, visibility, and panel-to-panel "
+            "state continuity easy to inspect. "
             "Also write the required *_desc.md beside the image with symbol legend, panel spatial map, "
             "constraint check, and temporal continuity check sections. Keep the required section headings "
             "exactly as specified, but write the description body text in Korean."
@@ -1789,7 +2295,7 @@ def stage_instruction(stage_id: str) -> str:
             "placement or required text absence, clear action blocking, planned detail "
             "density, visual emphasis, comic effect lines, line-weight contrast, and clean ink lines. "
             "Use 1-2 panels for special staging such as a full-page emotion beat, silence, stillness, "
-            "or a decisive action moment, while preserving all spatial/temporal locks from blocking."
+            "or a decisive action moment, while preserving the spatial validation overlay from blocking."
         )
     if stage_id == FINISH_STAGE:
         return (
@@ -1912,7 +2418,10 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
     contract = page.get("spatial_contract", {})
     if not spatial_contract_has_content(contract):
         return "- no structured spatial_contract supplied; use spatial_logic_notes, motion_checks, and must_match."
-    lines = ["- structured spatial_contract is active; treat it as a generation and inspection lock."]
+    lines = [
+        f"- structured spatial_contract is active; {SPATIAL_VALIDATION_OVERLAY_NOTE}",
+        "- Treat entries as validation constraints unless they contradict the approved narrative/page design.",
+    ]
     coordinate_space = contract.get("coordinate_space") or {}
     if coordinate_space:
         lines.append(f"- coordinate_space: {json.dumps(coordinate_space, ensure_ascii=False, sort_keys=True)}")
@@ -1952,6 +2461,54 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
             f"- constraint {constraint.get('id')} type={constraint.get('type')}: "
             + (", ".join(fields) if fields else "no extra fields")
         )
+    return "\n".join(lines)
+
+
+def narrative_plan_prompt_text(page: dict[str, Any]) -> str:
+    narrative_plan = normalize_optional_object(page.get("narrative_plan"), "narrative_plan")
+    if narrative_plan:
+        lines = [
+            "- Build and preserve the comic page from scenario, emotion, action rhythm, reader eye flow, panel density, negative space, and visual emphasis before applying spatial validation."
+        ]
+        for key in ["story_function", "reader_experience", "pacing_intent", "composition_intent"]:
+            value = narrative_plan.get(key)
+            if value not in (None, ""):
+                lines.append(f"- {key}: {format_spatial_value(value)}")
+        for key, value in narrative_plan.items():
+            if key in {"story_function", "reader_experience", "pacing_intent", "composition_intent"} or value in (None, ""):
+                continue
+            lines.append(f"- {key}: {format_spatial_value(value)}")
+        return "\n".join(lines)
+    return "\n".join(
+        [
+            "- No explicit narrative_plan supplied; derive narrative-first page design from layout_brief, panel beats, pacing notes, panel shape notes, negative space, detail density, visual emphasis, comic effects, and prompt.",
+            "- Compose the page as a comic scene first, then use spatial validation only to catch contradictions inside that approved design.",
+        ]
+    )
+
+
+def spatial_contract_extraction_prompt_text(page: dict[str, Any]) -> str:
+    extraction = normalize_optional_object(page.get("spatial_contract_extraction"), "spatial_contract_extraction")
+    lines = [
+        f"- {SPATIAL_VALIDATION_OVERLAY_NOTE}",
+        "- Extract spatial_contract only after page/panel narrative design is chosen.",
+    ]
+    if not extraction:
+        lines.extend(
+            [
+                "- derived_from: narrative_plan_and_panels",
+                "- verification_purpose: validate spatial, temporal, aim, cover, line-of-sight, trajectory, landmark, and state continuity contradictions inside the approved page design.",
+                "- must_not_override_page_design: true",
+            ]
+        )
+        return "\n".join(lines)
+    for key in ["derived_from", "verification_purpose", "must_not_override_page_design", "focus"]:
+        if key in extraction:
+            lines.append(f"- {key}: {format_spatial_value(extraction[key])}")
+    for key, value in extraction.items():
+        if key in {"derived_from", "verification_purpose", "must_not_override_page_design", "focus"} or value in (None, ""):
+            continue
+        lines.append(f"- {key}: {format_spatial_value(value)}")
     return "\n".join(lines)
 
 
@@ -2077,6 +2634,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     spatial_logic_notes = page.get("spatial_logic_notes") or "Keep character, object, prop, and environment positions physically plausible."
     motion_checks = "\n".join(f"- {entry}" for entry in as_list(page.get("motion_checks"))) or "- no impossible motion: thrown, kicked, or shot objects move in the direction implied by body pose and panel action"
     must_match = "\n".join(f"- {entry}" for entry in as_list(page.get("must_match"))) or "- preserve approved page layout, panel count, action direction, and character/object continuity"
+    narrative_plan = narrative_plan_prompt_text(page)
+    spatial_validation_overlay = spatial_contract_extraction_prompt_text(page)
     spatial_contract = spatial_contract_prompt_text(page)
     blocking_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
     assigned_description = (
@@ -2086,27 +2645,30 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     )
     if stage_id == STORYBOARD_BLOCKING_STAGE:
         prior_stage_use_requirement = (
-            "No prior-stage image is used for storyboard_blocking. Generate a rough text-free spatial "
-            "blocking image from the approved plan and write the required *_desc.md beside it. "
+            "No prior-stage image is used for storyboard_blocking. Generate a rough text-free comic-page "
+            "blocking image from the approved narrative-first page design and write the required *_desc.md beside it. "
             "Keep required headings exactly as specified, but write the description body text in Korean."
         )
         page_format_instruction = (
             "Generate one complete rough comic-page blocking image with the approved panel count and reading order. "
+            "Preserve the page's scenario beat, panel composition, pacing, reader eye flow, and comic readability first. "
             "For each important character, object, and environment element, draw a quick pen-sketch form at about "
             "3 seconds of effort per entity, recognizable enough to identify the entity and action: e.g. crouching person, "
             "standing person, gun, ball, hoop, low cover, wall, doorway, vehicle, table, tree, or landmark. "
-            "Use loose gesture poses, blocky object contours, rough environmental silhouettes, shadow masses, "
-            "minimal landmark outlines, plus clear lines, arrows, sight/aim lines, trajectory arrows, cover/occlusion "
-            "markers, and relation lines. Simplify or omit unimportant props/background elements when they are not needed "
-            "for the spatial contract, action readability, cover/occlusion, landmark continuity, or page composition. "
+            "Use loose gesture poses, blocky object contours, rough environmental silhouettes, shadow masses, and "
+            "minimal landmark outlines. Add validation marks only where needed: arrows, sight/aim lines, trajectory "
+            "arrows, cover/occlusion markers, and relation lines. Simplify or omit unimportant props/background elements "
+            "when they are not needed for story readability, action readability, cover/occlusion, landmark continuity, "
+            "or page composition. "
             "Do not render detailed faces, anatomy, costume detail, texture, dialogue, "
             "SFX, captions, labels, typography, polished ink, tone/color, or final art. Semantic labels belong only in the *_desc.md."
         )
     elif stage_id == STORYBOARD_SKETCH_INK_STAGE:
         prior_stage_use_requirement = (
-            "Use the parent-inspected storyboard_blocking image and its *_desc.md as required structure references. "
-            "Do not change entity positions, vectors, cover, visibility/occlusion, location anchors, or temporal "
-            "state locks unless an approved allowed_transition explicitly permits it."
+            "Use the parent-inspected storyboard_blocking image and its *_desc.md as the approved rough comic-page "
+            "structure plus spatial validation overlay. Preserve page readability, panel composition, story rhythm, "
+            "entity positions, vectors, cover, visibility/occlusion, location anchors, and temporal state unless an "
+            "approved allowed_transition explicitly permits it."
         )
         page_format_instruction = (
             "Generate one complete Korean comic-book page image with 3-5 panels by default and measured cinematic "
@@ -2119,8 +2681,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     else:
         prior_stage_use_requirement = (
             "Use the prior-stage image above as the required visual input / structure reference and keep the "
-            "blocking *_desc.md as the spatial/temporal source of truth. Do not redraw the page from scratch or "
-            "change the approved panel layout."
+            "blocking *_desc.md as the spatial validation overlay for the approved comic page design. Do not redraw "
+            "the page from scratch or change the approved panel layout."
         )
         page_format_instruction = (
             "Generate one complete Korean comic-book page image with 3-5 panels by default and measured cinematic "
@@ -2165,10 +2727,16 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Page layout brief:",
             page.get("layout_brief") or page.get("visual_brief") or page.get("prompt") or "",
             "",
+            "Narrative-first page design:",
+            narrative_plan,
+            "",
             "Page pacing and panel shape policy:",
             pacing_notes,
             panel_shape_notes,
             negative_space_notes,
+            "",
+            "Panels on this page:",
+            panel_text,
             "",
             "Comic visual direction:",
             detail_density_notes,
@@ -2176,6 +2744,12 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             comic_effects_notes,
             "For storyboard_sketch_ink, draw planned speed lines, focus lines, impact bursts, emotion lines, motion streaks, line-weight contrast, and ink emphasis directly in the sketch/ink pass when they serve the beat.",
             "For finish, preserve the inspected storyboard_sketch_ink visual emphasis, effect-line direction, and ink rhythm; tone/color must not weaken or cover them.",
+            "",
+            "Spatial validation overlay:",
+            spatial_validation_overlay,
+            "",
+            "Structured spatial contract:",
+            spatial_contract,
             "",
             "Page text policy:",
             *text_policy_lines,
@@ -2200,15 +2774,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "User revision overlays:",
             revision_overlays,
             "",
-            "Panels on this page:",
-            panel_text,
-            "",
             "Spatial and motion sanity rules:",
             spatial_logic_notes,
             motion_checks,
-            "",
-            "Structured spatial contract:",
-            spatial_contract,
             "",
             "Source consistency checklist:",
             "- Keep character faces, age impression, body shape, hair, outfit, accessories, props, profile details, setting, and landmarks consistent with the approved plan and allowed sources/ references.",
@@ -2239,10 +2807,10 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Worker inspection checklist:",
             "- Matches this exact page and stage",
-            "- For storyboard_blocking, uses quick recognizable 3-second rough forms for important characters, objects, and environment elements, plus arrows/vector/relation marks; simplifies or omits unimportant props/background elements; rejects meaningless pure-symbol blocking, detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
+            "- For storyboard_blocking, preserves rough comic-page readability, panel composition, story rhythm, and reader eye flow first; uses quick recognizable 3-second rough forms for important characters, objects, and environment elements; adds arrows/vector/relation marks only where needed for validation; simplifies or omits unimportant props/background elements; rejects meaningless pure-symbol blocking, tactical diagrams, detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
             "- For storyboard_blocking, writes the required *_desc.md with Symbol Legend, Panel Spatial Map, Constraint Check, and Temporal Continuity Check sections; heading text stays exact, and body explanation is Korean",
-            "- For storyboard_sketch_ink, uses the parent-inspected storyboard_blocking image and *_desc.md as required spatial/temporal references",
-            "- For finish, preserves the inspected sketch/ink image while still respecting the blocking *_desc.md spatial/temporal locks",
+            "- For storyboard_sketch_ink, uses the parent-inspected storyboard_blocking image and *_desc.md as rough comic-page structure plus spatial validation overlay",
+            "- For finish, preserves the inspected sketch/ink image while still respecting the blocking *_desc.md spatial validation overlay",
             "- Uses 3-5 panels by default with measured cinematic pacing",
             "- Accepts and encourages 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments",
             "- Requires explicit story justification for six or more panels",
@@ -2262,7 +2830,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Preserves panel-to-panel and adjacent-page continuity for character/object placement, gaze, action direction, time flow, and lettering placement",
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
             "- Character/object positions, action direction, object trajectory, and cause-effect motion are physically plausible",
-            "- Enforces every Structured spatial contract entity, panel snapshot, vector, visibility, occlusion, and constraint listed above",
+            "- Enforces every Structured spatial contract entity, panel snapshot, vector, visibility, occlusion, and constraint listed above as validation constraints unless they contradict the approved narrative/page design",
             "- Rejects target-opposite aim vectors, impossible projectile trajectories, broken cover/line-of-sight blocking, fixed landmark relation drift, and temporal state drift without an allowed_transition cause",
             "- No examples of impossible staging such as a basketball shot where the ball travels behind the shooter",
             "- Has no obvious anatomy, perspective, crop, object, or continuity defects",
@@ -2284,6 +2852,8 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     character_locks = page_policy_items(state, page, "character_locks")
     visual_text_guard = page_policy_items(state, page, "visual_text_guard")
     appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
+    narrative_plan = narrative_plan_prompt_text(page)
+    spatial_validation_overlay = spatial_contract_extraction_prompt_text(page)
     spatial_contract = spatial_contract_prompt_text(page)
     revision_overlays = user_revision_overlay_prompt_text(stage)
     blocking_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
@@ -2321,6 +2891,10 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             appearance_anatomy_lock,
             "Visual text guard:",
             bullet_text(visual_text_guard),
+            "Narrative-first page design:",
+            narrative_plan,
+            "Spatial validation overlay:",
+            spatial_validation_overlay,
             "Structured spatial contract:",
             spatial_contract,
             "Current rerun correction:",
@@ -2332,7 +2906,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. For storyboard_blocking, use image_gen exactly once, draw quick recognizable 3-second rough forms plus arrows/vector/relation marks for important entities, simplify or omit unimportant props/background elements, and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint as a validation overlay, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- description path when stage is storyboard_blocking",
@@ -2358,7 +2932,9 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         f"- Use {state.get('source_root') or DEFAULT_SOURCE_ROOT} as the default source data folder when the user did not specify source/reference paths.",
         f"- Do not use {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])} or any output/ subtree as source/reference data.",
         "- Generate stages in order: storyboard_blocking, storyboard_sketch_ink, finish.",
-        "- storyboard_blocking is a rough spatial/temporal blocking pass, not final art; it must use quick recognizable 3-second forms for important entities, simplify or omit unimportant props/background elements, and add arrows/vector/relation marks plus a sibling *_desc.md.",
+        "- Plan page/panel composition from scenario, emotion, action rhythm, reader eye flow, pacing, negative space, detail density, visual emphasis, and comic effects before extracting spatial_contract.",
+        f"- {SPATIAL_VALIDATION_OVERLAY_NOTE}",
+        "- storyboard_blocking is a rough comic-page blocking pass, not final art; it must preserve page readability, panel composition, story rhythm, and reader eye flow first, use quick recognizable 3-second forms for important entities, add arrows/vector/relation marks only where needed for validation, and write a sibling *_desc.md.",
         "- Do not reserve storyboard_sketch_ink until every targeted page has passed storyboard_blocking parent inspection and storyboard_blocking stage-review.",
         "- Do not reserve finish until every page has passed storyboard_sketch_ink parent inspection.",
         "- Do not reserve finish until storyboard_sketch_ink stage-review has passed and the user has approved the next stage with approve-next-stage plus the active feedback request.",
@@ -2374,8 +2950,8 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Parent inspection is required before a page stage counts as passed.",
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
         "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, character appearance/anatomy locks, and panel/page continuity.",
-        "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction.",
-        "- Structured spatial_contract entries are generation locks: runner validates plan-time entity/vector/cover/landmark/temporal constraints, and parent inspection must record spatial pass or rerun.",
+        "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction inside the approved comic page design.",
+        "- Structured spatial_contract entries are validation constraints unless they contradict the approved narrative/page design: runner validates plan-time entity/vector/cover/landmark/temporal constraints, and parent inspection must record spatial pass or rerun.",
         "",
     ]
     for lock in state.get("character_locks", []):
@@ -2433,6 +3009,8 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  detail_density: {page.get('detail_density_notes') or DEFAULT_DETAIL_DENSITY_NOTES}",
                 f"  visual_emphasis: {page.get('visual_emphasis_notes') or DEFAULT_VISUAL_EMPHASIS_NOTES}",
                 f"  comic_effects: {page.get('comic_effects_notes') or DEFAULT_COMIC_EFFECTS_NOTES}",
+                f"  narrative_plan: {json.dumps(page.get('narrative_plan') or {}, ensure_ascii=False, sort_keys=True)}",
+                f"  spatial_contract_extraction: {json.dumps(page.get('spatial_contract_extraction') or {}, ensure_ascii=False, sort_keys=True)}",
                 f"  dialogue_notes: {page.get('page_dialogue_notes') or ''}",
                 f"  spatial_logic: {page.get('spatial_logic_notes') or ''}",
                 f"  spatial_contract: {'present' if spatial_contract_has_content(page.get('spatial_contract')) else 'none'}",
@@ -2599,6 +3177,10 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "detail_density_notes": str(raw.get("detail_density_notes") or DEFAULT_DETAIL_DENSITY_NOTES),
         "visual_emphasis_notes": str(raw.get("visual_emphasis_notes") or DEFAULT_VISUAL_EMPHASIS_NOTES),
         "comic_effects_notes": str(raw.get("comic_effects_notes") or DEFAULT_COMIC_EFFECTS_NOTES),
+        "narrative_plan": normalize_optional_object(raw.get("narrative_plan"), "narrative_plan"),
+        "spatial_contract_extraction": normalize_optional_object(
+            raw.get("spatial_contract_extraction"), "spatial_contract_extraction"
+        ),
         "spatial_logic_notes": str(raw.get("spatial_logic_notes") or ""),
         "motion_checks": as_list(raw.get("motion_checks")),
         "must_match": as_list(raw.get("must_match")),
@@ -2695,6 +3277,21 @@ def command_spatial_check(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     print("SPATIAL_CHECK: pass")
     print(f"STRUCTURED_PAGES: {spatial_contract_page_count(pages)}")
+
+
+def command_spatial_preview(args: argparse.Namespace) -> None:
+    pages = pages_for_spatial_check(args)
+    issues = spatial_contract_issues(pages)
+    model = build_spatial_preview_model(pages, issues)
+    model["title"] = spatial_preview_title(args)
+    model["source"] = spatial_preview_source(args)
+    output_path = spatial_preview_output_path(args)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_spatial_preview_html(model), encoding="utf-8")
+    print(f"SPATIAL_PREVIEW: {output_path}")
+    print(f"SPATIAL_CHECK: {model['status']}")
+    print(f"STRUCTURED_PAGES: {model['structured_page_count']}")
+    print(f"ISSUES: {len(issues)}")
 
 
 def command_approve_plan(args: argparse.Namespace) -> None:
@@ -3295,6 +3892,13 @@ def build_parser() -> argparse.ArgumentParser:
     spatial_check.add_argument("--plan-file", default="")
     spatial_check.add_argument("--plan-json", default="")
     spatial_check.set_defaults(func=command_spatial_check)
+
+    spatial_preview = subparsers.add_parser("spatial-preview")
+    spatial_preview.add_argument("--run-dir", default="")
+    spatial_preview.add_argument("--plan-file", default="")
+    spatial_preview.add_argument("--plan-json", default="")
+    spatial_preview.add_argument("--output", default="")
+    spatial_preview.set_defaults(func=command_spatial_preview)
 
     approve = subparsers.add_parser("approve-plan")
     approve.add_argument("--run-dir", required=True)

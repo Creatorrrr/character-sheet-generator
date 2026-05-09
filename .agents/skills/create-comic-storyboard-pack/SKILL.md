@@ -33,13 +33,16 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Use six or more panels only for montage, comedy timing, quick action chains, or another explicit story reason.
 - Use experimental freeform panel design by default when readable: diagonal panels, asymmetry, tall vertical panels, half/full-page panels, borderless or open panels, inset panels, partial overlaps, and wide negative space.
 - Avoid generic uniform rectangular grids unless the user asks for them or the scene benefits from restraint.
-- Include page-level layout notes and panel-level composition/viewpoint notes.
-- Include detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines.
+- Use a two-pass page planning flow. First, design each page and panel from the scenario, emotional beats, action rhythm, reader eye flow, panel density, negative space, detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines.
+- After the narrative-first page/panel design is chosen, extract only the spatial relations needed for validation into `spatial_contract`. `spatial_contract` is a validation overlay, not a page or composition driver.
+- Do not design panels just to make `spatial_contract` easy to draw. Do not turn action pages into tactical diagrams or place character/object coordinates at the center of page design unless the story itself calls for a diagram-like page.
+- Include page-level layout notes, panel-level composition/viewpoint notes, and optional `narrative_plan` fields such as `story_function`, `reader_experience`, `pacing_intent`, and `composition_intent`.
 - Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and `must_match`.
-- For action or staging where direction, cover, line of sight, object trajectory, landmark continuity, or page-to-page state continuity matters, include a structured `spatial_contract`. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, temporal state fields, and machine-checkable constraints before generation.
-- Use `spatial_contract.entities[].blocking_symbol` to predefine the quick blocking mark for important characters, objects, cover, landmarks, and motion markers. Prefer a recognizable 3-second rough form or silhouette plus any needed fallback symbol, not a meaningless geometric mark alone. Unimportant props/background elements may be simplified or omitted when they are not needed for spatial contract verification, action readability, cover/occlusion, landmark continuity, or page composition.
+- For action or staging where direction, cover, line of sight, object trajectory, landmark continuity, or page-to-page state continuity matters, include a structured `spatial_contract` after the page/panel design. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, temporal state fields, and machine-checkable constraints before generation.
+- Use `spatial_contract_extraction` to record that the contract was derived from `narrative_plan_and_panels`, why it is being verified, the validation focus, and `must_not_override_page_design: true`.
+- Use `spatial_contract.entities[].blocking_symbol` to predefine the quick blocking mark for important characters, objects, cover, landmarks, and motion markers. Prefer a recognizable 3-second rough form or silhouette plus any needed fallback symbol, not a meaningless geometric mark alone. Unimportant props/background elements may be simplified or omitted when they are not needed for story readability, action readability, spatial contract verification, cover/occlusion, landmark continuity, or page composition.
 - Use `spatial_contract.panel_snapshots[].entities[]` fields such as `pose`, `cover`, `visibility`, `occlusion`, `location_anchor`, `held_props`, and `state_tags` when state continuity matters.
-- Use `spatial_contract.constraints` for relations such as `aims_at`, `trajectory_to`, `cover_between`, `behind_cover_from`, `line_of_sight_blocked`, `left_of`, `right_of`, `same_landmark_relation_as`, `same_cover_as`, `state_persists_from`, `occlusion_persists_from`, `allowed_transition`, and `requires_cause`. Treat failures as generation blockers before approval and rerun causes after image inspection.
+- Use `spatial_contract.constraints` for relations such as `aims_at`, `trajectory_to`, `cover_between`, `behind_cover_from`, `line_of_sight_blocked`, `left_of`, `right_of`, `same_landmark_relation_as`, `same_cover_as`, `state_persists_from`, `occlusion_persists_from`, `allowed_transition`, and `requires_cause`. Treat failures as validation blockers before approval and rerun causes after image inspection, without letting the contract replace the approved narrative/page design.
 - Include character appearance/anatomy locks in `character_locks` or `must_match`: approved species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.
 - Unless the plan or source explicitly approves a one-eyed, asymmetric, non-human, or otherwise unusual structure, treat missing/extra/merged eyes, one-eyed appearance for a two-eyed character, missing/extra limbs or fingers, changed species/body type, broken joints, and broken body proportions as rerun causes.
 - Preserve source scene references such as `S01`, `S02-S04`, or the user's own scene names.
@@ -73,15 +76,16 @@ Use this format:
 - 캐릭터 고정 조건(character_locks): ...
 - 캐릭터 외형/해부 고정 조건(appearance/anatomy): 종족/신체 구조, 얼굴 구조, 눈 개수/배치, 손/손가락/팔/다리 개수, 실루엣, 체형 비율, 자세. 예: 두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 하며, 외눈 캐릭터처럼 보이면 rerun.
 - 이미지 내 문자 방지 조건(visual_text_guard): ...
-- 구조화 공간/시간 계약(spatial_contract): 총구/시선/투사체/엄폐/랜드마크/상태 유지 관계가 중요한 컷은 승인 전 벡터, 관계, 시간적 상태 검증을 통과해야 함
+- 페이지/컷 구성 원칙: 먼저 시나리오, 감정선, 액션 리듬, 독자 시선, 컷 밀도, 여백, 디테일/강약/효과선 중심으로 만화 페이지를 설계함
+- 구조화 공간/시간 계약(spatial_contract): 페이지 구성 이후 추출하는 검수 레이어. 총구/시선/투사체/엄폐/랜드마크/상태 유지 관계가 중요한 컷은 승인 전 벡터, 관계, 시간적 상태 검증을 통과해야 하지만, spatial_contract가 컷 설계의 목적이 되어서는 안 됨
 
-| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/상태유지/spatial_contract 검수 포인트 |
+| id | 파일명 | 장면 | 만화적 장면 목적 | 독자 경험/감정 리듬 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/상태유지/spatial_contract 검수 포인트 |
 | ... |
 
 승인 후 진행 방식:
-- 1단계: 공간 검증용 콘티 storyboard_blocking
+- 1단계: 만화 페이지 러프 블로킹 + 공간 검수 보조 storyboard_blocking
 - 각 페이지는 $create-comic-storyboard-blocking subagent가 생성/1차 검수
-- 1단계 이미지는 중요한 캐릭터/오브젝트/환경 1개당 펜으로 3초 정도 빠르게 그린 수준의 러프 형체를 사용한다. 사람/총/공/골대/엄폐물/벽/문/차량/랜드마크처럼 무엇인지 알아볼 수 있어야 하며, 중요하지 않은 소품/배경 요소는 공간 계약, 액션 판독, 엄폐/가림, 랜드마크 연속성, 페이지 구성에 필요하지 않으면 단순화하거나 생략한다. 위치/방향/벡터/관계는 선, 화살표, 시선/조준선, 궤적선, 엄폐/가림 표시로 명확히 표시한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
+- 1단계 이미지는 먼저 승인된 만화 페이지의 패널 구도, 장면 리듬, 독자 시선 흐름을 보존한다. 중요한 캐릭터/오브젝트/환경 1개당 펜으로 3초 정도 빠르게 그린 수준의 러프 형체를 사용하고, 사람/총/공/골대/엄폐물/벽/문/차량/랜드마크처럼 무엇인지 알아볼 수 있어야 한다. 위치/방향/벡터/관계 선, 화살표, 시선/조준선, 궤적선, 엄폐/가림 표시는 검수에 필요한 만큼만 추가한다. 중요하지 않은 소품/배경 요소는 스토리 판독, 액션 판독, 엄폐/가림, 랜드마크 연속성, 페이지 구성에 필요하지 않으면 단순화하거나 생략한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
 - 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json`과 1단계 산출물을 사용자에게 보고하고, sketch/ink 진행 여부를 반드시 별도로 확인
@@ -124,6 +128,12 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
       "page_no": 1,
       "scene_refs": ["S01"],
       "layout_brief": "Three-panel cinematic page with a wide establishing panel, diagonal action panel, and close reaction panel.",
+      "narrative_plan": {
+        "story_function": "Establish the protagonist's arrival and the quiet gym mood.",
+        "reader_experience": "The reader feels a calm setup before the action begins.",
+        "pacing_intent": "One wide breath, one movement beat, one reaction beat.",
+        "composition_intent": "Design a readable comic page first; spatial validation is extracted afterward."
+      },
       "reading_order": "top-to-bottom, left-to-right",
       "text_policy": "dialogue_sfx_captions",
       "pacing_notes": "3-5 panels by default; 1-2 panels only for special staging.",
@@ -139,6 +149,12 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
         "no impossible ball direction",
         "two-eyed characters must not look one-eyed unless explicitly approved"
       ],
+      "spatial_contract_extraction": {
+        "derived_from": "narrative_plan_and_panels",
+        "verification_purpose": "Validate object trajectory, landmark relation, and state continuity after the comic page design is chosen.",
+        "must_not_override_page_design": true,
+        "focus": ["basketball trajectory", "hoop landmark relation", "protagonist state continuity"]
+      },
       "spatial_contract": {
         "coordinate_space": {
           "type": "panel_screen_2d",
@@ -255,10 +271,13 @@ Initialize and approve:
 python3 "$RUNNER" init --title "<story/scenario title>" --scenario <story-or-scenario-file>
 python3 "$RUNNER" status --run-dir <run-dir>
 python3 "$RUNNER" spatial-check --plan-file <approved-plan.json>
+python3 "$RUNNER" spatial-preview --plan-file <approved-plan.json>
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
 ```
 
-`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite aim vectors, impossible projectile trajectories, missing cover between actor/threat, fixed-landmark relation drift, cover/state persistence drift, and missing allowed-transition causes fail before any generation is reserved. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
+`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite aim vectors, impossible projectile trajectories, missing cover between actor/threat, fixed-landmark relation drift, cover/state persistence drift, and missing allowed-transition causes fail before any generation is reserved. This validation checks the approved comic page design; it must not become the driver for page or panel composition. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
+
+`spatial-preview` writes a read-only static HTML diagram for human inspection of `spatial_contract` positions, vectors, cover/line-of-sight relations, landmark/state continuity constraints, and the current `spatial-check` pass/fail issues. Use `--plan-file`, `--plan-json --output <html>`, or `--run-dir`; the default output is `<plan-stem>_spatial_preview.html` for plan files or `<run-dir>/spatial_contract_preview.html` for approved runs.
 
 Optional single-stage targets:
 
@@ -414,7 +433,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 - `stop-after-stage` changes the completion target to the requested completed stage.
 - `finish` requires a parent-inspected or imported prior `storyboard_sketch_ink` image.
 - `next-batch --limit 4` reserves at most four eligible pages and writes both `prompts/<stage>/...prompt.txt` and `subagent_prompts/<stage>/...subagent.txt`.
-- `next-batch` injects `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved entity positions, vectors, visibility/occlusion, cover, line-of-sight, trajectory, landmark-relation constraints, and temporal state constraints.
+- `next-batch` injects narrative-first page design, spatial validation overlay, and `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved comic page design first, then preserve entity positions, vectors, visibility/occlusion, cover, line-of-sight, trajectory, landmark-relation constraints, and temporal state constraints as validation constraints.
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
 - Parent `inspect-pass --spatial-verdict needs_rerun` never marks the page passed; it routes the page back to `pending` rerun and resets stage review / following gates.
@@ -433,9 +452,9 @@ When a page has `spatial_contract`, inspect against every entity, panel snapshot
 
 Character appearance/anatomy is an independent reject criterion, not just a technical-quality note. Unless explicitly approved by the plan or source, rerun pages with missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.
 
-For `storyboard_sketch_ink`, verify that sketch/ink preserved the inspected blocking PNG and `*_desc.md` spatial/temporal relationships while adding real drawing detail.
+For `storyboard_sketch_ink`, verify that sketch/ink preserved the inspected rough comic-page blocking PNG, approved panel design, and `*_desc.md` spatial validation overlay while adding real drawing detail.
 
-For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, blocking `*_desc.md`, structured spatial contract, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
+For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, blocking `*_desc.md` spatial validation overlay, structured spatial contract, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
 
 Do not claim page coverage, text quality, continuity, spatial logic, or stage quality unless the image was inspected.
 

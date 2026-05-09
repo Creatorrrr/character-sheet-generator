@@ -1,4 +1,4 @@
 interface:
   display_name: "Comic Storyboard Blocking"
   short_description: "Generate the abstract blocking stage and description for an approved comic page"
-  default_prompt: "Use $create-comic-storyboard-blocking only when a create-comic-storyboard-pack subagent prompt assigns one approved page at the storyboard_blocking stage. Read the assigned prompt file, use image_gen exactly once, create the abstract symbol-only blocking image, write the required *_desc.md, do not edit runner state, inspect both files, and return generated file path, description path, worker_status, and worker_note."
+  default_prompt: "Use $create-comic-storyboard-blocking only when a create-comic-storyboard-pack subagent prompt assigns one approved page at the storyboard_blocking stage. Read the assigned prompt file, use image_gen exactly once, create a rough comic-page blocking image that preserves page rhythm and readability first and adds spatial validation marks only where needed, write the required *_desc.md, do not edit runner state, inspect both files, and return generated file path, description path, worker_status, and worker_note."

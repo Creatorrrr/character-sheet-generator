@@ -672,6 +672,65 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(stage["spatial_verdict"], "pass")
             self.assertEqual(stage["spatial_note"], "aim, cover, and trajectory pass")
 
+    def test_narrative_first_spatial_contract_metadata_is_preserved_and_prompted_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = plan_with_spatial_contract(action_spatial_contract())
+            page = plan["pages"][0]
+            page["narrative_plan"] = {
+                "story_function": "The page sells the reversal beat before explaining tactical geometry.",
+                "reader_experience": "Reader should feel the interruption first, then understand cover logic.",
+                "pacing_intent": "One held reaction beat before the action resumes.",
+                "composition_intent": "Cinematic comic composition, not a tactical diagram.",
+            }
+            page["spatial_contract_extraction"] = {
+                "derived_from": "narrative_plan_and_panels",
+                "verification_purpose": "Check aim, cover, and trajectory after the page design is chosen.",
+                "must_not_override_page_design": True,
+                "focus": ["aim direction", "cover between combatants", "ball trajectory"],
+            }
+            plan_path = root / "narrative-first-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            approved = json.loads((run_dir / "approved_storyboard_plan.json").read_text(encoding="utf-8"))
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(approved["pages"][0]["narrative_plan"], page["narrative_plan"])
+            self.assertEqual(
+                approved["pages"][0]["spatial_contract_extraction"],
+                page["spatial_contract_extraction"],
+            )
+            self.assertEqual(state["pages"][0]["narrative_plan"], page["narrative_plan"])
+            self.assertEqual(
+                state["pages"][0]["spatial_contract_extraction"],
+                page["spatial_contract_extraction"],
+            )
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            prompt = Path(stage["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+            batch_plan = (run_dir / "batch_plan.md").read_text(encoding="utf-8")
+
+            self.assertLess(prompt.index("Narrative-first page design:"), prompt.index("Structured spatial contract:"))
+            self.assertLess(prompt.index("Panels on this page:"), prompt.index("Structured spatial contract:"))
+            self.assertIn(
+                "spatial_contract is a validation overlay, not a page or composition driver",
+                prompt,
+            )
+            self.assertIn("Narrative-first page design", subagent_prompt)
+            self.assertIn(
+                "spatial_contract is a validation overlay, not a page or composition driver",
+                subagent_prompt,
+            )
+            self.assertIn(
+                "spatial_contract is a validation overlay, not a page or composition driver",
+                batch_plan,
+            )
+
     def test_spatial_check_rejects_action_and_landmark_contradictions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -758,6 +817,72 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Spatial contract check failed", result.stderr)
             state = json.loads((run_dir / "state.json").read_text())
             self.assertFalse(state["plan_approved"])
+
+    def test_spatial_preview_generates_html_for_plan_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = plan_with_spatial_contract(action_spatial_contract())
+            plan_path = root / "spatial-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            result = run_cli("spatial-preview", "--plan-file", str(plan_path), cwd=root)
+
+            preview_path = root / "spatial-plan_spatial_preview.html"
+            self.assertTrue(preview_path.exists())
+            self.assertIn(f"SPATIAL_PREVIEW: {preview_path}", result.stdout)
+            self.assertIn("SPATIAL_CHECK: pass", result.stdout)
+            html = preview_path.read_text(encoding="utf-8")
+            self.assertIn("001-page-1.png", html)
+            self.assertIn("hero-aims-at-villain", html)
+            self.assertIn("crate-cover-between", html)
+            self.assertIn("ball-to-hoop", html)
+            self.assertIn("spatial-check: pass", html)
+
+    def test_spatial_preview_generates_html_when_spatial_check_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bad_contract = action_spatial_contract()
+            bad_contract["panel_snapshots"][0]["entities"][2]["aim_vector"] = [-1, 0]
+            plan = plan_with_spatial_contract(bad_contract)
+            plan_path = root / "bad-spatial-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            result = run_cli("spatial-preview", "--plan-file", str(plan_path), cwd=root)
+
+            preview_path = root / "bad-spatial-plan_spatial_preview.html"
+            self.assertTrue(preview_path.exists())
+            self.assertIn("SPATIAL_CHECK: fail", result.stdout)
+            html = preview_path.read_text(encoding="utf-8")
+            self.assertIn("spatial-check: fail", html)
+            self.assertIn("vector points away", html)
+
+    def test_spatial_preview_run_dir_default_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = plan_with_spatial_contract(action_spatial_contract())
+            plan_path = root / "spatial-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+
+            result = run_cli("spatial-preview", "--run-dir", str(run_dir), cwd=root)
+
+            preview_path = run_dir / "spatial_contract_preview.html"
+            self.assertTrue(preview_path.exists())
+            self.assertIn(f"SPATIAL_PREVIEW: {preview_path}", result.stdout)
+            html = preview_path.read_text(encoding="utf-8")
+            self.assertIn("Gym Story", html)
+            self.assertIn("hero-aims-at-villain", html)
+
+    def test_spatial_preview_plan_json_requires_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan_json = json.dumps(plan_with_spatial_contract(action_spatial_contract()))
+
+            result = run_cli_raw("spatial-preview", "--plan-json", plan_json, cwd=root)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires --output", result.stderr)
 
     def test_temporal_constraints_reject_cover_and_state_drift(self):
         with tempfile.TemporaryDirectory() as tmp:

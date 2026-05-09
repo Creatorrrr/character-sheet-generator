@@ -37,7 +37,7 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Include detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines.
 - Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and `must_match`.
 - For action or staging where direction, cover, line of sight, object trajectory, landmark continuity, or page-to-page state continuity matters, include a structured `spatial_contract`. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, temporal state fields, and machine-checkable constraints before generation.
-- Use `spatial_contract.entities[].blocking_symbol` to predefine the blocking symbol for important characters, objects, cover, landmarks, and motion markers.
+- Use `spatial_contract.entities[].blocking_symbol` to predefine the quick blocking mark for important characters, objects, cover, landmarks, and motion markers. Prefer a recognizable 5-second rough form or silhouette plus any needed fallback symbol, not a meaningless geometric mark alone.
 - Use `spatial_contract.panel_snapshots[].entities[]` fields such as `pose`, `cover`, `visibility`, `occlusion`, `location_anchor`, `held_props`, and `state_tags` when state continuity matters.
 - Use `spatial_contract.constraints` for relations such as `aims_at`, `trajectory_to`, `cover_between`, `behind_cover_from`, `line_of_sight_blocked`, `left_of`, `right_of`, `same_landmark_relation_as`, `same_cover_as`, `state_persists_from`, `occlusion_persists_from`, `allowed_transition`, and `requires_cause`. Treat failures as generation blockers before approval and rerun causes after image inspection.
 - Include character appearance/anatomy locks in `character_locks` or `must_match`: approved species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.
@@ -81,7 +81,7 @@ Use this format:
 승인 후 진행 방식:
 - 1단계: 공간 검증용 콘티 storyboard_blocking
 - 각 페이지는 $create-comic-storyboard-blocking subagent가 생성/1차 검수
-- 1단계 이미지는 동그라미/네모/세모/선/화살표/실루엣/그림자만 사용하고, 같은 이름의 `<page_stem>_desc.md`를 반드시 작성. `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
+- 1단계 이미지는 캐릭터/오브젝트/환경 1개당 펜으로 5초 정도 빠르게 그린 수준의 러프 형체를 사용한다. 사람/총/공/골대/엄폐물/벽/문/차량/랜드마크처럼 무엇인지 알아볼 수 있어야 하며, 위치/방향/벡터/관계는 선, 화살표, 시선/조준선, 궤적선, 엄폐/가림 표시로 명확히 표시한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
 - 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json`과 1단계 산출물을 사용자에게 보고하고, sketch/ink 진행 여부를 반드시 별도로 확인
@@ -152,19 +152,19 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
             "id": "protagonist",
             "type": "character",
             "role": "shooter",
-            "blocking_symbol": {"shape": "circle", "tone": "solid black", "meaning": "protagonist body center"}
+            "blocking_symbol": {"shape": "rough_gesture_silhouette", "tone": "loose black line", "meaning": "protagonist 5-second shooter pose"}
           },
           {
             "id": "basketball",
             "type": "object",
             "role": "projectile",
-            "blocking_symbol": {"shape": "circle", "tone": "hollow", "meaning": "basketball"}
+            "blocking_symbol": {"shape": "small_rough_ball", "tone": "hollow", "meaning": "basketball projectile"}
           },
           {
             "id": "hoop",
             "type": "landmark",
             "role": "target",
-            "blocking_symbol": {"shape": "square", "tone": "gray outline", "meaning": "basketball hoop/rim target"}
+            "blocking_symbol": {"shape": "rough_hoop_and_backboard", "tone": "gray outline", "meaning": "basketball hoop/rim target"}
           }
         ],
         "panel_snapshots": [
@@ -427,7 +427,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 
 Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, structured `spatial_contract` compliance, temporal continuity, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
 
-For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
+For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, meaningless pure-symbol blocking that makes entities impossible to identify, over-detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
 
 When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, temporal state field, and constraint. Reject target-opposite aim vectors, projectile paths that do not move toward the target, cover that is not between actor and threat, exposed characters that were specified as hidden behind cover, broken line-of-sight blocking, left/right relation flips, fixed landmark relation drift, low cover turning into a building wall without cause, and pose/cover/location/held-prop/state-tag drift without an `allowed_transition`. Record the result with `--spatial-verdict` and `--spatial-note`.
 

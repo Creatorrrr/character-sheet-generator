@@ -32,7 +32,7 @@ STAGES = [
         "id": STORYBOARD_BLOCKING_STAGE,
         "label": "storyboard blocking",
         "dir": "01_storyboard_blocking",
-        "purpose": "abstract spatial/temporal blocking page using only symbols, silhouettes, shadows, arrows, and relation lines",
+        "purpose": "rough spatial/temporal blocking page using quick recognizable 5-second forms plus vectors, arrows, and relation lines",
     },
     {
         "id": STORYBOARD_SKETCH_INK_STAGE,
@@ -1766,11 +1766,14 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
 def stage_instruction(stage_id: str) -> str:
     if stage_id == STORYBOARD_BLOCKING_STAGE:
         return (
-            "Create the abstract storyboard blocking page for spatial and temporal verification. Use only "
-            "simple circles, squares, triangles, lines, arrows, silhouettes, shadows, and relation lines. "
-            "Do not render detailed faces, anatomy, costume detail, dialogue, SFX, typography, polished ink, "
-            "tone/color, or final art. The image should make entity positions, facing, gaze/aim/trajectory "
-            "vectors, cover, occlusion, visibility, and panel-to-panel state continuity easy to inspect. "
+            "Create the rough storyboard blocking page for spatial and temporal verification. Draw each "
+            "character, object, and environment element as a loose pen sketch at roughly 5 seconds of effort "
+            "per entity: recognizable enough to identify the entity category and action, but not polished. "
+            "Use simple gesture poses, rough object contours, environmental silhouettes, shadow masses, "
+            "minimal landmark outlines, and clear arrows/vector/relation marks. Do not render detailed faces, "
+            "anatomy, costume detail, texture, dialogue, SFX, typography, polished ink, tone/color, or final art. "
+            "The image should make entity positions, facing, gaze/aim/trajectory vectors, cover, occlusion, "
+            "visibility, and panel-to-panel state continuity easy to inspect. "
             "Also write the required *_desc.md beside the image with symbol legend, panel spatial map, "
             "constraint check, and temporal continuity check sections. Keep the required section headings "
             "exactly as specified, but write the description body text in Korean."
@@ -2081,15 +2084,19 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     )
     if stage_id == STORYBOARD_BLOCKING_STAGE:
         prior_stage_use_requirement = (
-            "No prior-stage image is used for storyboard_blocking. Generate an abstract text-free spatial "
+            "No prior-stage image is used for storyboard_blocking. Generate a rough text-free spatial "
             "blocking image from the approved plan and write the required *_desc.md beside it. "
             "Keep required headings exactly as specified, but write the description body text in Korean."
         )
         page_format_instruction = (
-            "Generate one complete abstract comic-page blocking image with the approved panel count and reading order. "
-            "Use only circles, squares, triangles, lines, arrows, silhouettes, shadows, and relation lines. "
-            "Do not render detailed faces, anatomy, costume detail, dialogue, SFX, captions, labels, typography, "
-            "polished ink, tone/color, or final art. Semantic labels belong only in the *_desc.md."
+            "Generate one complete rough comic-page blocking image with the approved panel count and reading order. "
+            "For each character, object, and environment element, draw a quick pen-sketch form at about 5 seconds "
+            "of effort per entity, recognizable enough to identify the entity and action: e.g. crouching person, "
+            "standing person, gun, ball, hoop, low cover, wall, doorway, vehicle, table, tree, or landmark. "
+            "Use loose gesture poses, blocky object contours, rough environmental silhouettes, shadow masses, "
+            "minimal landmark outlines, plus clear lines, arrows, sight/aim lines, trajectory arrows, cover/occlusion "
+            "markers, and relation lines. Do not render detailed faces, anatomy, costume detail, texture, dialogue, "
+            "SFX, captions, labels, typography, polished ink, tone/color, or final art. Semantic labels belong only in the *_desc.md."
         )
     elif stage_id == STORYBOARD_SKETCH_INK_STAGE:
         prior_stage_use_requirement = (
@@ -2228,7 +2235,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Worker inspection checklist:",
             "- Matches this exact page and stage",
-            "- For storyboard_blocking, uses only simplified symbols, silhouettes, shadows, arrows, and relation lines; rejects detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
+            "- For storyboard_blocking, uses quick recognizable 5-second rough forms for characters, objects, and environment elements, plus arrows/vector/relation marks; rejects meaningless pure-symbol blocking, detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
             "- For storyboard_blocking, writes the required *_desc.md with Symbol Legend, Panel Spatial Map, Constraint Check, and Temporal Continuity Check sections; heading text stays exact, and body explanation is Korean",
             "- For storyboard_sketch_ink, uses the parent-inspected storyboard_blocking image and *_desc.md as required spatial/temporal references",
             "- For finish, preserves the inspected sketch/ink image while still respecting the blocking *_desc.md spatial/temporal locks",
@@ -2321,7 +2328,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. For storyboard_blocking, use image_gen exactly once and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. For storyboard_blocking, use image_gen exactly once, draw quick recognizable 5-second rough forms plus arrows/vector/relation marks, and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- description path when stage is storyboard_blocking",
@@ -2347,7 +2354,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         f"- Use {state.get('source_root') or DEFAULT_SOURCE_ROOT} as the default source data folder when the user did not specify source/reference paths.",
         f"- Do not use {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])} or any output/ subtree as source/reference data.",
         "- Generate stages in order: storyboard_blocking, storyboard_sketch_ink, finish.",
-        "- storyboard_blocking is an abstract spatial/temporal blocking pass, not final art; it must use simplified symbols plus a sibling *_desc.md.",
+        "- storyboard_blocking is a rough spatial/temporal blocking pass, not final art; it must use quick recognizable 5-second forms plus arrows/vector/relation marks and a sibling *_desc.md.",
         "- Do not reserve storyboard_sketch_ink until every targeted page has passed storyboard_blocking parent inspection and storyboard_blocking stage-review.",
         "- Do not reserve finish until every page has passed storyboard_sketch_ink parent inspection.",
         "- Do not reserve finish until storyboard_sketch_ink stage-review has passed and the user has approved the next stage with approve-next-stage plus the active feedback request.",

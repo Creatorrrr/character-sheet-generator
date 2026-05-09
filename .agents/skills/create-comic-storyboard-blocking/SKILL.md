@@ -1,6 +1,6 @@
 ---
 name: create-comic-storyboard-blocking
-description: Use when an approved comic storyboard page needs an abstract spatial/temporal blocking image and matching description from a create-comic-storyboard-pack runner prompt.
+description: Use when an approved comic storyboard page needs a rough spatial/temporal blocking image and matching description from a create-comic-storyboard-pack runner prompt.
 ---
 
 # Create Comic Storyboard Blocking
@@ -25,8 +25,11 @@ Read the prompt file before generation.
 
 - Use Codex built-in `image_gen` exactly once for the blocking page image.
 - Generate one complete page image with the approved panel count and reading order.
-- Use only simplified symbols: circles, squares, triangles, lines, arrows, silhouettes, shadows, and relation lines.
-- Do not render detailed faces, anatomy, costume detail, dialogue, SFX, captions, labels, typography, polished ink, tone/color, or final art.
+- Draw each character, object, and environment element as a quick rough pen sketch, roughly the level of detail possible in about 5 seconds per entity.
+- Make the rough form recognizable enough to identify the entity category and action: e.g. crouching person, standing person, gun, ball, hoop, low cover, wall, doorway, vehicle, tree, table, or landmark.
+- Keep the drawing loose and schematic: simple gesture poses, blocky object contours, rough environmental silhouettes, shadow masses, and minimal landmark outlines are enough.
+- Add clear lines, arrows, vector marks, relation lines, sight/aim lines, trajectory arrows, and occlusion/cover markers so positions, directions, and spatial relationships remain inspectable.
+- Do not render detailed faces, anatomy, costume detail, texture, dialogue, SFX, captions, labels, typography, polished ink, tone/color, or final art.
 - Semantic labels must not be drawn into the image. Put meanings in the sibling `*_desc.md`.
 - Make positions, facing/gaze/aim vectors, trajectories, cover relationships, line of sight, visibility, occlusion, and location anchors easy to inspect.
 - Preserve every `spatial_contract` entity id, panel snapshot, vector, visibility/occlusion state, and constraint.
@@ -48,7 +51,7 @@ Write the Markdown description file exactly at the assigned description path. It
 ## Temporal Continuity Check
 ```
 
-Keep the required heading text exactly as shown above. Write all body text under those headings in Korean, while preserving every entity id and constraint id verbatim. The description must mention every active `spatial_contract.entities[].id` and every named constraint id. Use plain Korean text to explain each symbol's meaning, each panel's spatial map, every constraint result, and temporal continuity status.
+Keep the required heading text exactly as shown above. Write all body text under those headings in Korean, while preserving every entity id and constraint id verbatim. The description must mention every active `spatial_contract.entities[].id` and every named constraint id. Use plain Korean text to explain each rough mark or symbol's meaning, each panel's spatial map, every constraint result, and temporal continuity status.
 
 ## Worker Inspection
 

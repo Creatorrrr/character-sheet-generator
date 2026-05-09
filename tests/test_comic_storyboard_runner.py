@@ -980,10 +980,13 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             prompt_path = Path(state["pages"][0]["stages"][FIRST_STAGE]["prompt_file"])
             prompt = prompt_path.read_text(encoding="utf-8")
 
-            self.assertIn("one complete abstract comic-page blocking image", prompt)
+            self.assertIn("one complete rough comic-page blocking image", prompt)
             self.assertIn("Assigned blocking description:", prompt)
             self.assertIn("write the description body text in Korean", prompt)
-            self.assertIn("Use only circles, squares, triangles, lines, arrows, silhouettes, shadows", prompt)
+            self.assertIn("about 5 seconds of effort per entity", prompt)
+            self.assertIn("recognizable enough to identify the entity and action", prompt)
+            self.assertIn("sight/aim lines, trajectory arrows, cover/occlusion", prompt)
+            self.assertIn("meaningless pure-symbol blocking", prompt)
             self.assertIn("Semantic labels belong only in the *_desc.md", prompt)
             self.assertIn("measured cinematic pacing", prompt)
             self.assertIn("No prior-stage image is used for storyboard_blocking", prompt)
@@ -1272,6 +1275,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Stage: storyboard_blocking", storyboard_subagent)
             self.assertIn("Assigned description path:", storyboard_subagent)
             self.assertIn("image_gen exactly once", storyboard_subagent)
+            self.assertIn("quick recognizable 5-second rough forms", storyboard_subagent)
             self.assertIn("write the description body text in Korean", storyboard_subagent)
             self.assertIn("description path when stage is storyboard_blocking", storyboard_subagent)
 

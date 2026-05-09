@@ -1,13 +1,13 @@
 ---
 name: create-comic-storyboard-finish
-description: Use when an approved comic storyboard page needs tone, color, lettering, or final polish from a parent-inspected storyboard_sketch_ink image.
+description: Use when an approved comic storyboard page needs tone, color, lettering, or final polish from a parent-inspected storyboard_sketch_ink image while preserving blocking spatial/temporal locks.
 ---
 
 # Create Comic Storyboard Finish
 
 ## Overview
 
-Generate exactly one approved comic page for the `finish` stage. This skill is stage-local: it adds tone, color when requested, lighting, final cleanup, and policy-approved lettering or text absence while preserving the parent-inspected `storyboard_sketch_ink` page.
+Generate exactly one approved comic page for the `finish` stage. This skill is stage-local: it adds tone, color when requested, lighting, final cleanup, and policy-approved lettering or text absence while preserving the parent-inspected `storyboard_sketch_ink` page and the earlier blocking `*_desc.md` spatial/temporal locks.
 
 The pack runner owns `state.json`, import, parent inspection, rerun, stage-review, and user approval for entering this stage.
 
@@ -16,7 +16,8 @@ The pack runner owns `state.json`, import, parent inspection, rerun, stage-revie
 Use the assigned subagent prompt from the pack runner. It provides:
 
 - Run folder, approved plan, assigned page, stage, prompt file, output path, and batch id.
-- Required prior-stage reference from `01_storyboard_sketch_ink/`.
+- Required prior-stage reference from `02_storyboard_sketch_ink/` or a recorded legacy/imported sketch path.
+- Blocking `*_desc.md` reference when available; keep it as the spatial/temporal source of truth.
 - Default source folder and excluded output folder.
 - Relevant references, text policy, character locks, character appearance/anatomy lock, visual text guard, and rerun correction.
 
@@ -26,6 +27,7 @@ Read the prompt file and use the prior-stage image as the required visual input 
 
 - Use Codex built-in `image_gen`; do not call external image APIs.
 - Preserve the inspected `storyboard_sketch_ink` page structure.
+- Preserve the blocking-stage positions, vectors, cover, line of sight, visibility, occlusion, location anchors, and temporal state fields recorded in the blocking `*_desc.md`.
 - Do not change page layout, panel count, panel shapes, reading order, gutters, negative space, text placement or required text absence, visual emphasis, line-weight rhythm, comic effect lines, character/object blocking, motion direction, or action logic.
 - Add tone, color if requested, lighting, shadows, texture, cleanup, and final polish.
 - Preserve the approved focal hierarchy and avoid flattening or hiding the ink rhythm.
@@ -40,13 +42,13 @@ Read the prompt file and use the prior-stage image as the required visual input 
 - For `sfx_only`, render only approved SFX. Do not render speech balloons, dialogue, captions, narration, signage, environmental text, labels, page numbers, panel numbers, random typography, or corner labels.
 - For `text_free`, render no text of any kind, including SFX, dialogue, balloons, captions, signage, labels, logos, page or panel numbers, environmental text, or random glyphs.
 - Preserve all character locks and visual text guards from the prompt.
-- Reject any source drift introduced during finishing, including changed faces, outfits, props, landmarks, text policy, panel continuity, or motion direction.
+- Reject any source drift introduced during finishing, including changed faces, outfits, props, landmarks, text policy, panel continuity, cover/visibility/occlusion, temporal state, or motion direction.
 - Use `character_locks`, `must_match`, source references, page/panel notes, and the parent-inspected sketch/ink image as the source of truth for approved anatomy or non-human exceptions.
 - Unless explicitly approved by the plan or source, reject missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, and broken body proportions.
 
 ## Worker Inspection
 
-After generation, inspect the output before returning. Mark `needs_rerun` when finishing changes the inspected sketch/ink structure or violates text policy, source consistency, character locks, character appearance/anatomy lock, visual text guard, spatial logic, motion direction, or technical quality.
+After generation, inspect the output before returning. Mark `needs_rerun` when finishing changes the inspected sketch/ink structure or violates text policy, source consistency, character locks, character appearance/anatomy lock, visual text guard, blocking spatial/temporal locks, spatial logic, motion direction, or technical quality.
 
 Do not pass a finish output that changes a passed two-eye, face, hand, limb, silhouette, body-proportion, or posture structure from the sketch/ink stage unless that exception is explicitly approved in the plan or source.
 

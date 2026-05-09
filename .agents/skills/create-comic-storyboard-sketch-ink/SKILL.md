@@ -1,19 +1,20 @@
 ---
 name: create-comic-storyboard-sketch-ink
-description: Use when an approved comic storyboard page needs a storyboard, sketch, and ink image stage from a create-comic-storyboard-pack runner prompt.
+description: Use when an approved comic storyboard page needs a sketch and ink image stage from a parent-inspected blocking image and description.
 ---
 
 # Create Comic Storyboard Sketch Ink
 
 ## Overview
 
-Generate exactly one approved comic page for the `storyboard_sketch_ink` stage. This skill is stage-local: it creates and first-pass inspects the image, but the pack runner owns `state.json`, import, parent inspection, rerun, and stage-review.
+Generate exactly one approved comic page for the `storyboard_sketch_ink` stage. This skill is stage-local: it converts a parent-inspected `storyboard_blocking` image plus its `*_desc.md` into the sketch/ink pass, then first-pass inspects the result. The pack runner owns `state.json`, import, parent inspection, rerun, and stage-review.
 
 ## Inputs
 
 Use the assigned subagent prompt from the pack runner. It provides:
 
 - Run folder, approved plan, assigned page, stage, prompt file, output path, and batch id.
+- Required prior-stage `storyboard_blocking` image and sibling `*_desc.md` when blocking is part of the target stages.
 - Default source folder and excluded output folder.
 - Relevant references, text policy, character locks, character appearance/anatomy lock, visual text guard, rerun correction, and prior-stage reference.
 
@@ -29,7 +30,9 @@ Read the prompt file before generation. Do not edit `state.json`, `batch_plan.md
 - Use six or more panels only when the approved page includes an explicit story reason.
 - Use experimental freeform panel shapes when approved: diagonal panels, asymmetry, tall vertical panels, open or borderless panels, inset panels, partial overlaps, and wide negative space are valid if reading order is clear.
 - Avoid unintentional uniform rectangular grids, overcrowded pages, and dialogue/SFX packed without breathing room.
+- Use the parent-inspected blocking image and `*_desc.md` as required structure references.
 - Draw the approved sketch structure and ink lines in this stage.
+- Preserve the blocking-stage positions, vectors, cover, line of sight, visibility, occlusion, location anchors, and temporal state fields.
 - Include approved visual emphasis: selective detail density, focal-point strength, closeup intensity, line-weight rhythm, black-ink weight, and background simplification or emphasis.
 - Use speed lines, focus lines, impact bursts, emotion lines, and motion streaks only where they serve the approved beat. Effect-line direction must match action direction, impact, mood, or eye guidance.
 - Preserve the approved character appearance/anatomy lock: species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.
@@ -44,11 +47,12 @@ Read the prompt file before generation. Do not edit `state.json`, `batch_plan.md
 - Use `character_locks`, `must_match`, source references, and page/panel notes as the source of truth for approved anatomy or non-human exceptions.
 - Unless explicitly approved by the plan or source, reject missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, and broken body proportions.
 - Preserve character, prop, setting, landmark, gaze, position, object trajectory, time flow, and cause-effect continuity across panels and adjacent-page references.
+- Treat `spatial_contract` and blocking `*_desc.md` as generation locks. Reject changed cover type, exposed hidden characters, reversed aim/trajectory vectors, landmark drift, or temporal state drift unless an approved `allowed_transition` with a valid cause reference permits it.
 - Reject impossible staging, such as a thrown, kicked, or shot object moving opposite the body pose or intended target.
 
 ## Worker Inspection
 
-After generation, inspect the output before returning. Mark `needs_rerun` when any required page structure, text policy, character lock, character appearance/anatomy lock, visual text guard, source consistency, spatial logic, motion direction, or technical quality check fails.
+After generation, inspect the output before returning. Mark `needs_rerun` when any required page structure, text policy, character lock, character appearance/anatomy lock, visual text guard, source consistency, blocking reference, spatial logic, temporal continuity, motion direction, or technical quality check fails.
 
 Do not pass a two-eyed character that appears one-eyed unless the approved plan or source explicitly says the character is one-eyed, asymmetric, non-human in that way, or naturally occluded by angle, hair, prop, or framing.
 

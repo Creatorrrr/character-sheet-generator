@@ -16,6 +16,7 @@ WORKFLOW = "create-comic-storyboard-pack"
 REPO_ROOT = Path("/Users/chasoik/Projects/character-sheet-generator")
 DEFAULT_SOURCE_ROOT = REPO_ROOT / "sources"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output"
+STORYBOARD_BLOCKING_STAGE = "storyboard_blocking"
 STORYBOARD_SKETCH_INK_STAGE = "storyboard_sketch_ink"
 FINISH_STAGE = "finish"
 TEXT_POLICY_DIALOGUE_SFX_CAPTIONS = "dialogue_sfx_captions"
@@ -28,20 +29,27 @@ TEXT_POLICY_VALUES = {
 }
 STAGES = [
     {
+        "id": STORYBOARD_BLOCKING_STAGE,
+        "label": "storyboard blocking",
+        "dir": "01_storyboard_blocking",
+        "purpose": "abstract spatial/temporal blocking page using only symbols, silhouettes, shadows, arrows, and relation lines",
+    },
+    {
         "id": STORYBOARD_SKETCH_INK_STAGE,
-        "label": "storyboard/sketch/ink",
-        "dir": "01_storyboard_sketch_ink",
-        "purpose": "comic page storyboard, panel layout, policy-approved text/SFX placement or text absence, sketch, and ink line pass",
+        "label": "sketch/ink",
+        "dir": "02_storyboard_sketch_ink",
+        "purpose": "comic page sketch and ink pass preserving the parent-inspected blocking image and blocking description",
     },
     {
         "id": FINISH_STAGE,
         "label": "tone/color/finish",
-        "dir": "02_finish",
+        "dir": "03_finish",
         "purpose": "tone, color, policy-approved lettering/text absence, and final polish pass",
     },
 ]
 STAGE_IDS = [stage["id"] for stage in STAGES]
 STAGE_SKILL_NAMES = {
+    STORYBOARD_BLOCKING_STAGE: "create-comic-storyboard-blocking",
     STORYBOARD_SKETCH_INK_STAGE: "create-comic-storyboard-sketch-ink",
     FINISH_STAGE: "create-comic-storyboard-finish",
 }
@@ -70,7 +78,18 @@ SPATIAL_CONSTRAINT_TYPES = {
     "left_of",
     "right_of",
     "same_landmark_relation_as",
+    "same_cover_as",
+    "state_persists_from",
+    "occlusion_persists_from",
+    "allowed_transition",
+    "requires_cause",
 }
+BLOCKING_DESCRIPTION_HEADINGS = [
+    "## Symbol Legend",
+    "## Panel Spatial Map",
+    "## Constraint Check",
+    "## Temporal Continuity Check",
+]
 DEFAULT_PACING_NOTES = (
     "Use 3-5 panels by default with measured cinematic pacing. Use 1-2 panels for special staging such "
     "as full-page emotional beats, silence, stillness, or decisive action moments. Split pages instead "
@@ -285,7 +304,17 @@ def normalize_spatial_entity_state(raw_state: Any, index: int) -> dict[str, Any]
             if alias in entry and entry[alias] is not None and entry[alias] != "":
                 normalized[target_field] = normalized_vector(entry[alias])
                 break
-    for field in ["visibility", "occlusion", "occluded_by", "notes"]:
+    for field in [
+        "pose",
+        "cover",
+        "visibility",
+        "occlusion",
+        "occluded_by",
+        "location_anchor",
+        "held_props",
+        "state_tags",
+        "notes",
+    ]:
         if field in entry:
             normalized[field] = entry[field]
     return normalized
@@ -601,9 +630,265 @@ def validate_same_landmark_relation(
             )
 
 
+def page_lookup_aliases(pages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for page in pages:
+        aliases = {
+            str(page.get("id") or ""),
+            str(page.get("filename") or ""),
+            Path(str(page.get("filename") or "")).stem,
+            slugify(str(page.get("id") or "")),
+            slugify(Path(str(page.get("filename") or "")).stem),
+        }
+        for alias in aliases:
+            if alias and alias not in lookup:
+                lookup[alias] = page
+    return lookup
+
+
+def constraint_entity_id(constraint: dict[str, Any]) -> str:
+    return str(spatial_constraint_value(constraint, "entity", "subject", "actor", "object") or "")
+
+
+def constraint_reference_entity_id(constraint: dict[str, Any], fallback: str) -> str:
+    return str(spatial_constraint_value(constraint, "reference_entity", "from_entity") or fallback)
+
+
+def constraint_page_ref(constraint: dict[str, Any], current_page: dict[str, Any], *names: str) -> str:
+    return str(spatial_constraint_value(constraint, *names) or current_page["id"])
+
+
+def page_panel_exists(page: dict[str, Any], panel: str) -> bool:
+    if not panel:
+        return False
+    contract = page.get("spatial_contract", {})
+    if panel in spatial_snapshots_by_panel(contract):
+        return True
+    for panel_info in page.get("panels", []):
+        aliases = {
+            panel_key(panel_info.get("panel_no")),
+            panel_key(panel_info.get("order")),
+            panel_key(panel_info.get("id")),
+        }
+        if panel in aliases:
+            return True
+    return False
+
+
+def cause_ref_parts(constraint: dict[str, Any], current_page: dict[str, Any]) -> tuple[str, str]:
+    cause_ref = str(spatial_constraint_value(constraint, "cause_ref", "cause") or "").strip()
+    if cause_ref:
+        if ":" in cause_ref:
+            page_ref, panel_ref = cause_ref.split(":", 1)
+            return page_ref.strip() or current_page["id"], panel_key(panel_ref.strip())
+        return current_page["id"], panel_key(cause_ref)
+    return (
+        constraint_page_ref(constraint, current_page, "cause_page"),
+        panel_key(spatial_constraint_value(constraint, "cause_panel", "cause_panel_id")),
+    )
+
+
+def cause_reference_exists(
+    pages_by_id: dict[str, dict[str, Any]],
+    current_page: dict[str, Any],
+    constraint: dict[str, Any],
+) -> bool:
+    cause_page_ref, cause_panel = cause_ref_parts(constraint, current_page)
+    cause_page = pages_by_id.get(cause_page_ref)
+    if cause_page is None:
+        return False
+    return page_panel_exists(cause_page, cause_panel)
+
+
+def normalize_state_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        if all(not isinstance(item, (dict, list)) for item in value):
+            return json.dumps(sorted(str(item) for item in value), ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value).strip()
+
+
+def state_value_matches(left: Any, right: Any) -> bool:
+    return normalize_state_value(left) == normalize_state_value(right)
+
+
+def transition_endpoint(
+    pages_by_id: dict[str, dict[str, Any]],
+    current_page: dict[str, Any],
+    constraint: dict[str, Any],
+    label: str,
+    issues: list[str],
+) -> tuple[str, str, str, str, str] | None:
+    entity_id = constraint_entity_id(constraint)
+    if not entity_id:
+        issues.append(f"{label}: missing entity/subject.")
+        return None
+    from_page_id = constraint_page_ref(constraint, current_page, "from_page", "reference_page")
+    from_panel = panel_key(spatial_constraint_value(constraint, "from_panel", "reference_panel"))
+    to_page_id = constraint_page_ref(constraint, current_page, "to_page")
+    to_panel = panel_key(spatial_constraint_value(constraint, "to_panel", "panel"))
+    if from_page_id not in pages_by_id:
+        issues.append(f"{label}: unknown from_page/reference_page {from_page_id}.")
+        return None
+    if to_page_id not in pages_by_id:
+        issues.append(f"{label}: unknown to_page {to_page_id}.")
+        return None
+    if not from_panel:
+        issues.append(f"{label}: needs from_panel/reference_panel.")
+        return None
+    if not to_panel:
+        issues.append(f"{label}: needs to_panel/panel.")
+        return None
+    if not page_panel_exists(pages_by_id[from_page_id], from_panel):
+        issues.append(f"{label}: unknown from_panel/reference_panel {from_panel}.")
+        return None
+    if not page_panel_exists(pages_by_id[to_page_id], to_panel):
+        issues.append(f"{label}: unknown to_panel/panel {to_panel}.")
+        return None
+    return entity_id, from_page_id, from_panel, to_page_id, to_panel
+
+
+def transition_allowed(
+    pages: list[dict[str, Any]],
+    pages_by_id: dict[str, dict[str, Any]],
+    entity_id: str,
+    from_page_id: str,
+    from_panel: str,
+    to_page_id: str,
+    to_panel: str,
+) -> bool:
+    for page in pages:
+        for constraint in page.get("spatial_contract", {}).get("constraints", []):
+            if constraint.get("type") != "allowed_transition":
+                continue
+            if constraint_entity_id(constraint) != entity_id:
+                continue
+            allowed_from_page = constraint_page_ref(constraint, page, "from_page", "reference_page")
+            allowed_from_panel = panel_key(spatial_constraint_value(constraint, "from_panel", "reference_panel"))
+            allowed_to_page = constraint_page_ref(constraint, page, "to_page")
+            allowed_to_panel = panel_key(spatial_constraint_value(constraint, "to_panel", "panel"))
+            if (
+                allowed_from_page == from_page_id
+                and allowed_from_panel == from_panel
+                and allowed_to_page == to_page_id
+                and allowed_to_panel == to_panel
+                and cause_reference_exists(pages_by_id, page, constraint)
+            ):
+                return True
+    return False
+
+
+def temporal_state_pair(
+    pages_by_id: dict[str, dict[str, Any]],
+    page: dict[str, Any],
+    contract: dict[str, Any],
+    constraint: dict[str, Any],
+    label: str,
+    issues: list[str],
+) -> tuple[str, str, str, str, str, dict[str, Any] | None, dict[str, Any] | None] | None:
+    current_panel = constraint_panel(contract, constraint, issues, label)
+    if not current_panel:
+        return None
+    entity_id = constraint_entity_id(constraint)
+    if not entity_id:
+        issues.append(f"{label}: missing entity/subject.")
+        return None
+    reference_entity_id = constraint_reference_entity_id(constraint, entity_id)
+    reference_page_id = constraint_page_ref(constraint, page, "reference_page", "from_page")
+    reference_page = pages_by_id.get(reference_page_id)
+    if reference_page is None:
+        issues.append(f"{label}: unknown reference_page/from_page {reference_page_id}.")
+        return None
+    reference_contract = reference_page.get("spatial_contract", {})
+    reference_snapshots = reference_contract.get("panel_snapshots", [])
+    reference_panel = panel_key(spatial_constraint_value(constraint, "reference_panel", "from_panel"))
+    if not reference_panel and len(reference_snapshots) == 1:
+        reference_panel = panel_key(reference_snapshots[0].get("panel"))
+    if not reference_panel:
+        issues.append(f"{label}: needs reference_panel/from_panel.")
+        return None
+    current_state = snapshot_state(spatial_snapshots_by_panel(contract), current_panel, entity_id, issues, label)
+    reference_state = snapshot_state(
+        spatial_snapshots_by_panel(reference_contract),
+        reference_panel,
+        reference_entity_id,
+        issues,
+        label,
+    )
+    return entity_id, reference_page_id, reference_panel, page["id"], current_panel, reference_state, current_state
+
+
+def temporal_fields_for_constraint(constraint: dict[str, Any], default_fields: list[str]) -> list[str]:
+    raw_fields = constraint.get("state_fields") or constraint.get("fields") or constraint.get("attributes")
+    fields = [str(field) for field in as_list(raw_fields)] if raw_fields else list(default_fields)
+    return [field for field in fields if field]
+
+
+def validate_temporal_persistence(
+    pages: list[dict[str, Any]],
+    pages_by_id: dict[str, dict[str, Any]],
+    page: dict[str, Any],
+    contract: dict[str, Any],
+    constraint: dict[str, Any],
+    constraint_index: int,
+    issues: list[str],
+    default_fields: list[str],
+) -> None:
+    label = f"{page['id']} spatial_contract constraint {constraint_index} ({constraint.get('type')})"
+    pair = temporal_state_pair(pages_by_id, page, contract, constraint, label, issues)
+    if pair is None:
+        return
+    entity_id, reference_page_id, reference_panel, current_page_id, current_panel, reference_state, current_state = pair
+    if reference_state is None or current_state is None:
+        return
+    if transition_allowed(pages, pages_by_id, entity_id, reference_page_id, reference_panel, current_page_id, current_panel):
+        return
+    fields = temporal_fields_for_constraint(constraint, default_fields)
+    for field in fields:
+        reference_value = reference_state.get(field)
+        current_value = current_state.get(field)
+        if not state_value_matches(reference_value, current_value):
+            issues.append(
+                f"{label}: {field} drift for {entity_id} "
+                f"(reference={normalize_state_value(reference_value) or 'missing'}, "
+                f"current={normalize_state_value(current_value) or 'missing'})."
+            )
+
+
+def validate_allowed_transition(
+    pages_by_id: dict[str, dict[str, Any]],
+    page: dict[str, Any],
+    constraint: dict[str, Any],
+    constraint_index: int,
+    issues: list[str],
+) -> None:
+    label = f"{page['id']} spatial_contract constraint {constraint_index} ({constraint.get('type')})"
+    transition_endpoint(pages_by_id, page, constraint, label, issues)
+    if not cause_reference_exists(pages_by_id, page, constraint):
+        cause_page, cause_panel = cause_ref_parts(constraint, page)
+        issues.append(f"{label}: allowed_transition requires an existing cause reference ({cause_page}:{cause_panel}).")
+
+
+def validate_requires_cause(
+    pages_by_id: dict[str, dict[str, Any]],
+    page: dict[str, Any],
+    constraint: dict[str, Any],
+    constraint_index: int,
+    issues: list[str],
+) -> None:
+    label = f"{page['id']} spatial_contract constraint {constraint_index} ({constraint.get('type')})"
+    if not cause_reference_exists(pages_by_id, page, constraint):
+        cause_page, cause_panel = cause_ref_parts(constraint, page)
+        issues.append(f"{label}: requires_cause points to a missing cause panel ({cause_page}:{cause_panel}).")
+
+
 def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
     issues: list[str] = []
-    pages_by_id = {page["id"]: page for page in pages}
+    pages_by_id = page_lookup_aliases(pages)
     for page in pages:
         contract = page.get("spatial_contract", {})
         if not spatial_contract_has_content(contract):
@@ -636,6 +921,48 @@ def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
                 continue
             if constraint_type == "same_landmark_relation_as":
                 validate_same_landmark_relation(pages_by_id, page, constraint, index, issues)
+                continue
+            if constraint_type == "same_cover_as":
+                validate_temporal_persistence(
+                    pages,
+                    pages_by_id,
+                    page,
+                    contract,
+                    constraint,
+                    index,
+                    issues,
+                    ["cover"],
+                )
+                continue
+            if constraint_type == "state_persists_from":
+                validate_temporal_persistence(
+                    pages,
+                    pages_by_id,
+                    page,
+                    contract,
+                    constraint,
+                    index,
+                    issues,
+                    ["pose", "cover", "visibility", "occlusion", "location_anchor", "held_props", "state_tags"],
+                )
+                continue
+            if constraint_type == "occlusion_persists_from":
+                validate_temporal_persistence(
+                    pages,
+                    pages_by_id,
+                    page,
+                    contract,
+                    constraint,
+                    index,
+                    issues,
+                    ["cover", "visibility", "occlusion", "occluded_by"],
+                )
+                continue
+            if constraint_type == "allowed_transition":
+                validate_allowed_transition(pages_by_id, page, constraint, index, issues)
+                continue
+            if constraint_type == "requires_cause":
+                validate_requires_cause(pages_by_id, page, constraint, index, issues)
                 continue
 
             panel = constraint_panel(contract, constraint, issues, label)
@@ -728,6 +1055,9 @@ def blank_stage_state() -> dict[str, Any]:
         "prompt_file": "",
         "subagent_prompt_file": "",
         "output_path": "",
+        "description_path": "",
+        "description_source": "",
+        "description_imported_at": "",
         "generated_source": "",
         "external_prior_stage": False,
         "worker_status": "",
@@ -820,6 +1150,13 @@ def normalize_stage_record(stage: dict[str, Any], page_id: str, stage_id: str) -
 
 
 def migrate_legacy_stage_records(stages: dict[str, Any]) -> None:
+    if STORYBOARD_BLOCKING_STAGE not in stages:
+        legacy_storyboard = stages.get("storyboard")
+        if isinstance(legacy_storyboard, dict) and legacy_storyboard.get("status") in PASS_STATUSES:
+            stages[STORYBOARD_BLOCKING_STAGE] = dict(legacy_storyboard)
+        else:
+            stages[STORYBOARD_BLOCKING_STAGE] = blank_stage_state()
+
     if STORYBOARD_SKETCH_INK_STAGE not in stages:
         legacy_sketch = stages.get("sketch_ink")
         if isinstance(legacy_sketch, dict) and legacy_sketch.get("status") in PASS_STATUSES:
@@ -953,8 +1290,23 @@ def resolve_page(state: dict[str, Any], page_ref: str) -> dict[str, Any]:
     raise SystemExit(f"Unknown page: {page_ref}")
 
 
-def stage_output_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Path:
+def stage_output_path(run_dir: Path, page: dict[str, Any], stage_id: str, prefer_recorded: bool = False) -> Path:
+    if prefer_recorded:
+        stage = page.get("stages", {}).get(stage_id, {})
+        recorded = str(stage.get("output_path") or "").strip()
+        if recorded:
+            return Path(recorded)
     return run_dir / stage_meta(stage_id)["dir"] / page["filename"]
+
+
+def stage_description_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Path:
+    stem = Path(page["filename"]).stem
+    return run_dir / stage_meta(stage_id)["dir"] / f"{stem}_desc.md"
+
+
+def recorded_stage_description_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Path:
+    recorded = str(stage_state(page, stage_id).get("description_path") or "").strip()
+    return Path(recorded) if recorded else stage_description_path(run_dir, page, stage_id)
 
 
 def stage_prompt_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Path:
@@ -974,38 +1326,95 @@ def previous_stage_id(stage_id: str) -> str:
     return STAGE_IDS[index - 1]
 
 
-def prior_stage_reference(run_dir: Path, page: dict[str, Any], stage_id: str) -> str:
+def prior_stage_reference(
+    run_dir: Path,
+    page: dict[str, Any],
+    stage_id: str,
+    state: dict[str, Any] | None = None,
+) -> str:
     prior = previous_stage_id(stage_id)
     if not prior:
         return "none"
-    path = stage_output_path(run_dir, page, prior)
+    if state is not None and prior not in target_stages(state) and not page_complete_for_stage(page, prior):
+        return f"none ({prior} skipped by target_stages)"
+    path = stage_output_path(run_dir, page, prior, prefer_recorded=True)
+    if stage_id == STORYBOARD_SKETCH_INK_STAGE:
+        desc_path = recorded_stage_description_path(run_dir, page, prior)
+        marker = "required visual blocking input plus *_desc.md spatial/temporal source"
+        image_part = f"{path} ({marker})" if path.exists() else f"{path} ({marker}; not found yet)"
+        desc_part = f"{desc_path} (blocking description)" if desc_path.exists() else f"{desc_path} (blocking description; not found yet)"
+        return f"{image_part}; {desc_part}"
     if stage_id == FINISH_STAGE:
+        blocking_desc = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
         marker = "required visual input / structure reference from storyboard_sketch_ink"
-        return f"{path} ({marker})" if path.exists() else f"{path} ({marker}; not found yet)"
+        image_part = f"{path} ({marker})" if path.exists() else f"{path} ({marker}; not found yet)"
+        if blocking_desc.exists():
+            return f"{image_part}; blocking spatial/temporal source: {blocking_desc}"
+        return image_part
     return str(path) if path.exists() else f"{path} (not found yet)"
 
 
 def assert_required_prior_stage_outputs_exist(state: dict[str, Any], run_dir: Path, pages: list[dict[str, Any]], stage_id: str) -> None:
-    if stage_id != FINISH_STAGE:
+    prior = previous_stage_id(stage_id)
+    if not prior:
+        return
+    if stage_id == STORYBOARD_SKETCH_INK_STAGE and prior not in target_stages(state):
         return
     missing = []
     for page in pages:
-        if not page_complete_for_stage(page, STORYBOARD_SKETCH_INK_STAGE):
-            missing.append(f"{page['filename']} needs parent-inspected storyboard_sketch_ink before finish")
+        if not page_complete_for_stage(page, prior):
+            missing.append(f"{page['filename']} needs parent-inspected {prior} before {stage_id}")
             continue
-        path = stage_output_path(run_dir, page, STORYBOARD_SKETCH_INK_STAGE)
+        path = stage_output_path(run_dir, page, prior, prefer_recorded=True)
         if not path.exists():
             missing.append(f"{page['filename']} requires {path}")
+        if prior == STORYBOARD_BLOCKING_STAGE:
+            desc_path = recorded_stage_description_path(run_dir, page, prior)
+            if not desc_path.exists():
+                missing.append(f"{page['filename']} requires blocking description {desc_path}")
     if missing:
         details = "; ".join(missing)
+        if stage_id == FINISH_STAGE:
+            raise SystemExit(
+                "Finish stage requires the parent-inspected storyboard_sketch_ink image as input before reservation: "
+                f"{details}"
+            )
         raise SystemExit(
-            "Finish stage requires the parent-inspected storyboard_sketch_ink image as input before reservation: "
+            f"{stage_id} stage requires the parent-inspected {prior} image"
+            + (" and description" if prior == STORYBOARD_BLOCKING_STAGE else "")
+            + " as input before reservation: "
             f"{details}"
         )
-    if not stage_review_passed(state, STORYBOARD_SKETCH_INK_STAGE):
-        raise SystemExit(
-            "Finish stage requires storyboard_sketch_ink stage-review pass before reservation."
-        )
+    if not stage_review_passed(state, prior):
+        if stage_id == FINISH_STAGE:
+            raise SystemExit("Finish stage requires storyboard_sketch_ink stage-review pass before reservation.")
+        raise SystemExit(f"{stage_id} stage requires {prior} stage-review pass before reservation.")
+
+
+def validate_blocking_description(path: Path, page: dict[str, Any]) -> None:
+    if not path.exists():
+        raise SystemExit(f"Blocking description file not found: {path}")
+    text = path.read_text(encoding="utf-8")
+    stem_heading = f"# {Path(page['filename']).stem}_desc"
+    issues = []
+    if stem_heading not in text:
+        issues.append(f"missing heading {stem_heading}")
+    for heading in BLOCKING_DESCRIPTION_HEADINGS:
+        if heading not in text:
+            issues.append(f"missing heading {heading}")
+    contract = page.get("spatial_contract", {})
+    if spatial_contract_has_content(contract):
+        for entity in contract.get("entities", []):
+            entity_id = str(entity.get("id") or "").strip()
+            if entity_id and entity_id not in text:
+                issues.append(f"missing spatial_contract entity id {entity_id}")
+        for constraint in contract.get("constraints", []):
+            constraint_id = str(constraint.get("id") or "").strip()
+            if constraint_id and constraint_id not in text:
+                issues.append(f"missing spatial_contract constraint id {constraint_id}")
+    if issues:
+        details = "; ".join(issues)
+        raise SystemExit(f"Invalid blocking description {path}: {details}")
 
 
 def current_blockers(state: dict[str, Any]) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
@@ -1043,7 +1452,7 @@ def reset_stage_review(state: dict[str, Any], stage_id: str, note: str) -> None:
 
 
 def reset_following_stage_gates(state: dict[str, Any], stage_id: str, note: str) -> None:
-    if stage_id == STORYBOARD_SKETCH_INK_STAGE:
+    if stage_id in {STORYBOARD_BLOCKING_STAGE, STORYBOARD_SKETCH_INK_STAGE}:
         gate = state.setdefault("stage_gates", {}).setdefault(
             stage_gate_key(STORYBOARD_SKETCH_INK_STAGE, FINISH_STAGE),
             blank_stage_gate(),
@@ -1081,6 +1490,7 @@ def transition_feedback_outputs(state: dict[str, Any], run_dir: Path, stage_id: 
                 "page_no": page.get("page_no", ""),
                 "stage": stage_id,
                 "output_path": output_path,
+                "description_path": stage.get("description_path", ""),
                 "parent_note": stage.get("parent_note", ""),
                 "spatial_verdict": stage.get("spatial_verdict", ""),
                 "spatial_note": stage.get("spatial_note", ""),
@@ -1287,15 +1697,26 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
 
 
 def stage_instruction(stage_id: str) -> str:
+    if stage_id == STORYBOARD_BLOCKING_STAGE:
+        return (
+            "Create the abstract storyboard blocking page for spatial and temporal verification. Use only "
+            "simple circles, squares, triangles, lines, arrows, silhouettes, shadows, and relation lines. "
+            "Do not render detailed faces, anatomy, costume detail, dialogue, SFX, typography, polished ink, "
+            "tone/color, or final art. The image should make entity positions, facing, gaze/aim/trajectory "
+            "vectors, cover, occlusion, visibility, and panel-to-panel state continuity easy to inspect. "
+            "Also write the required *_desc.md beside the image with symbol legend, panel spatial map, "
+            "constraint check, and temporal continuity check sections."
+        )
     if stage_id == STORYBOARD_SKETCH_INK_STAGE:
         return (
-            "Create the combined Korean comic-book page storyboard, sketch, and ink pass. Show a full "
-            "page with 3-5 panels by default, measured cinematic pacing, experimental freeform panel "
+            "Create the Korean comic-book page sketch and ink pass from the parent-inspected "
+            "storyboard_blocking image and *_desc.md. Show a full page with 3-5 panels by default, "
+            "measured cinematic pacing, experimental freeform panel "
             "design, gutters or open borders where appropriate, clear reading order, active-text-policy "
             "placement or required text absence, clear action blocking, planned detail "
             "density, visual emphasis, comic effect lines, line-weight contrast, and clean ink lines. "
             "Use 1-2 panels for special staging such as a full-page emotion beat, silence, stillness, "
-            "or a decisive action moment."
+            "or a decisive action moment, while preserving all spatial/temporal locks from blocking."
         )
     if stage_id == FINISH_STAGE:
         return (
@@ -1407,6 +1828,8 @@ def spatial_entity_summary(entity: dict[str, Any]) -> str:
         extra.append(f"type={entity.get('type')}")
     if entity.get("role"):
         extra.append(f"role={entity.get('role')}")
+    if entity.get("blocking_symbol"):
+        extra.append(f"blocking_symbol={format_spatial_value(entity.get('blocking_symbol'))}")
     if extra:
         detail += " (" + ", ".join(extra) + ")"
     return detail
@@ -1426,7 +1849,18 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
         entity_parts = []
         for state in snapshot.get("entities", []):
             parts = [str(state.get("id"))]
-            for field in ["position", "facing_vector", "gaze_vector", "aim_vector", "trajectory_vector"]:
+            for field in [
+                "position",
+                "facing_vector",
+                "gaze_vector",
+                "aim_vector",
+                "trajectory_vector",
+                "pose",
+                "cover",
+                "location_anchor",
+                "held_props",
+                "state_tags",
+            ]:
                 if field in state:
                     parts.append(f"{field}={format_spatial_value(state[field])}")
             if state.get("visibility"):
@@ -1541,8 +1975,15 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     excluded_roots = ", ".join(state.get("excluded_source_roots") or [str(DEFAULT_OUTPUT_ROOT)])
     panels = page.get("panels", [])
     text_policy = normalize_text_policy(page.get("text_policy") or state.get("text_policy"))
-    text_policy_lines = text_policy_instruction_lines(text_policy, page)
-    text_policy_worker_checks = text_policy_worker_check_lines(text_policy)
+    render_text_policy = TEXT_POLICY_TEXT_FREE if stage_id == STORYBOARD_BLOCKING_STAGE else text_policy
+    text_policy_lines = text_policy_instruction_lines(render_text_policy, page)
+    if stage_id == STORYBOARD_BLOCKING_STAGE:
+        text_policy_lines = [
+            "Text policy: storyboard_blocking_text_free",
+            f"Approved final-page text_policy is {text_policy}, but storyboard_blocking must render no text.",
+            "Do not render dialogue, SFX, speech balloons, captions, signage, labels, page or panel numbers, symbols with text, or arbitrary typography; put semantic meanings only in the *_desc.md.",
+        ]
+    text_policy_worker_checks = text_policy_worker_check_lines(render_text_policy)
     character_locks = page_policy_items(state, page, "character_locks")
     visual_text_guard = page_policy_items(state, page, "visual_text_guard")
     appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
@@ -1564,12 +2005,48 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     motion_checks = "\n".join(f"- {entry}" for entry in as_list(page.get("motion_checks"))) or "- no impossible motion: thrown, kicked, or shot objects move in the direction implied by body pose and panel action"
     must_match = "\n".join(f"- {entry}" for entry in as_list(page.get("must_match"))) or "- preserve approved page layout, panel count, action direction, and character/object continuity"
     spatial_contract = spatial_contract_prompt_text(page)
-    prior_stage_use_requirement = (
-        "Use the prior-stage image above as the required visual input / structure reference. "
-        "Do not redraw the page from scratch or change the approved panel layout."
-        if stage_id == FINISH_STAGE
-        else "No prior-stage image is used for storyboard_sketch_ink; generate the approved page structure, sketch, and ink pass from the approved plan and allowed source references."
+    blocking_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
+    assigned_description = (
+        f"Assigned blocking description: {stage_description_path(run_dir, page, stage_id)}"
+        if stage_id == STORYBOARD_BLOCKING_STAGE
+        else f"Blocking description reference: {blocking_desc_path if blocking_desc_path.exists() else 'not available'}"
     )
+    if stage_id == STORYBOARD_BLOCKING_STAGE:
+        prior_stage_use_requirement = (
+            "No prior-stage image is used for storyboard_blocking. Generate an abstract text-free spatial "
+            "blocking image from the approved plan and write the required *_desc.md beside it."
+        )
+        page_format_instruction = (
+            "Generate one complete abstract comic-page blocking image with the approved panel count and reading order. "
+            "Use only circles, squares, triangles, lines, arrows, silhouettes, shadows, and relation lines. "
+            "Do not render detailed faces, anatomy, costume detail, dialogue, SFX, captions, labels, typography, "
+            "polished ink, tone/color, or final art. Semantic labels belong only in the *_desc.md."
+        )
+    elif stage_id == STORYBOARD_SKETCH_INK_STAGE:
+        prior_stage_use_requirement = (
+            "Use the parent-inspected storyboard_blocking image and its *_desc.md as required structure references. "
+            "Do not change entity positions, vectors, cover, visibility/occlusion, location anchors, or temporal "
+            "state locks unless an approved allowed_transition explicitly permits it."
+        )
+        page_format_instruction = (
+            "Generate one complete Korean comic-book page image with 3-5 panels by default and measured cinematic "
+            "pacing. Use 1-2 panels for special staging such as full-page emotional beats, silence, stillness, "
+            "or decisive action moments. Use experimental freeform panel design by default: diagonal panels, "
+            "asymmetry, tall vertical panels, open or borderless panels, inset panels, partial overlaps, and wide "
+            "negative space are allowed when reading order and continuity stay clear. Avoid a uniform rectangular "
+            "grid unless the user requested it or the scene clearly benefits from it."
+        )
+    else:
+        prior_stage_use_requirement = (
+            "Use the prior-stage image above as the required visual input / structure reference and keep the "
+            "blocking *_desc.md as the spatial/temporal source of truth. Do not redraw the page from scratch or "
+            "change the approved panel layout."
+        )
+        page_format_instruction = (
+            "Generate one complete Korean comic-book page image with 3-5 panels by default and measured cinematic "
+            "pacing. Preserve the inspected storyboard_sketch_ink panel layout, freeform shapes, negative space, "
+            "visual emphasis, effect-line direction, and ink rhythm."
+        )
     negative = page.get("negative_prompt") or (
         "low resolution, watermark, random logo, unrelated captions, garbled lettering, unreadable "
         "speech balloons, duplicated limbs, broken perspective, impossible object motion, ball moving "
@@ -1578,7 +2055,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     )
     negative_terms = merge_unique(
         negative,
-        text_policy_negative_terms(text_policy),
+        text_policy_negative_terms(render_text_policy),
         visual_text_guard,
         DEFAULT_APPEARANCE_ANATOMY_NEGATIVE_TERMS,
     )
@@ -1589,11 +2066,12 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             f"Scenario title: {state.get('title', '')}",
             f"Stage: {stage_id} ({meta['purpose']})",
             f"Assigned output: {stage_output_path(run_dir, page, stage_id)}",
+            assigned_description,
             f"Page id: {page['id']}",
             f"Page number: {page.get('page_no', page.get('order', ''))}",
             f"Reading order: {page.get('reading_order') or state.get('reading_order') or 'right-to-left or top-to-bottom as approved'}",
             f"Scene refs: {', '.join(page.get('scene_refs', [])) or 'unspecified'}",
-            f"Prior stage reference: {prior_stage_reference(run_dir, page, stage_id)}",
+            f"Prior stage reference: {prior_stage_reference(run_dir, page, stage_id, state)}",
             "",
             "Stage instruction:",
             stage_instruction(stage_id),
@@ -1602,7 +2080,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             prior_stage_use_requirement,
             "",
             "Page format:",
-            "Generate one complete Korean comic-book page image with 3-5 panels by default and measured cinematic pacing. Use 1-2 panels for special staging such as full-page emotional beats, silence, stillness, or decisive action moments. Use experimental freeform panel design by default: diagonal panels, asymmetry, tall vertical panels, open or borderless panels, inset panels, partial overlaps, and wide negative space are allowed when reading order and continuity stay clear. Avoid a uniform rectangular grid unless the user requested it or the scene clearly benefits from it.",
+            page_format_instruction,
             "",
             "Page layout brief:",
             page.get("layout_brief") or page.get("visual_brief") or page.get("prompt") or "",
@@ -1624,7 +2102,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Page dialogue notes:",
             page_dialogue_notes
-            if text_policy == TEXT_POLICY_DIALOGUE_SFX_CAPTIONS
+            if render_text_policy == TEXT_POLICY_DIALOGUE_SFX_CAPTIONS
             else "Dialogue and caption fields remain plan metadata only under this text_policy unless the policy above explicitly permits them.",
             "",
             "Character locks:",
@@ -1681,6 +2159,10 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Worker inspection checklist:",
             "- Matches this exact page and stage",
+            "- For storyboard_blocking, uses only simplified symbols, silhouettes, shadows, arrows, and relation lines; rejects detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
+            "- For storyboard_blocking, writes the required *_desc.md with Symbol Legend, Panel Spatial Map, Constraint Check, and Temporal Continuity Check sections",
+            "- For storyboard_sketch_ink, uses the parent-inspected storyboard_blocking image and *_desc.md as required spatial/temporal references",
+            "- For finish, preserves the inspected sketch/ink image while still respecting the blocking *_desc.md spatial/temporal locks",
             "- Uses 3-5 panels by default with measured cinematic pacing",
             "- Accepts and encourages 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments",
             "- Requires explicit story justification for six or more panels",
@@ -1701,14 +2183,14 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
             "- Character/object positions, action direction, object trajectory, and cause-effect motion are physically plausible",
             "- Enforces every Structured spatial contract entity, panel snapshot, vector, visibility, occlusion, and constraint listed above",
-            "- Rejects target-opposite aim vectors, impossible projectile trajectories, broken cover/line-of-sight blocking, and fixed landmark relation drift",
+            "- Rejects target-opposite aim vectors, impossible projectile trajectories, broken cover/line-of-sight blocking, fixed landmark relation drift, and temporal state drift without an allowed_transition cause",
             "- No examples of impossible staging such as a basketball shot where the ball travels behind the shooter",
             "- Has no obvious anatomy, perspective, crop, object, or continuity defects",
             "",
             "Negative prompt:",
             negative_prompt_text,
             "",
-            "Return only: generated file path, worker_status, worker_note.",
+            "Return only: generated file path, description path for storyboard_blocking, worker_status, worker_note.",
         ]
     )
 
@@ -1724,6 +2206,11 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
     spatial_contract = spatial_contract_prompt_text(page)
     revision_overlays = user_revision_overlay_prompt_text(stage)
+    blocking_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
+    if stage_id == STORYBOARD_BLOCKING_STAGE:
+        description_line = f"Assigned description path: {stage_description_path(run_dir, page, stage_id)}"
+    else:
+        description_line = f"Blocking description reference: {blocking_desc_path if blocking_desc_path.exists() else 'not available'}"
     return "\n".join(
         [
             f"Use ${skill_name}.",
@@ -1737,13 +2224,17 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             f"Stage: {stage_id}",
             f"Prompt file: {stage.get('prompt_file')}",
             f"Output path: {stage.get('output_path')}",
+            description_line,
             f"Batch id: {stage.get('batch_id')}",
             f"Default source folder: {state.get('source_root') or DEFAULT_SOURCE_ROOT}",
             f"Excluded source folder: {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])}",
-            f"Prior-stage reference: {prior_stage_reference(run_dir, page, stage_id)}",
+            f"Prior-stage reference: {prior_stage_reference(run_dir, page, stage_id, state)}",
             "Relevant references:",
             reference_text,
             f"Page text policy: {text_policy}",
+            "Stage render text policy: storyboard_blocking_text_free; render no text in the blocking image"
+            if stage_id == STORYBOARD_BLOCKING_STAGE
+            else f"Stage render text policy: {text_policy}",
             "Character locks:",
             bullet_text(character_locks),
             "Character appearance/anatomy lock:",
@@ -1761,9 +2252,10 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. For storyboard_blocking, use image_gen exactly once and write the *_desc.md beside the image. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
+            "- description path when stage is storyboard_blocking",
             "- worker_status: pass or needs_rerun",
             "- worker_note: concise inspection note",
         ]
@@ -1785,9 +2277,12 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Do not reserve images before approve-plan.",
         f"- Use {state.get('source_root') or DEFAULT_SOURCE_ROOT} as the default source data folder when the user did not specify source/reference paths.",
         f"- Do not use {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])} or any output/ subtree as source/reference data.",
-        "- Generate stages in order: storyboard_sketch_ink, finish.",
+        "- Generate stages in order: storyboard_blocking, storyboard_sketch_ink, finish.",
+        "- storyboard_blocking is an abstract spatial/temporal blocking pass, not final art; it must use simplified symbols plus a sibling *_desc.md.",
+        "- Do not reserve storyboard_sketch_ink until every targeted page has passed storyboard_blocking parent inspection and storyboard_blocking stage-review.",
         "- Do not reserve finish until every page has passed storyboard_sketch_ink parent inspection.",
         "- Do not reserve finish until storyboard_sketch_ink stage-review has passed and the user has approved the next stage with approve-next-stage plus the active feedback request.",
+        "- storyboard_sketch_ink must use the parent-inspected storyboard_blocking image and *_desc.md as required spatial/temporal references when storyboard_blocking is in target_stages.",
         "- Finish must use the parent-inspected storyboard_sketch_ink image as the required visual input / structure reference.",
         "- Use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need clear story justification.",
         "- Use experimental freeform panel design by default and avoid unintentional uniform rectangular grids.",
@@ -1800,7 +2295,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
         "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, character appearance/anatomy locks, and panel/page continuity.",
         "- Worker and parent inspection must reject implausible spatial layout, object motion, or cause-effect direction.",
-        "- Structured spatial_contract entries are generation locks: runner validates plan-time entity/vector/cover/landmark constraints, and parent inspection must record spatial pass or rerun.",
+        "- Structured spatial_contract entries are generation locks: runner validates plan-time entity/vector/cover/landmark/temporal constraints, and parent inspection must record spatial pass or rerun.",
         "",
     ]
     for lock in state.get("character_locks", []):
@@ -2267,6 +2762,8 @@ def command_next_batch(args: argparse.Namespace) -> None:
         prompt_path.write_text(prompt_text(run_dir, page, stage_id, state), encoding="utf-8")
         stage["prompt_file"] = str(prompt_path)
         stage["output_path"] = str(stage_output_path(run_dir, page, stage_id))
+        if stage_id == STORYBOARD_BLOCKING_STAGE:
+            stage["description_path"] = str(stage_description_path(run_dir, page, stage_id))
         subagent_path = subagent_prompt_path(run_dir, page, stage_id)
         subagent_path.parent.mkdir(parents=True, exist_ok=True)
         stage["subagent_prompt_file"] = str(subagent_path)
@@ -2314,9 +2811,25 @@ def command_import(args: argparse.Namespace) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if generated.resolve(strict=False) != destination.resolve(strict=False):
         shutil.copy2(generated, destination)
+    description_destination = None
+    if stage_id == STORYBOARD_BLOCKING_STAGE:
+        if not args.description:
+            raise SystemExit("storyboard_blocking import requires --description <desc.md>.")
+        description_source = Path(args.description)
+        if not description_source.exists():
+            raise SystemExit(f"Blocking description file not found: {description_source}")
+        description_destination = stage_description_path(run_dir, page, stage_id)
+        description_destination.parent.mkdir(parents=True, exist_ok=True)
+        if description_source.resolve(strict=False) != description_destination.resolve(strict=False):
+            shutil.copy2(description_source, description_destination)
+        validate_blocking_description(description_destination, page)
     stage["status"] = "imported"
     stage["generated_source"] = str(generated)
     stage["output_path"] = str(destination)
+    if description_destination is not None:
+        stage["description_path"] = str(description_destination)
+        stage["description_source"] = str(args.description)
+        stage["description_imported_at"] = now_iso()
     stage["worker_status"] = args.worker_status
     stage["worker_note"] = args.worker_note
     stage["imported_at"] = now_iso()
@@ -2335,9 +2848,11 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
     stage = stage_state(page, stage_id)
     if stage.get("status") not in {"imported", "inspected_pass", "complete"}:
         raise SystemExit(f"Page stage is not imported for inspection: {page['filename']} {stage_id} ({stage.get('status')})")
-    output = stage_output_path(run_dir, page, stage_id)
+    output = stage_output_path(run_dir, page, stage_id, prefer_recorded=True)
     if not output.exists():
         raise SystemExit(f"Output file does not exist: {output}")
+    if stage_id == STORYBOARD_BLOCKING_STAGE:
+        validate_blocking_description(recorded_stage_description_path(run_dir, page, stage_id), page)
     spatial_note = args.spatial_note or (
         "parent spatial contract inspection passed"
         if spatial_contract_has_content(page.get("spatial_contract"))
@@ -2611,6 +3126,20 @@ def command_import_prior_stage(args: argparse.Namespace) -> None:
     if generated.resolve(strict=False) != destination.resolve(strict=False):
         shutil.copy2(generated, destination)
     stage = stage_state(page, args.stage)
+    if args.stage == STORYBOARD_BLOCKING_STAGE:
+        if not args.description:
+            raise SystemExit("import-prior-stage for storyboard_blocking requires --description <desc.md>.")
+        description_source = Path(args.description)
+        if not description_source.exists():
+            raise SystemExit(f"Blocking description file not found: {description_source}")
+        description_destination = stage_description_path(run_dir, page, args.stage)
+        description_destination.parent.mkdir(parents=True, exist_ok=True)
+        if description_source.resolve(strict=False) != description_destination.resolve(strict=False):
+            shutil.copy2(description_source, description_destination)
+        validate_blocking_description(description_destination, page)
+        stage["description_path"] = str(description_destination)
+        stage["description_source"] = str(description_source)
+        stage["description_imported_at"] = now_iso()
     stage["status"] = "inspected_pass"
     stage["generated_source"] = str(generated)
     stage["output_path"] = str(destination)
@@ -2705,6 +3234,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_cmd.add_argument("--item", required=True)
     import_cmd.add_argument("--stage", choices=STAGE_IDS, required=True)
     import_cmd.add_argument("--generated", required=True)
+    import_cmd.add_argument("--description", default="")
     import_cmd.add_argument("--worker-status", choices=sorted(WORKER_STATUS_VALUES), required=True)
     import_cmd.add_argument("--worker-note", required=True)
     import_cmd.set_defaults(func=command_import)
@@ -2760,6 +3290,7 @@ def build_parser() -> argparse.ArgumentParser:
     import_prior.add_argument("--item", required=True)
     import_prior.add_argument("--stage", choices=STAGE_IDS, required=True)
     import_prior.add_argument("--generated", required=True)
+    import_prior.add_argument("--description", default="")
     import_prior.add_argument("--note", required=True)
     import_prior.set_defaults(func=command_import_prior_stage)
 

@@ -11,6 +11,7 @@ Convert a story outline, plot, or scenario into a resumable Korean comic-book pa
 
 Actual image generation is delegated to stage skills:
 
+- `$create-comic-storyboard-blocking` for `storyboard_blocking`
 - `$create-comic-storyboard-sketch-ink` for `storyboard_sketch_ink`
 - `$create-comic-storyboard-finish` for `finish`
 
@@ -20,7 +21,7 @@ Use Codex built-in `image_gen` only through one subagent per reserved page. Do n
 
 If the user does not specify a save folder, create `output/<slug>-comic-storyboard-pack-YYYYMMDD-HHMMSS/` under `/Users/chasoik/Projects/character-sheet-generator/output/`.
 
-Save `scenario.md`, `state.json`, `approved_storyboard_plan.json`, `batch_plan.md`, prompt files, subagent prompt files, generated stage images, worker notes, parent inspection notes, and stage-review state under that run folder.
+Save `scenario.md`, `state.json`, `approved_storyboard_plan.json`, `batch_plan.md`, prompt files, subagent prompt files, generated stage images, blocking `*_desc.md` files, worker notes, parent inspection notes, and stage-review state under that run folder.
 
 If the user does not specify source/reference paths, use `/Users/chasoik/Projects/character-sheet-generator/sources/`. Do not use `/Users/chasoik/Projects/character-sheet-generator/output/` or any `output/` subtree as source/reference data. Current-run generated images may be used only as prior-stage workflow references after parent inspection.
 
@@ -35,8 +36,10 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Include page-level layout notes and panel-level composition/viewpoint notes.
 - Include detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines.
 - Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and `must_match`.
-- For action or staging where direction, cover, line of sight, object trajectory, or landmark continuity matters, include a structured `spatial_contract`. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, and machine-checkable constraints before generation.
-- Use `spatial_contract.constraints` for relations such as `aims_at`, `trajectory_to`, `cover_between`, `behind_cover_from`, `line_of_sight_blocked`, `left_of`, `right_of`, and `same_landmark_relation_as`. Treat failures as generation blockers before approval and rerun causes after image inspection.
+- For action or staging where direction, cover, line of sight, object trajectory, landmark continuity, or page-to-page state continuity matters, include a structured `spatial_contract`. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, temporal state fields, and machine-checkable constraints before generation.
+- Use `spatial_contract.entities[].blocking_symbol` to predefine the blocking symbol for important characters, objects, cover, landmarks, and motion markers.
+- Use `spatial_contract.panel_snapshots[].entities[]` fields such as `pose`, `cover`, `visibility`, `occlusion`, `location_anchor`, `held_props`, and `state_tags` when state continuity matters.
+- Use `spatial_contract.constraints` for relations such as `aims_at`, `trajectory_to`, `cover_between`, `behind_cover_from`, `line_of_sight_blocked`, `left_of`, `right_of`, `same_landmark_relation_as`, `same_cover_as`, `state_persists_from`, `occlusion_persists_from`, `allowed_transition`, and `requires_cause`. Treat failures as generation blockers before approval and rerun causes after image inspection.
 - Include character appearance/anatomy locks in `character_locks` or `must_match`: approved species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.
 - Unless the plan or source explicitly approves a one-eyed, asymmetric, non-human, or otherwise unusual structure, treat missing/extra/merged eyes, one-eyed appearance for a two-eyed character, missing/extra limbs or fingers, changed species/body type, broken joints, and broken body proportions as rerun causes.
 - Preserve source scene references such as `S01`, `S02-S04`, or the user's own scene names.
@@ -70,25 +73,28 @@ Use this format:
 - 캐릭터 고정 조건(character_locks): ...
 - 캐릭터 외형/해부 고정 조건(appearance/anatomy): 종족/신체 구조, 얼굴 구조, 눈 개수/배치, 손/손가락/팔/다리 개수, 실루엣, 체형 비율, 자세. 예: 두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 하며, 외눈 캐릭터처럼 보이면 rerun.
 - 이미지 내 문자 방지 조건(visual_text_guard): ...
-- 구조화 공간 계약(spatial_contract): 총구/시선/투사체/엄폐/랜드마크 관계가 중요한 컷은 승인 전 벡터와 관계 검증을 통과해야 함
+- 구조화 공간/시간 계약(spatial_contract): 총구/시선/투사체/엄폐/랜드마크/상태 유지 관계가 중요한 컷은 승인 전 벡터, 관계, 시간적 상태 검증을 통과해야 함
 
-| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/spatial_contract 검수 포인트 |
+| id | 파일명 | 장면 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/상태유지/spatial_contract 검수 포인트 |
 | ... |
 
 승인 후 진행 방식:
-- 1단계: 콘티/스케치/펜선 storyboard_sketch_ink
-- 각 페이지는 $create-comic-storyboard-sketch-ink subagent가 생성/1차 검수
+- 1단계: 공간 검증용 콘티 storyboard_blocking
+- 각 페이지는 $create-comic-storyboard-blocking subagent가 생성/1차 검수
+- 1단계 이미지는 동그라미/네모/세모/선/화살표/실루엣/그림자만 사용하고, 같은 이름의 `<page_stem>_desc.md`를 반드시 작성
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
-- 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_sketch_ink_to_finish.json`과 1단계 산출물을 사용자에게 보고하고, 다음 단계 진행 여부를 반드시 별도로 확인
-- 처음 페이지 계획 승인과 1단계 이후 finish 승인은 별개의 승인이다. 초기 "승인"을 finish 진행 승인으로 재사용하지 않는다.
+- 1단계 stage-review 통과 후 2단계: 스케치/펜선 storyboard_sketch_ink
+- 2단계는 $create-comic-storyboard-sketch-ink subagent가 parent-inspected blocking 이미지와 `*_desc.md`를 필수 입력으로 사용
+- 2단계 모든 페이지 부모 검수와 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_sketch_ink_to_finish.json`과 2단계 산출물을 사용자에게 보고하고, finish 진행 여부를 반드시 별도로 확인
+- 처음 페이지 계획 승인과 2단계 이후 finish 승인은 별개의 승인이다. 초기 "승인"을 finish 진행 승인으로 재사용하지 않는다.
 - 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_finish`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
 - approve-next-stage 전에는 finish 예약 금지. `stage-review`, `approve-next-stage`, finish `next-batch`를 같은 병렬 실행이나 같은 사용자 응답 없이 연속 실행하지 않는다.
-- 사용자가 중단하면 stop-after-stage로 1단계 산출물만 완료 처리
+- 사용자가 중단하면 stop-after-stage로 스케치/펜선 산출물까지만 완료 처리
 - 사용자 또는 에이전트가 수정을 요청하면 `$review-image-overlays`로 색상별 오버레이 PNG/TXT와 `revision_requests.json`을 저장하고, `request-revisions`로 해당 페이지를 rerun 처리
-- 사용자가 승인하면 2단계: 톤/채색/마무리 finish
-- 2단계는 $create-comic-storyboard-finish subagent가 생성/1차 검수
-- 2단계는 parent-inspected storyboard_sketch_ink 이미지를 필수 입력으로 사용
+- 사용자가 승인하면 3단계: 톤/채색/마무리 finish
+- 3단계는 $create-comic-storyboard-finish subagent가 생성/1차 검수
+- 3단계는 parent-inspected storyboard_sketch_ink 이미지와 blocking `*_desc.md` 공간/시간 잠금을 필수 입력으로 사용
 ```
 
 Do not call `approve-plan` or `next-batch` until the user approves this list. If the user edits generated-page details or rendered text, update the plan and ask approval again.
@@ -139,23 +145,69 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
           "units": "normalized 0..1 or consistent scene units"
         },
         "entities": [
-          {"id": "protagonist", "type": "character", "role": "shooter"},
-          {"id": "basketball", "type": "object", "role": "projectile"},
-          {"id": "hoop", "type": "landmark", "role": "target"}
+          {
+            "id": "protagonist",
+            "type": "character",
+            "role": "shooter",
+            "blocking_symbol": {"shape": "circle", "tone": "solid black", "meaning": "protagonist body center"}
+          },
+          {
+            "id": "basketball",
+            "type": "object",
+            "role": "projectile",
+            "blocking_symbol": {"shape": "circle", "tone": "hollow", "meaning": "basketball"}
+          },
+          {
+            "id": "hoop",
+            "type": "landmark",
+            "role": "target",
+            "blocking_symbol": {"shape": "square", "tone": "gray outline", "meaning": "basketball hoop/rim target"}
+          }
         ],
         "panel_snapshots": [
           {
             "panel": 1,
             "entities": [
-              {"id": "protagonist", "position": [0.25, 0.68], "facing_vector": [1, -0.15]},
-              {"id": "basketball", "position": [0.34, 0.55], "trajectory_vector": [1, -0.2]},
-              {"id": "hoop", "position": [0.82, 0.36]}
+              {
+                "id": "protagonist",
+                "position": [0.25, 0.68],
+                "facing_vector": [1, -0.15],
+                "pose": "jump-shot release",
+                "cover": "none",
+                "visibility": "visible",
+                "occlusion": "none",
+                "location_anchor": "left key area",
+                "held_props": [],
+                "state_tags": ["shooting"]
+              },
+              {"id": "basketball", "position": [0.34, 0.55], "trajectory_vector": [1, -0.2], "state_tags": ["released"]},
+              {"id": "hoop", "position": [0.82, 0.36], "location_anchor": "far wall"}
             ]
           }
         ],
         "constraints": [
-          {"type": "trajectory_to", "panel": 1, "object": "basketball", "target": "hoop"},
-          {"type": "right_of", "panel": 1, "subject": "hoop", "anchor": "protagonist"}
+          {"id": "ball-to-hoop", "type": "trajectory_to", "panel": 1, "object": "basketball", "target": "hoop"},
+          {"id": "hoop-right-of-protagonist", "type": "right_of", "panel": 1, "subject": "hoop", "anchor": "protagonist"},
+          {
+            "id": "protagonist-state-carries-from-prior-panel",
+            "type": "state_persists_from",
+            "panel": 1,
+            "entity": "protagonist",
+            "reference_page": "001-gym-arrival",
+            "reference_panel": 1,
+            "state_fields": ["cover", "visibility", "location_anchor"]
+          },
+          {
+            "id": "approved-shot-release-transition",
+            "type": "allowed_transition",
+            "entity": "basketball",
+            "from_page": "001-gym-arrival",
+            "from_panel": 1,
+            "to_page": "001-gym-arrival",
+            "to_panel": 1,
+            "cause_page": "001-gym-arrival",
+            "cause_panel": 1
+          }
         ]
       },
       "panels": [
@@ -203,11 +255,12 @@ python3 "$RUNNER" spatial-check --plan-file <approved-plan.json>
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json>
 ```
 
-`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite aim vectors, impossible projectile trajectories, missing cover between actor/threat, and fixed-landmark relation drift fail before any generation is reserved. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
+`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite aim vectors, impossible projectile trajectories, missing cover between actor/threat, fixed-landmark relation drift, cover/state persistence drift, and missing allowed-transition causes fail before any generation is reserved. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
 
 Optional single-stage targets:
 
 ```bash
+python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json> --target-stage storyboard_blocking
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json> --target-stage storyboard_sketch_ink
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json> --target-stage finish
 ```
@@ -218,11 +271,25 @@ Reserve and process a batch:
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 # Spawn one fork_context=true subagent per printed item.
 # Use the printed SUBAGENT_PROMPT_FILE content as the subagent task.
-python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
-python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial contract visual inspection pass>"
-python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<parent inspection note>" --spatial-verdict needs_rerun --spatial-note "<spatial contradiction found>"
-python3 "$RUNNER" rerun --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<reason>"
+python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_blocking --generated <generated-path> --description <page_stem>_desc.md --worker-status pass --worker-note "<subagent note>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<parent inspection note>" --spatial-verdict needs_rerun --spatial-note "<spatial/temporal contradiction found>"
+python3 "$RUNNER" rerun --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<reason>"
 python3 "$RUNNER" batch-status --run-dir <run-dir> --batch-id <batch-id>
+```
+
+After every page in `storyboard_blocking` passes parent inspection:
+
+```bash
+python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_blocking --status pass --note "<blocking spatial/temporal continuity pass>"
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+```
+
+The next batch is `storyboard_sketch_ink`. Import/inspect it the same way, except no `--description` is used:
+
+```bash
+python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
 ```
 
 After every page in `storyboard_sketch_ink` passes parent inspection:
@@ -238,7 +305,7 @@ This sets `stage_gates.storyboard_sketch_ink_to_finish.status` to `pending_user_
 <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.md
 ```
 
-At that point report the first-stage outputs and the feedback request path to the user, then wait for the user's explicit next-stage choice. The original page-plan approval is not a finish approval.
+At that point report the sketch/ink-stage outputs and the feedback request path to the user, then wait for the user's explicit next-stage choice. The original page-plan approval is not a finish approval.
 
 Offer exactly these feedback choices:
 
@@ -246,7 +313,7 @@ Offer exactly these feedback choices:
 - Open revision UI or create agent markup: use `$review-image-overlays` to collect color-coded overlay requests.
 - Stop after stage: keep only `storyboard_sketch_ink` with `stop-after-stage`.
 
-Do not run `approve-next-stage` in the same tool call, parallel group, or assistant turn as the `stage-review` unless the user has explicitly answered this feedback request after seeing the first-stage outputs. Do not reserve finish with `next-batch` until `approve-next-stage` has consumed the runner-generated feedback request.
+Do not run `approve-next-stage` in the same tool call, parallel group, or assistant turn as the `stage-review` unless the user has explicitly answered this feedback request after seeing the sketch/ink-stage outputs. Do not reserve finish with `next-batch` until `approve-next-stage` has consumed the runner-generated feedback request.
 
 If the user wants the revision UI:
 
@@ -298,13 +365,16 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 ## State Rules
 
 - `approve-plan` is the only transition from approval-gated planning into generation-ready state.
-- `target_stages` defaults to `["storyboard_sketch_ink", "finish"]`.
+- `target_stages` defaults to `["storyboard_blocking", "storyboard_sketch_ink", "finish"]`.
+- Existing already-approved legacy states keep their recorded `target_stages`; they are not force-migrated into blocking.
+- `storyboard_blocking` must finish parent inspection and stage-review before default `storyboard_sketch_ink` reservation.
+- `storyboard_blocking` imports require `--description <desc.md>`, and the runner validates required headings plus all active entity/constraint ids.
 - `storyboard_sketch_ink` must finish parent inspection and stage-review before `finish`.
 - `finish` also requires `approve-next-stage` with the active runner-generated feedback request and `--feedback-choice approve_finish`; stage-review pass or parent-only note is not enough.
 - `stop-after-stage` changes the completion target to the requested completed stage.
 - `finish` requires a parent-inspected or imported prior `storyboard_sketch_ink` image.
 - `next-batch --limit 4` reserves at most four eligible pages and writes both `prompts/<stage>/...prompt.txt` and `subagent_prompts/<stage>/...subagent.txt`.
-- `next-batch` injects `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved entity positions, vectors, visibility/occlusion, cover, line-of-sight, trajectory, and landmark-relation constraints.
+- `next-batch` injects `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved entity positions, vectors, visibility/occlusion, cover, line-of-sight, trajectory, landmark-relation constraints, and temporal state constraints.
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
 - Parent `inspect-pass --spatial-verdict needs_rerun` never marks the page passed; it routes the page back to `pending` rerun and resets stage review / following gates.
@@ -315,13 +385,17 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 
 ## Parent Verification
 
-Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, structured `spatial_contract` compliance, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
+Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, structured `spatial_contract` compliance, temporal continuity, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
 
-When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, and constraint. Reject target-opposite aim vectors, projectile paths that do not move toward the target, cover that is not between actor and threat, exposed characters that were specified as hidden behind cover, broken line-of-sight blocking, left/right relation flips, and fixed landmark relation drift. Record the result with `--spatial-verdict` and `--spatial-note`.
+For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, missing entity ids, missing constraint ids, detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
+
+When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, temporal state field, and constraint. Reject target-opposite aim vectors, projectile paths that do not move toward the target, cover that is not between actor and threat, exposed characters that were specified as hidden behind cover, broken line-of-sight blocking, left/right relation flips, fixed landmark relation drift, low cover turning into a building wall without cause, and pose/cover/location/held-prop/state-tag drift without an `allowed_transition`. Record the result with `--spatial-verdict` and `--spatial-note`.
 
 Character appearance/anatomy is an independent reject criterion, not just a technical-quality note. Unless explicitly approved by the plan or source, rerun pages with missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.
 
-For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, structured spatial contract, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
+For `storyboard_sketch_ink`, verify that sketch/ink preserved the inspected blocking PNG and `*_desc.md` spatial/temporal relationships while adding real drawing detail.
+
+For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, blocking `*_desc.md`, structured spatial contract, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
 
 Do not claim page coverage, text quality, continuity, spatial logic, or stage quality unless the image was inspected.
 
@@ -335,7 +409,7 @@ After each batch or gate, report in Korean:
 - 저장 폴더: ...
 - 상태 파일: ...
 - 대상 단계(target_stages): ...
-- 현재 단계: storyboard_sketch_ink | finish | complete
+- 현재 단계: storyboard_blocking | storyboard_sketch_ink | finish | complete
 - 승인된 페이지 수: ...
 - 이번 병렬 그룹: ...
 - worker 검수 결과: ...
@@ -344,7 +418,7 @@ After each batch or gate, report in Korean:
 - 캐릭터 고정 조건 검수: ...
 - 캐릭터 외형/해부 검수: ...
 - 이미지 내 문자 방지 검수: ...
-- 공간/동선 검수: ...
+- 공간/동선/상태유지 검수: ...
 - 단계 마무리 검수 결과: ...
 - 다음 단계 사용자 피드백 게이트: pending_user_feedback | approved | stopped
 - 피드백 요청 파일: <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json

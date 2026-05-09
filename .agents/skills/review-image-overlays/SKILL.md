@@ -21,6 +21,8 @@ python3 "$RUNNER" serve --run-dir <run-dir> --stage storyboard_sketch_ink
 
 The script binds to `127.0.0.1` on an empty port by default, opens the browser, and prints `REVIEW_OVERLAY_URL`.
 
+For comic storyboard runs, valid review stages include `storyboard_blocking`, `storyboard_sketch_ink`, and `finish`. User feedback before finish is normally collected after `storyboard_sketch_ink`; blocking overlays are for internal spatial/temporal correction before sketch/ink.
+
 Use `--items <filename>` repeatedly to limit the gallery:
 
 ```bash

@@ -428,6 +428,73 @@ def generate_file(root, name="generated.png", data=b"generated image"):
     return path
 
 
+def make_state_legacy_parallel(run_dir):
+    state_path = run_dir / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state.pop("page_generation_mode", None)
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def import_and_inspect(root, run_dir, item, stage_id, generated):
+    run_cli(
+        "import",
+        "--run-dir",
+        str(run_dir),
+        "--item",
+        item,
+        "--stage",
+        stage_id,
+        "--generated",
+        str(generated),
+        "--worker-status",
+        "pass",
+        "--worker-note",
+        "worker pass",
+        cwd=root,
+    )
+    run_cli(
+        "inspect-pass",
+        "--run-dir",
+        str(run_dir),
+        "--item",
+        item,
+        "--stage",
+        stage_id,
+        "--note",
+        "parent pass",
+        cwd=root,
+    )
+
+
+def anchor_review_pass(root, run_dir, stage_id, item="001-page-1.png", note="stage level anchor pass"):
+    return run_cli(
+        "anchor-review",
+        "--run-dir",
+        str(run_dir),
+        "--stage",
+        stage_id,
+        "--item",
+        item,
+        "--status",
+        "pass",
+        "--note",
+        note,
+        cwd=root,
+    )
+
+
+def maybe_anchor_review_first_page(root, run_dir, stage_id, page):
+    state = json.loads((run_dir / "state.json").read_text())
+    if state.get("page_generation_mode") != "sequential_prior_pages":
+        return
+    if not state.get("pages") or state["pages"][0]["id"] != page["id"]:
+        return
+    review = state.get("stage_anchor_reviews", {}).get(stage_id, {})
+    if review.get("status") == "passed":
+        return
+    anchor_review_pass(root, run_dir, stage_id, item=page["filename"], note=f"{stage_id} anchor level pass")
+
+
 def stage_is_complete(state, stage_id):
     pages = state.get("pages", [])
     return bool(pages) and all(
@@ -496,6 +563,7 @@ def ensure_stage_review_passed(root, run_dir, stage_id, note="stage review pass"
                 "parent pass",
                 cwd=root,
             )
+            maybe_anchor_review_first_page(root, run_dir, stage_id, page)
     state = json.loads((run_dir / "state.json").read_text())
     if state["stage_reviews"][stage_id]["status"] != "passed":
         run_cli(
@@ -548,8 +616,12 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
             self.assertEqual(state["stage_reviews"][SKETCH_INK_STAGE]["status"], "pending")
             self.assertEqual(state["stage_reviews"][FINISH_STAGE]["status"], "pending")
+            self.assertEqual(state["stage_anchor_reviews"][FIRST_STAGE]["status"], "pending")
+            self.assertEqual(state["stage_anchor_reviews"][SKETCH_INK_STAGE]["status"], "pending")
+            self.assertEqual(state["stage_anchor_reviews"][FINISH_STAGE]["status"], "pending")
             self.assertEqual(state["stage_gates"][f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}"]["status"], "pending")
             self.assertEqual(state["stage_gates"][f"{SKETCH_INK_STAGE}_to_{FINISH_STAGE}"]["status"], "pending")
+            self.assertEqual(state["page_generation_mode"], "sequential_prior_pages")
 
     def test_approve_plan_normalizes_pages_and_nested_panels(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -562,6 +634,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
 
             self.assertTrue(state["plan_approved"])
             self.assertEqual(state["target_stages"], STAGE_ORDER)
+            self.assertEqual(state["page_generation_mode"], "sequential_prior_pages")
             self.assertEqual(len(state["pages"]), 2)
             first = state["pages"][0]
             self.assertEqual(first["id"], "001-page-1")
@@ -582,11 +655,13 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(set(first["stages"].keys()), set(STAGE_ORDER))
             self.assertEqual(first["stages"][FIRST_STAGE]["status"], "pending")
             self.assertEqual(set(state["stage_reviews"].keys()), set(STAGE_ORDER))
+            self.assertEqual(set(state["stage_anchor_reviews"].keys()), set(STAGE_ORDER))
             self.assertEqual(
                 set(state["stage_gates"].keys()),
                 {f"{BLOCKING_STAGE}_to_{SKETCH_INK_STAGE}", f"{SKETCH_INK_STAGE}_to_{FINISH_STAGE}"},
             )
             self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
+            self.assertEqual(state["stage_anchor_reviews"][FIRST_STAGE]["status"], "pending")
             self.assertTrue((run_dir / "approved_storyboard_plan.json").exists())
             self.assertTrue((run_dir / "batch_plan.md").exists())
 
@@ -995,7 +1070,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Plan is not approved", result.stderr)
 
-    def test_next_batch_reserves_at_most_four_current_stage_pages(self):
+    def test_next_batch_reserves_one_page_by_default_in_sequential_prior_pages_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = init_run(root)
@@ -1003,8 +1078,101 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
 
             result = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "10", cwd=root)
             self.assertIn(f"STAGE: {FIRST_STAGE}", result.stdout)
+            self.assertEqual(result.stdout.count("ITEM: "), 1)
+            self.assertIn("ITEM: 001-page-1.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            self.assertEqual(state["page_generation_mode"], "sequential_prior_pages")
+            reserved = [
+                page
+                for page in state["pages"]
+                if page["stages"][FIRST_STAGE]["status"] == "generation_requested"
+            ]
+            self.assertEqual(len(reserved), 1)
+            self.assertEqual({page["stages"][FIRST_STAGE]["batch_id"] for page in reserved}, {"batch-001"})
+            self.assertEqual(state["pages"][1]["stages"][FIRST_STAGE]["status"], "pending")
+
+    def test_stage_anchor_review_blocks_second_page_until_passed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=2)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            import_and_inspect(root, run_dir, "001-page-1.png", FIRST_STAGE, generated)
+
+            blocked = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            self.assertIn(f"STAGE_ANCHOR_REVIEW_REQUIRED: {FIRST_STAGE}", blocked.stdout)
+            self.assertIn("ANCHOR_REVIEW_COMMAND:", blocked.stdout)
+            self.assertNotIn("BATCH_ID:", blocked.stdout)
+
+            anchor_review_pass(root, run_dir, FIRST_STAGE, note="blocking anchor level is correct")
+            second = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            self.assertIn("ITEM: 002-page-2.png", second.stdout)
+
+            state = json.loads((run_dir / "state.json").read_text())
+            review = state["stage_anchor_reviews"][FIRST_STAGE]
+            self.assertEqual(review["status"], "passed")
+            self.assertEqual(review["anchor_item"], "001-page-1.png")
+            self.assertEqual(review["anchor_level_note"], "blocking anchor level is correct")
+            second_stage = state["pages"][1]["stages"][FIRST_STAGE]
+            second_prompt = Path(second_stage["prompt_file"]).read_text(encoding="utf-8")
+            second_subagent = Path(second_stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+            self.assertIn("Stage level anchor reference:", second_prompt)
+            self.assertIn("blocking anchor level is correct", second_prompt)
+            self.assertIn("Stage level anchor reference:", second_subagent)
+
+    def test_stage_anchor_review_needs_rerun_resets_anchor_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=2)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            import_and_inspect(root, run_dir, "001-page-1.png", FIRST_STAGE, generated)
+
+            result = run_cli(
+                "anchor-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--item",
+                "001-page-1.png",
+                "--status",
+                "needs_rerun",
+                "--note",
+                "blocking is too polished for the rough anchor",
+                "--issue",
+                "too polished",
+                cwd=root,
+            )
+            self.assertIn(f"STAGE_ANCHOR_REVIEW: {FIRST_STAGE}", result.stdout)
+            self.assertIn("STATUS: needs_rerun", result.stdout)
+
+            state = json.loads((run_dir / "state.json").read_text())
+            first_stage = state["pages"][0]["stages"][FIRST_STAGE]
+            self.assertEqual(first_stage["status"], "pending")
+            self.assertTrue(first_stage["rerun_pending"])
+            self.assertIn("blocking is too polished", first_stage["parent_note"])
+            review = state["stage_anchor_reviews"][FIRST_STAGE]
+            self.assertEqual(review["status"], "needs_rerun")
+            self.assertEqual(review["issues"], ["too polished"])
+            self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
+
+    def test_legacy_parallel_batch_reserves_at_most_four_current_stage_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=5)
+            make_state_legacy_parallel(run_dir)
+
+            result = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "10", cwd=root)
+            self.assertIn(f"STAGE: {FIRST_STAGE}", result.stdout)
             self.assertEqual(result.stdout.count("ITEM: "), 4)
             state = json.loads((run_dir / "state.json").read_text())
+            self.assertEqual(state["page_generation_mode"], "parallel_batch")
             reserved = [
                 page
                 for page in state["pages"]
@@ -1013,6 +1181,124 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(len(reserved), 4)
             self.assertEqual({page["stages"][FIRST_STAGE]["batch_id"] for page in reserved}, {"batch-001"})
             self.assertEqual(state["pages"][4]["stages"][FIRST_STAGE]["status"], "pending")
+
+    def test_sequential_prior_pages_records_required_image_attachments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            generated = generate_file(root)
+
+            first = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            self.assertEqual(first.stdout.count("ITEM: "), 1)
+            self.assertIn("ITEM: 001-page-1.png", first.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            first_stage = state["pages"][0]["stages"][FIRST_STAGE]
+            self.assertEqual(first_stage["visual_reference_paths"], [])
+            first_prompt = Path(first_stage["prompt_file"]).read_text(encoding="utf-8")
+            first_subagent = Path(first_stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+            self.assertIn("Required image attachments:\n- none", first_prompt)
+            self.assertIn("Prior page continuity references:\n- none", first_subagent)
+
+            import_and_inspect(root, run_dir, "001-page-1.png", FIRST_STAGE, generated)
+            anchor_review_pass(root, run_dir, FIRST_STAGE, note="blocking anchor level pass")
+            second = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            page1_blocking = str(run_dir / "01_storyboard_blocking" / "001-page-1.png")
+            self.assertEqual(second.stdout.count("ITEM: "), 1)
+            self.assertIn("ITEM: 002-page-2.png", second.stdout)
+            self.assertIn(f"VISUAL_REFERENCE_IMAGE: {page1_blocking}", second.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            second_stage = state["pages"][1]["stages"][FIRST_STAGE]
+            self.assertEqual(second_stage["visual_reference_paths"], [page1_blocking])
+            second_prompt = Path(second_stage["prompt_file"]).read_text(encoding="utf-8")
+            second_subagent = Path(second_stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+            self.assertIn("Required image attachments:", second_prompt)
+            self.assertIn(page1_blocking, second_prompt)
+            self.assertIn("priority 1: 001-page-1.png", second_subagent)
+
+            import_and_inspect(root, run_dir, "002-page-2.png", FIRST_STAGE, generated)
+            third = run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            page2_blocking = str(run_dir / "01_storyboard_blocking" / "002-page-2.png")
+            self.assertEqual(third.stdout.count("ITEM: "), 1)
+            self.assertIn("ITEM: 003-page-3.png", third.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            third_stage = state["pages"][2]["stages"][FIRST_STAGE]
+            self.assertEqual(third_stage["visual_reference_paths"], [page2_blocking, page1_blocking])
+            third_subagent = Path(third_stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+            self.assertIn("priority 1: 002-page-2.png", third_subagent)
+            self.assertIn("priority 2: 001-page-1.png", third_subagent)
+
+    def test_later_stages_include_current_prior_stage_and_prior_page_references(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=2)
+            generated = generate_file(root)
+
+            ensure_stage_review_passed(root, run_dir, BLOCKING_STAGE, note="blocking pass")
+            approve_sketch_ink_stage(root, run_dir)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            page1_sketch = state["pages"][0]["stages"][SKETCH_INK_STAGE]
+            page1_blocking_path = str(run_dir / "01_storyboard_blocking" / "001-page-1.png")
+            self.assertEqual(page1_sketch["visual_reference_paths"], [page1_blocking_path])
+            self.assertIn("Prior-stage reference:", Path(page1_sketch["subagent_prompt_file"]).read_text(encoding="utf-8"))
+
+            import_and_inspect(root, run_dir, "001-page-1.png", SKETCH_INK_STAGE, generated)
+            anchor_review_pass(root, run_dir, SKETCH_INK_STAGE, note="sketch/ink anchor level pass")
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            page2_sketch = state["pages"][1]["stages"][SKETCH_INK_STAGE]
+            page2_blocking_path = str(run_dir / "01_storyboard_blocking" / "002-page-2.png")
+            page1_sketch_path = str(run_dir / "02_storyboard_sketch_ink" / "001-page-1.png")
+            self.assertEqual(page2_sketch["visual_reference_paths"], [page2_blocking_path, page1_sketch_path])
+
+            import_and_inspect(root, run_dir, "002-page-2.png", SKETCH_INK_STAGE, generated)
+            approve_finish_stage(root, run_dir)
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            page1_finish = state["pages"][0]["stages"][FINISH_STAGE]
+            page1_sketch_path = str(run_dir / "02_storyboard_sketch_ink" / "001-page-1.png")
+            self.assertEqual(page1_finish["visual_reference_paths"], [page1_sketch_path])
+
+            import_and_inspect(root, run_dir, "001-page-1.png", FINISH_STAGE, generated)
+            anchor_review_pass(root, run_dir, FINISH_STAGE, note="finish anchor level pass")
+            run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
+            state = json.loads((run_dir / "state.json").read_text())
+            page2_finish = state["pages"][1]["stages"][FINISH_STAGE]
+            page2_sketch_path = str(run_dir / "02_storyboard_sketch_ink" / "002-page-2.png")
+            page1_finish_path = str(run_dir / "03_finish" / "001-page-1.png")
+            self.assertEqual(page2_finish["visual_reference_paths"], [page2_sketch_path, page1_finish_path])
+
+    def test_prior_page_rerun_marks_later_same_stage_pages_for_rerun(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            ensure_stage_review_passed(root, run_dir, FIRST_STAGE, note="blocking pass")
+
+            result = run_cli(
+                "rerun",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "page 1 continuity defect",
+                cwd=root,
+            )
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 002-page-2.png", result.stdout)
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 003-page-3.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            for page in state["pages"]:
+                stage = page["stages"][FIRST_STAGE]
+                self.assertEqual(stage["status"], "pending")
+                self.assertTrue(stage["rerun_pending"])
+                self.assertEqual(stage["visual_reference_paths"], [])
+            self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
 
     def test_legacy_stage_names_are_not_cli_choices(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1513,6 +1799,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             root = Path(tmp)
             run_dir = init_run(root)
             approve_plan(root, run_dir, page_count=5)
+            make_state_legacy_parallel(run_dir)
             generated = generate_file(root)
 
             run_cli("next-batch", "--run-dir", str(run_dir), "--limit", "4", cwd=root)
@@ -2112,6 +2399,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             root = Path(tmp)
             run_dir = init_run(root)
             approve_plan(root, run_dir, page_count=2)
+            make_state_legacy_parallel(run_dir)
             generated = generate_file(root)
 
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
@@ -2165,6 +2453,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             root = Path(tmp)
             run_dir = init_run(root)
             approve_plan(root, run_dir, page_count=2)
+            make_state_legacy_parallel(run_dir)
             generated = generate_file(root)
 
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)

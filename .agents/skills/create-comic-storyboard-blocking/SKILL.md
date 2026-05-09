@@ -16,10 +16,12 @@ The pack runner owns `state.json`, import, parent inspection, rerun, and stage-r
 Use the assigned subagent prompt from the pack runner. It provides:
 
 - Run folder, approved plan, assigned page, stage, prompt file, output path, description path, and batch id.
+- `Required image attachments` / `Prior page continuity references` for previous pages in the same stage when the pack runner provides them.
+- `Stage level anchor reference`; if this is the first page, it may define the stage level for later pages, and if prior pages exist it includes the passed anchor note to match.
 - Relevant references, text policy, character locks, visual text guard, narrative-first page design, structured `spatial_contract`, rerun correction, and overlay notes.
 - The required `*_desc.md` path beside the generated blocking image.
 
-Read the prompt file before generation.
+Read the prompt file before generation. Attach every listed required image path as a local image visual reference when calling `image_gen`.
 
 ## Generation Rules
 
@@ -59,6 +61,8 @@ Keep the required heading text exactly as shown above. Write all body text under
 ## Worker Inspection
 
 After generation and description writing, inspect both files before returning. Mark `needs_rerun` when the blocking image or description fails the prompt, omits required entities/constraints, contradicts a vector/cover/visibility/occlusion relation, introduces unsupported temporal drift, becomes a tactical diagram instead of a rough comic page, or contains detailed/final-art rendering.
+
+If this page is marked as the stage-level anchor, self-inspect the blocking level especially strictly: it must stay rough, readable, and non-final while setting a reliable reference level for later pages.
 
 Return only:
 

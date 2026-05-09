@@ -15,10 +15,12 @@ Use the assigned subagent prompt from the pack runner. It provides:
 
 - Run folder, approved plan, assigned page, stage, prompt file, output path, and batch id.
 - Required prior-stage rough comic-page `storyboard_blocking` image and sibling `*_desc.md` when blocking is part of the target stages.
+- `Required image attachments` / `Prior page continuity references`, including the current page's prior-stage image and previous pages' inspected sketch/ink images when the pack runner provides them.
+- `Stage level anchor reference`; if this is the first page, it may define the sketch/ink level for later pages, and if prior pages exist it includes the passed anchor note to match.
 - Default source folder and excluded output folder.
 - Relevant references, text policy, character locks, character appearance/anatomy lock, visual text guard, rerun correction, and prior-stage reference.
 
-Read the prompt file before generation. Do not edit `state.json`, `batch_plan.md`, `approved_storyboard_plan.json`, or any runner state files.
+Read the prompt file before generation. Attach every listed required image path as a local image visual reference when calling `image_gen`. Do not edit `state.json`, `batch_plan.md`, `approved_storyboard_plan.json`, or any runner state files.
 
 ## Generation Rules
 
@@ -53,6 +55,8 @@ Read the prompt file before generation. Do not edit `state.json`, `batch_plan.md
 ## Worker Inspection
 
 After generation, inspect the output before returning. Mark `needs_rerun` when any required page structure, text policy, character lock, character appearance/anatomy lock, visual text guard, source consistency, blocking reference, spatial logic, temporal continuity, motion direction, or technical quality check fails.
+
+If this page is marked as the stage-level anchor, self-inspect the sketch/ink level especially strictly: it must add real sketch/ink drawing detail and line rhythm while avoiding tone/color/final polish.
 
 Do not pass a two-eyed character that appears one-eyed unless the approved plan or source explicitly says the character is one-eyed, asymmetric, non-human in that way, or naturally occluded by angle, hair, prop, or framing.
 

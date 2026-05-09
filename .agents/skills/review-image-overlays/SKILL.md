@@ -102,10 +102,10 @@ After saving overlays for a `$create-comic-storyboard-pack` run, feed the manife
 ```bash
 COMIC_RUNNER=".agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_runner.py"
 python3 "$COMIC_RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_sketch_ink/<review-id>/revision_requests.json
-python3 "$COMIC_RUNNER" next-batch --run-dir <run-dir> --limit 4
+python3 "$COMIC_RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 
-`request-revisions` marks the matching page stage as rerun-pending, resets the stage review and following gate, and injects the overlay paths plus request text into the next subagent prompt.
+`request-revisions` marks the matching page stage as rerun-pending, resets the stage review and following gate, injects the overlay paths plus request text into the next subagent prompt, and may reset later same-stage pages if an earlier page's continuity reference became stale.
 
 ## Validation Rules
 

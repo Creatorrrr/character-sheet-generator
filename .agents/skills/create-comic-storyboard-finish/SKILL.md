@@ -18,10 +18,12 @@ Use the assigned subagent prompt from the pack runner. It provides:
 - Run folder, approved plan, assigned page, stage, prompt file, output path, and batch id.
 - Required prior-stage reference from `02_storyboard_sketch_ink/` or a recorded legacy/imported sketch path.
 - Blocking `*_desc.md` reference when available; keep it as the spatial validation overlay for the approved comic page design.
+- `Required image attachments` / `Prior page continuity references`, including the current page's sketch/ink image and previous pages' inspected finish images when the pack runner provides them.
+- `Stage level anchor reference`; if this is the first page, it may define the finish level for later pages, and if prior pages exist it includes the passed anchor note to match.
 - Default source folder and excluded output folder.
 - Relevant references, text policy, character locks, character appearance/anatomy lock, visual text guard, and rerun correction.
 
-Read the prompt file and use the prior-stage image as the required visual input and structure reference. Do not edit `state.json`, `batch_plan.md`, `approved_storyboard_plan.json`, or any runner state files.
+Read the prompt file and use the prior-stage image as the required visual input and structure reference. Attach every listed required image path as a local image visual reference when calling `image_gen`. Do not edit `state.json`, `batch_plan.md`, `approved_storyboard_plan.json`, or any runner state files.
 
 ## Generation Rules
 
@@ -49,6 +51,8 @@ Read the prompt file and use the prior-stage image as the required visual input 
 ## Worker Inspection
 
 After generation, inspect the output before returning. Mark `needs_rerun` when finishing changes the inspected sketch/ink structure or violates text policy, source consistency, character locks, character appearance/anatomy lock, visual text guard, blocking spatial validation overlay, spatial logic, motion direction, or technical quality.
+
+If this page is marked as the stage-level anchor, self-inspect the finish level especially strictly: it must add tone/color/final polish while preserving sketch/ink structure, line rhythm, effect lines, and text policy.
 
 Do not pass a finish output that changes a passed two-eye, face, hand, limb, silhouette, body-proportion, or posture structure from the sketch/ink stage unless that exception is explicitly approved in the plan or source.
 

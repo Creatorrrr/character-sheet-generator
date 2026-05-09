@@ -109,13 +109,18 @@
 
 진행 단계:
 
-1. `$create-comic-storyboard-sketch-ink`: 콘티/스케치/펜선 `storyboard_sketch_ink`
-2. 사용자 피드백 및 다음 단계 진행 승인
-3. `$create-comic-storyboard-finish`: 톤/채색/마무리 `finish`
+1. `$create-comic-storyboard-blocking`: 러프 블로킹 + 공간 검수 보조 `storyboard_blocking`
+2. 사용자 피드백 및 sketch/ink 진행 승인
+3. `$create-comic-storyboard-sketch-ink`: 콘티/스케치/펜선 `storyboard_sketch_ink`
+4. 사용자 피드백 및 finish 진행 승인
+5. `$create-comic-storyboard-finish`: 톤/채색/마무리 `finish`
 
 기본 정책:
 
 - 승인 전에는 이미지를 생성하지 않습니다.
+- 승인 후 새 run은 `sequential_prior_pages` 모드로 한 번에 한 페이지만 예약합니다. 각 페이지는 여전히 subagent가 생성하지만, 두 번째 페이지부터는 같은 단계에서 부모 검수를 통과한 이전 페이지 이미지들을 `Required image attachments`로 함께 첨부합니다.
+- 각 단계의 첫 이미지는 이후 페이지의 수준을 정하는 stage-level anchor로 검증합니다. 첫 페이지가 부모 검수와 `anchor-review`를 통과해야 같은 단계의 두 번째 페이지 이후를 예약합니다.
+- 이미 승인된 오래된 run에 `page_generation_mode`가 없으면 기존 병렬 batch 동작(`parallel_batch`)을 유지합니다.
 - 기본 페이지는 3-5컷을 권장하고, 1-2컷은 큰 감정 컷/전면 컷/침묵/정적/강한 액션 순간 같은 특수 연출에 권장합니다.
 - 6컷 이상은 몽타주/개그 타이밍/빠른 액션 연쇄처럼 명확한 이유가 있을 때만 사용합니다.
 - 사선, 비대칭, 오픈 컷, 무테 컷, 삽입컷, 부분 겹침, 넓은 여백 같은 실험적 자유형 컷 구성을 기본으로 허용합니다.
@@ -136,6 +141,7 @@
 - 승인안이나 source가 외눈/비대칭/비인간 구조를 명시하지 않았다면 눈 누락/추가/병합, 두 눈 캐릭터가 외눈처럼 보이는 경우, 손가락/팔/다리 누락이나 추가, 종족/체형 변경, 관절/비율 붕괴는 rerun 대상입니다.
 - 예: 두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 하며, 외눈 캐릭터처럼 보이면 rerun합니다.
 - 다음 단계는 이전 단계의 모든 페이지가 부모 검수와 단계 마무리 검수를 통과하고 사용자가 진행을 승인한 뒤에만 진행합니다.
+- 이전 페이지가 rerun되면 같은 단계에서 그 이미지를 참조한 뒤쪽 페이지들은 stale reference 방지를 위해 rerun-pending으로 되돌립니다. 기존 산출 파일은 audit artifact로 보존합니다.
 
 ```bash
 python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_runner.py spatial-preview --plan-file <approved-plan.json>
@@ -146,8 +152,9 @@ python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_run
 
 | Skill | 용도 |
 | --- | --- |
-| `$create-comic-storyboard-sketch-ink` | 승인된 만화 페이지 plan과 runner prompt를 바탕으로 한 페이지의 콘티/스케치/펜선 이미지를 생성하고 1차 검수합니다. `state.json`은 수정하지 않고 결과 경로, `worker_status`, `worker_note`만 반환합니다. 캐릭터 외형/해부 고정 조건 위반은 `needs_rerun`입니다. |
-| `$create-comic-storyboard-finish` | 부모 검수 통과한 `storyboard_sketch_ink` 이미지를 필수 구조 참조로 사용해 톤/채색/마무리를 생성하고 1차 검수합니다. 레이아웃, 컷 수, 동선, 텍스트 정책, 효과선 방향, 눈/얼굴/손/체형 구조를 변경하지 않습니다. |
+| `$create-comic-storyboard-blocking` | 승인된 만화 페이지 plan과 runner prompt를 바탕으로 러프 블로킹 이미지를 만들고, 공간/시간 검수용 `*_desc.md`를 함께 작성합니다. runner가 이전 페이지 visual reference나 stage-level anchor reference를 제공하면 함께 첨부해 페이지 연속성과 단계 수준을 맞춥니다. |
+| `$create-comic-storyboard-sketch-ink` | 승인된 만화 페이지 plan과 runner prompt를 바탕으로 한 페이지의 콘티/스케치/펜선 이미지를 생성하고 1차 검수합니다. `state.json`은 수정하지 않고 결과 경로, `worker_status`, `worker_note`만 반환합니다. 캐릭터 외형/해부 고정 조건 위반이나 stage-level anchor 수준 불일치는 `needs_rerun`입니다. |
+| `$create-comic-storyboard-finish` | 부모 검수 통과한 `storyboard_sketch_ink` 이미지를 필수 구조 참조로 사용해 톤/채색/마무리를 생성하고 1차 검수합니다. 레이아웃, 컷 수, 동선, 텍스트 정책, 효과선 방향, 눈/얼굴/손/체형 구조와 stage-level anchor 수준을 변경하지 않습니다. |
 
 ## 2D to Photoreal Stage Skills
 

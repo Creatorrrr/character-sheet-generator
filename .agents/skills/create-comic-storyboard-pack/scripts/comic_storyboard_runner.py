@@ -17,6 +17,12 @@ WORKFLOW = "create-comic-storyboard-pack"
 REPO_ROOT = Path("/Users/chasoik/Projects/character-sheet-generator")
 DEFAULT_SOURCE_ROOT = REPO_ROOT / "sources"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "output"
+PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES = "sequential_prior_pages"
+PAGE_GENERATION_MODE_PARALLEL_BATCH = "parallel_batch"
+PAGE_GENERATION_MODE_VALUES = {
+    PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES,
+    PAGE_GENERATION_MODE_PARALLEL_BATCH,
+}
 STORYBOARD_BLOCKING_STAGE = "storyboard_blocking"
 STORYBOARD_SKETCH_INK_STAGE = "storyboard_sketch_ink"
 FINISH_STAGE = "finish"
@@ -89,6 +95,8 @@ VALID_STATUSES = {"pending", "generation_requested", "imported", "inspected_pass
 WORKER_STATUS_VALUES = {"pass", "needs_rerun"}
 REVIEW_STATUSES = {"pending", "passed", "needs_rerun"}
 REVIEW_CLI_STATUSES = {"pass", "needs_rerun"}
+ANCHOR_REVIEW_STATUSES = REVIEW_STATUSES
+ANCHOR_REVIEW_CLI_STATUSES = REVIEW_CLI_STATUSES
 SPATIAL_VERDICT_VALUES = {"pass", "needs_rerun"}
 SPATIAL_CONSTRAINT_TYPES = {
     "aims_at",
@@ -1587,6 +1595,7 @@ def blank_stage_state() -> dict[str, Any]:
         "spatial_checked_at": "",
         "current_rerun_correction": "",
         "user_revision_overlays": [],
+        "visual_reference_paths": [],
     }
 
 
@@ -1605,6 +1614,22 @@ def blank_stage_review() -> dict[str, Any]:
 
 def build_stage_reviews() -> dict[str, dict[str, Any]]:
     return {stage_id: blank_stage_review() for stage_id in STAGE_IDS}
+
+
+def blank_stage_anchor_review() -> dict[str, Any]:
+    return {
+        "status": "pending",
+        "anchor_item": "",
+        "output_path": "",
+        "note": "",
+        "issues": [],
+        "reviewed_at": "",
+        "anchor_level_note": "",
+    }
+
+
+def build_stage_anchor_reviews() -> dict[str, dict[str, Any]]:
+    return {stage_id: blank_stage_anchor_review() for stage_id in STAGE_IDS}
 
 
 def stage_gate_key(from_stage: str, to_stage: str) -> str:
@@ -1691,6 +1716,19 @@ def normalize_target_stages(state: dict[str, Any]) -> None:
     state["target_stages"] = ordered
 
 
+def normalize_page_generation_mode(state: dict[str, Any]) -> None:
+    mode = str(state.get("page_generation_mode") or "").strip()
+    if not mode:
+        mode = (
+            PAGE_GENERATION_MODE_PARALLEL_BATCH
+            if state.get("plan_approved")
+            else PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES
+        )
+    if mode not in PAGE_GENERATION_MODE_VALUES:
+        raise SystemExit(f"Invalid page_generation_mode: {mode}")
+    state["page_generation_mode"] = mode
+
+
 def normalize_stage_review(review: dict[str, Any], stage_id: str) -> None:
     for key, value in blank_stage_review().items():
         review.setdefault(key, value)
@@ -1699,11 +1737,20 @@ def normalize_stage_review(review: dict[str, Any], stage_id: str) -> None:
         raise SystemExit(f"Invalid stage review status for {stage_id}: {review['status']}")
 
 
+def normalize_stage_anchor_review(review: dict[str, Any], stage_id: str) -> None:
+    for key, value in blank_stage_anchor_review().items():
+        review.setdefault(key, value)
+    review["issues"] = as_list(review.get("issues"))
+    if review["status"] not in ANCHOR_REVIEW_STATUSES:
+        raise SystemExit(f"Invalid stage anchor review status for {stage_id}: {review['status']}")
+
+
 def normalize_stage_record(stage: dict[str, Any], page_id: str, stage_id: str) -> None:
     for key, value in blank_stage_state().items():
         stage.setdefault(key, value)
     if not isinstance(stage.get("user_revision_overlays"), list):
         stage["user_revision_overlays"] = as_list(stage.get("user_revision_overlays"))
+    stage["visual_reference_paths"] = [str(path) for path in as_list(stage.get("visual_reference_paths"))]
     if stage["status"] not in VALID_STATUSES:
         raise SystemExit(f"Invalid stage status for {page_id}:{stage_id}: {stage['status']}")
 
@@ -1741,6 +1788,7 @@ def normalize_state(state: dict[str, Any]) -> None:
     state["visual_text_guard"] = merge_unique(state.get("visual_text_guard"))
     state["stage_order"] = STAGE_IDS
     normalize_target_stages(state)
+    normalize_page_generation_mode(state)
     normalize_stage_gates(state)
     state["source_references"] = validate_reference_paths(state.get("source_references", []))
     stage_reviews = state.setdefault("stage_reviews", {})
@@ -1750,6 +1798,13 @@ def normalize_state(state: dict[str, Any]) -> None:
     for stage_id in STAGE_IDS:
         review = stage_reviews.setdefault(stage_id, {})
         normalize_stage_review(review, stage_id)
+    stage_anchor_reviews = state.setdefault("stage_anchor_reviews", {})
+    for stage_id in list(stage_anchor_reviews.keys()):
+        if stage_id not in STAGE_IDS:
+            del stage_anchor_reviews[stage_id]
+    for stage_id in STAGE_IDS:
+        review = stage_anchor_reviews.setdefault(stage_id, {})
+        normalize_stage_anchor_review(review, stage_id)
     state.setdefault("pages", [])
     for page in state.get("pages", []):
         page.setdefault("dependencies", [])
@@ -1811,6 +1866,12 @@ def pages_complete_for_stage(state: dict[str, Any], stage_id: str) -> bool:
 
 def stage_review_passed(state: dict[str, Any], stage_id: str) -> bool:
     return state.get("stage_reviews", {}).get(stage_id, {}).get("status") == "passed"
+
+
+def stage_anchor_review_passed(state: dict[str, Any], stage_id: str) -> bool:
+    if not sequential_prior_pages_mode(state):
+        return True
+    return state.get("stage_anchor_reviews", {}).get(stage_id, {}).get("status") == "passed"
 
 
 def stage_complete(state: dict[str, Any], stage_id: str) -> bool:
@@ -1917,6 +1978,191 @@ def prior_stage_reference(
     return str(path) if path.exists() else f"{path} (not found yet)"
 
 
+def page_generation_mode(state: dict[str, Any]) -> str:
+    normalize_page_generation_mode(state)
+    return state["page_generation_mode"]
+
+
+def sequential_prior_pages_mode(state: dict[str, Any]) -> bool:
+    return page_generation_mode(state) == PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES
+
+
+def ordered_pages(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return sorted(state.get("pages", []), key=lambda page: (int(page.get("order", 9999)), page.get("id", "")))
+
+
+def previous_pages_for_page(state: dict[str, Any], page: dict[str, Any]) -> list[dict[str, Any]]:
+    pages = ordered_pages(state)
+    for index, candidate in enumerate(pages):
+        if candidate.get("id") == page.get("id"):
+            return pages[:index]
+    return []
+
+
+def stage_anchor_page(state: dict[str, Any], stage_id: str) -> dict[str, Any] | None:
+    pages = ordered_pages(state)
+    return pages[0] if pages and stage_id in STAGE_IDS else None
+
+
+def is_stage_anchor_page(state: dict[str, Any], page: dict[str, Any], stage_id: str) -> bool:
+    anchor_page = stage_anchor_page(state, stage_id)
+    return bool(anchor_page and anchor_page.get("id") == page.get("id"))
+
+
+def prior_pages_ready_for_stage(state: dict[str, Any], page: dict[str, Any], stage_id: str) -> bool:
+    if not sequential_prior_pages_mode(state):
+        return True
+    return all(page_complete_for_stage(prior_page, stage_id) for prior_page in previous_pages_for_page(state, page))
+
+
+def stage_anchor_allows_page_reservation(state: dict[str, Any], page: dict[str, Any], stage_id: str) -> bool:
+    if not sequential_prior_pages_mode(state):
+        return True
+    if is_stage_anchor_page(state, page, stage_id):
+        return True
+    return stage_anchor_review_passed(state, stage_id)
+
+
+def stage_anchor_review_required_page(state: dict[str, Any], stage_id: str) -> dict[str, Any] | None:
+    if not sequential_prior_pages_mode(state):
+        return None
+    anchor_page = stage_anchor_page(state, stage_id)
+    if not anchor_page:
+        return None
+    if not page_complete_for_stage(anchor_page, stage_id):
+        return None
+    if stage_anchor_review_passed(state, stage_id):
+        return None
+    return anchor_page
+
+
+def stage_image_reference_path(run_dir: Path, page: dict[str, Any], stage_id: str) -> Path | None:
+    if not page_complete_for_stage(page, stage_id):
+        return None
+    path = stage_output_path(run_dir, page, stage_id, prefer_recorded=True)
+    return path if path.exists() else None
+
+
+def visual_reference_paths(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    prior_stage = previous_stage_id(stage_id)
+    if prior_stage:
+        current_prior = stage_image_reference_path(run_dir, page, prior_stage)
+        if current_prior is not None:
+            paths.append(str(current_prior))
+    if sequential_prior_pages_mode(state):
+        for prior_page in reversed(previous_pages_for_page(state, page)):
+            prior_page_path = stage_image_reference_path(run_dir, prior_page, stage_id)
+            if prior_page_path is not None:
+                paths.append(str(prior_page_path))
+    return merge_unique(paths)
+
+
+def visual_reference_prompt_text(paths: list[str]) -> str:
+    if not paths:
+        return "- none"
+    return "\n".join(f"- {path}" for path in paths)
+
+
+def prior_page_continuity_reference_text(
+    run_dir: Path,
+    page: dict[str, Any],
+    stage_id: str,
+    state: dict[str, Any],
+) -> str:
+    if not sequential_prior_pages_mode(state):
+        return "- none (legacy parallel_batch mode)"
+    prior_pages = previous_pages_for_page(state, page)
+    if not prior_pages:
+        return "- none"
+    lines: list[str] = []
+    for priority, prior_page in enumerate(reversed(prior_pages), start=1):
+        path = stage_image_reference_path(run_dir, prior_page, stage_id)
+        if path is None:
+            continue
+        if priority == 1:
+            role = "highest priority immediate previous page for action, pose, layout rhythm, and continuity"
+        else:
+            role = "supporting earlier page for style, character, prop, landmark, and setting continuity"
+        line = f"- priority {priority}: {prior_page['filename']} -> {path} ({role})"
+        if stage_id == STORYBOARD_BLOCKING_STAGE:
+            desc_path = recorded_stage_description_path(run_dir, prior_page, stage_id)
+            if desc_path.exists():
+                line += f"; blocking description={desc_path}"
+        lines.append(line)
+    return "\n".join(lines) if lines else "- none"
+
+
+def stage_anchor_review_checklist(stage_id: str) -> str:
+    common = (
+        "Common anchor checks: text_policy, character_locks, character appearance/anatomy lock, "
+        "visual_text_guard, structured spatial_contract, panel/page continuity, page-to-page continuity, "
+        "and technical quality must all fit the approved plan."
+    )
+    if stage_id == STORYBOARD_BLOCKING_STAGE:
+        return (
+            "storyboard_blocking anchor: rough comic-page blocking level; preserve panel composition, scene rhythm, "
+            "and reader eye flow first; important entities must be recognizable as quick 3-second rough forms; use "
+            "arrows, relation lines, visibility/occlusion marks, and motion-path marks only where needed; reject detailed "
+            "faces, anatomy, costume rendering, tone/color, typography, polished ink, or final art. "
+            + common
+        )
+    if stage_id == STORYBOARD_SKETCH_INK_STAGE:
+        return (
+            "storyboard_sketch_ink anchor: preserve the inspected blocking PNG and *_desc.md structure while adding real "
+            "sketch/ink line art, line-weight rhythm, black-ink emphasis, and planned effect lines; reject tone/color, "
+            "lighting, glossy finish, or final polish that belongs to finish. "
+            + common
+        )
+    return (
+        "finish anchor: preserve the inspected sketch/ink layout, panel shapes, negative space, line rhythm, effect lines, "
+        "text policy, and character structure while adding tone/color/final polish; reject redraws, layout changes, "
+        "weakened effect-line direction, or changed eye/face/hand/limb/silhouette/body-proportion/posture structure. "
+        + common
+    )
+
+
+def stage_anchor_reference_text(
+    run_dir: Path,
+    page: dict[str, Any],
+    stage_id: str,
+    state: dict[str, Any],
+) -> str:
+    if not sequential_prior_pages_mode(state):
+        return "- none (legacy parallel_batch mode)"
+    anchor_page = stage_anchor_page(state, stage_id)
+    if not anchor_page:
+        return "- none"
+    if is_stage_anchor_page(state, page, stage_id):
+        return "\n".join(
+            [
+                "- Stage level anchor: this page will define the stage level for later pages in this stage.",
+                "- After import and parent inspect-pass, run anchor-review before reserving page 2 or later.",
+                f"- Anchor checklist: {stage_anchor_review_checklist(stage_id)}",
+            ]
+        )
+    review = state.get("stage_anchor_reviews", {}).get(stage_id, blank_stage_anchor_review())
+    path = stage_image_reference_path(run_dir, anchor_page, stage_id)
+    if review.get("status") == "passed" and path is not None:
+        note = review.get("anchor_level_note") or review.get("note") or "stage level anchor passed"
+        return "\n".join(
+            [
+                f"- anchor page: {anchor_page['filename']} -> {path}",
+                "- role: highest-priority stage-level quality benchmark for roughness/detail/polish, line rhythm, "
+                "visual intensity, text policy, and continuity consistency.",
+                f"- anchor_level_note: {note}",
+                f"- Anchor checklist: {stage_anchor_review_checklist(stage_id)}",
+            ]
+        )
+    return "\n".join(
+        [
+            f"- anchor page: {anchor_page['filename']} is not available as a passed stage-level anchor yet.",
+            "- Do not reserve later pages in this stage until anchor-review passes.",
+            f"- Anchor checklist: {stage_anchor_review_checklist(stage_id)}",
+        ]
+    )
+
+
 def assert_required_prior_stage_outputs_exist(state: dict[str, Any], run_dir: Path, pages: list[dict[str, Any]], stage_id: str) -> None:
     prior = previous_stage_id(stage_id)
     if not prior:
@@ -2012,6 +2258,17 @@ def reset_stage_review(state: dict[str, Any], stage_id: str, note: str) -> None:
     review["note"] = note
     review["issues"] = []
     review["reviewed_at"] = ""
+
+
+def reset_stage_anchor_review(state: dict[str, Any], stage_id: str, note: str) -> None:
+    review = state.setdefault("stage_anchor_reviews", {}).setdefault(stage_id, blank_stage_anchor_review())
+    review["status"] = "pending"
+    review["anchor_item"] = ""
+    review["output_path"] = ""
+    review["note"] = note
+    review["issues"] = []
+    review["reviewed_at"] = ""
+    review["anchor_level_note"] = ""
 
 
 def reset_following_stage_gates(state: dict[str, Any], stage_id: str, note: str) -> None:
@@ -2250,6 +2507,7 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
             "spatial_verdict": stage.get("spatial_verdict", ""),
             "spatial_note": stage.get("spatial_note", ""),
             "user_revision_overlays": stage.get("user_revision_overlays", []),
+            "visual_reference_paths": stage.get("visual_reference_paths", []),
         }
     )
     stage["status"] = "pending"
@@ -2264,6 +2522,37 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
     stage["spatial_checked_at"] = ""
     stage["current_rerun_correction"] = note
     stage["user_revision_overlays"] = []
+    stage["visual_reference_paths"] = []
+
+
+def mark_downstream_prior_page_dependents_for_rerun(
+    state: dict[str, Any],
+    source_page: dict[str, Any],
+    stage_id: str,
+    note: str,
+) -> list[dict[str, Any]]:
+    if not sequential_prior_pages_mode(state):
+        return []
+    pages = ordered_pages(state)
+    source_index = next(
+        (index for index, page in enumerate(pages) if page.get("id") == source_page.get("id")),
+        None,
+    )
+    if source_index is None:
+        return []
+    updated: list[dict[str, Any]] = []
+    for downstream_page in pages[source_index + 1 :]:
+        stage = stage_state(downstream_page, stage_id)
+        if stage.get("status") == "pending":
+            continue
+        mark_page_stage_for_rerun(downstream_page, stage_id, note)
+        updated.append(downstream_page)
+    return updated
+
+
+def append_unique_page(pages: list[dict[str, Any]], page: dict[str, Any]) -> None:
+    if page.get("id") not in {entry.get("id") for entry in pages}:
+        pages.append(page)
 
 
 def stage_instruction(stage_id: str) -> str:
@@ -2618,6 +2907,10 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     visual_text_guard = page_policy_items(state, page, "visual_text_guard")
     appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
     stage = stage_state(page, stage_id)
+    attachment_paths = as_list(stage.get("visual_reference_paths")) or visual_reference_paths(run_dir, page, stage_id, state)
+    attachment_text = visual_reference_prompt_text(attachment_paths)
+    prior_page_references = prior_page_continuity_reference_text(run_dir, page, stage_id, state)
+    stage_anchor_reference = stage_anchor_reference_text(run_dir, page, stage_id, state)
     rerun_correction = current_rerun_correction(stage)
     revision_overlays = user_revision_overlay_prompt_text(stage)
     panel_text = "\n".join(panel_line(panel) for panel in panels) or "- no panel details supplied"
@@ -2714,6 +3007,15 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             f"Reading order: {page.get('reading_order') or state.get('reading_order') or 'right-to-left or top-to-bottom as approved'}",
             f"Scene refs: {', '.join(page.get('scene_refs', [])) or 'unspecified'}",
             f"Prior stage reference: {prior_stage_reference(run_dir, page, stage_id, state)}",
+            "",
+            "Required image attachments:",
+            attachment_text,
+            "",
+            "Prior page continuity references:",
+            prior_page_references,
+            "",
+            "Stage level anchor reference:",
+            stage_anchor_reference,
             "",
             "Stage instruction:",
             stage_instruction(stage_id),
@@ -2847,6 +3149,10 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     stage = stage_state(page, stage_id)
     references = validate_reference_paths(as_list(state.get("source_references")) + as_list(page.get("references")))
     reference_text = "\n".join(f"- {ref}" for ref in references) or "- none"
+    attachment_paths = as_list(stage.get("visual_reference_paths")) or visual_reference_paths(run_dir, page, stage_id, state)
+    attachment_text = visual_reference_prompt_text(attachment_paths)
+    prior_page_references = prior_page_continuity_reference_text(run_dir, page, stage_id, state)
+    stage_anchor_reference = stage_anchor_reference_text(run_dir, page, stage_id, state)
     skill_name = STAGE_SKILL_NAMES[stage_id]
     text_policy = normalize_text_policy(page.get("text_policy") or state.get("text_policy"))
     character_locks = page_policy_items(state, page, "character_locks")
@@ -2879,6 +3185,12 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             f"Default source folder: {state.get('source_root') or DEFAULT_SOURCE_ROOT}",
             f"Excluded source folder: {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])}",
             f"Prior-stage reference: {prior_stage_reference(run_dir, page, stage_id, state)}",
+            "Required image attachments:",
+            attachment_text,
+            "Prior page continuity references:",
+            prior_page_references,
+            "Stage level anchor reference:",
+            stage_anchor_reference,
             "Relevant references:",
             reference_text,
             f"Page text policy: {text_policy}",
@@ -2906,7 +3218,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and visual references, including any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint as a validation overlay, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint as a validation overlay, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- description path when stage is storyboard_blocking",
@@ -2925,6 +3237,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         f"Scenario title: {state.get('title', '')}",
         f"Plan approved: {state.get('plan_approved', False)}",
         f"Target stages: {', '.join(target_stages(state))}",
+        f"Page generation mode: {page_generation_mode(state)}",
         "",
         "Generation policy:",
         "- Use Codex built-in image_gen only through one subagent per reserved page.",
@@ -2946,7 +3259,9 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Plan and verify character appearance/anatomy locks: species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture.",
         "- Unless explicitly approved by the plan or source, reject missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.",
         f"- Text policy: {text_policy}. {text_policy_batch_summary(text_policy)}",
-        "- Reserve at most four pages per batch.",
+        "- In sequential_prior_pages mode, reserve one page per batch and use parent-inspected earlier pages from the same stage as visual continuity references.",
+        "- In sequential_prior_pages mode, the first page in each stage is the stage-level anchor; page 2 or later waits for anchor-review pass.",
+        "- In legacy parallel_batch mode, reserve at most four eligible pages per batch.",
         "- Parent inspection is required before a page stage counts as passed.",
         "- Stage finish review is required after all page stages pass; next stage opens only after stage-review pass.",
         "- Stage finish review checks source consistency against characters, props, profiles, sources/ references, character appearance/anatomy locks, and panel/page continuity.",
@@ -2979,6 +3294,22 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
             [
                 f"- {stage_id}: {review.get('status', 'pending')}",
                 f"  note: {review.get('note', '')}",
+                f"  issues: {issues}",
+                f"  reviewed_at: {review.get('reviewed_at', '')}",
+                "",
+            ]
+        )
+    lines.extend(["Stage anchor reviews:", ""])
+    for stage_id in STAGE_IDS:
+        review = state.get("stage_anchor_reviews", {}).get(stage_id, blank_stage_anchor_review())
+        issues = "; ".join(as_list(review.get("issues"))) or "none"
+        lines.extend(
+            [
+                f"- {stage_id}: {review.get('status', 'pending')}",
+                f"  anchor_item: {review.get('anchor_item', '')}",
+                f"  output_path: {review.get('output_path', '')}",
+                f"  note: {review.get('note', '')}",
+                f"  anchor_level_note: {review.get('anchor_level_note', '')}",
                 f"  issues: {issues}",
                 f"  reviewed_at: {review.get('reviewed_at', '')}",
                 "",
@@ -3019,6 +3350,13 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 "",
             ]
         )
+        for stage_id in STAGE_IDS:
+            visual_refs = stage_state(page, stage_id).get("visual_reference_paths") or []
+            if visual_refs:
+                lines.append(f"  {stage_id}_visual_reference_paths:")
+                for ref_path in visual_refs:
+                    lines.append(f"    - {ref_path}")
+                lines.append("")
         if spatial_contract_has_content(page.get("spatial_contract")):
             lines.append("  Structured spatial contract:")
             for contract_line in spatial_contract_prompt_text(page).splitlines():
@@ -3065,7 +3403,9 @@ def command_init(args: argparse.Namespace) -> None:
         "visual_text_guard": [],
         "stage_order": STAGE_IDS,
         "target_stages": STAGE_IDS,
+        "page_generation_mode": PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES,
         "stage_reviews": build_stage_reviews(),
+        "stage_anchor_reviews": build_stage_anchor_reviews(),
         "stage_gates": build_stage_gates(),
         "plan_approved": False,
         "complete": False,
@@ -3321,10 +3661,12 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     state["plan_approved"] = True
     state["approved_at"] = now_iso()
     state["target_stages"] = [args.target_stage] if args.target_stage else list(STAGE_IDS)
+    state["page_generation_mode"] = PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES
     state["pages"] = pages
     state.pop("panels", None)
     state["batches"] = []
     state["stage_reviews"] = build_stage_reviews()
+    state["stage_anchor_reviews"] = build_stage_anchor_reviews()
     state["stage_gates"] = build_stage_gates()
     state.setdefault("notes", []).append(f"Approved {len(pages)} comic pages at {state['approved_at']}.")
     normalize_state(state)
@@ -3342,6 +3684,8 @@ def command_approve_plan(args: argparse.Namespace) -> None:
             "character_locks": state.get("character_locks", []),
             "visual_text_guard": state.get("visual_text_guard", []),
             "target_stages": state.get("target_stages", STAGE_IDS),
+            "page_generation_mode": state.get("page_generation_mode", PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES),
+            "stage_anchor_reviews": state.get("stage_anchor_reviews", {}),
             "pages": state.get("pages", []),
         },
     )
@@ -3350,7 +3694,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     print(f"APPROVED_PAGES: {len(pages)}")
     print(f"SPATIAL_CHECK: pass ({spatial_contract_page_count(pages)} structured pages)")
     print(f"PLAN: {run_dir / 'approved_storyboard_plan.json'}")
-    print("NEXT: comic_storyboard_runner.py next-batch --run-dir <run-dir> --limit 4")
+    print("NEXT: comic_storyboard_runner.py next-batch --run-dir <run-dir> --limit 1")
 
 
 def command_next_batch(args: argparse.Namespace) -> None:
@@ -3378,10 +3722,29 @@ def command_next_batch(args: argparse.Namespace) -> None:
             continue
         if not dependencies_ready(state, page, stage_id):
             continue
+        if not prior_pages_ready_for_stage(state, page, stage_id):
+            continue
+        if not stage_anchor_allows_page_reservation(state, page, stage_id):
+            continue
         candidates.append(page)
     candidates.sort(key=lambda page: page_sort_key(page, stage_id))
 
     if not candidates:
+        anchor_page = stage_anchor_review_required_page(state, stage_id)
+        if anchor_page:
+            print(f"STAGE_ANCHOR_REVIEW_REQUIRED: {stage_id}")
+            print(f"ANCHOR_ITEM: {anchor_page['filename']}")
+            print(f"ANCHOR_OUTPUT: {stage_output_path(run_dir, anchor_page, stage_id, prefer_recorded=True)}")
+            print(
+                "ANCHOR_REVIEW_COMMAND: comic_storyboard_runner.py anchor-review "
+                f"--run-dir <run-dir> --stage {stage_id} --item {anchor_page['filename']} "
+                '--status pass --note "<stage level anchor pass>"'
+            )
+            print(
+                "ANCHOR_RERUN_COMMAND: comic_storyboard_runner.py anchor-review "
+                f"--run-dir <run-dir> --stage {stage_id} --item {anchor_page['filename']} "
+                '--status needs_rerun --note "<reason>"'
+            )
         if pages_complete_for_stage(state, stage_id) and not stage_review_passed(state, stage_id):
             print(f"STAGE_REVIEW_REQUIRED: {stage_id}")
         print("NO_ELIGIBLE_ITEMS")
@@ -3389,6 +3752,8 @@ def command_next_batch(args: argparse.Namespace) -> None:
         return
 
     limit = min(max(args.limit, 1), 4)
+    if sequential_prior_pages_mode(state):
+        limit = 1
     selected = candidates[:limit]
     assert_required_prior_stage_outputs_exist(state, run_dir, selected, stage_id)
     required_transition = transition_required_before_stage(state, stage_id)
@@ -3433,6 +3798,7 @@ def command_next_batch(args: argparse.Namespace) -> None:
         stage["spatial_note"] = ""
         stage["spatial_checked_at"] = ""
         stage["current_rerun_correction"] = rerun_correction
+        stage["visual_reference_paths"] = visual_reference_paths(run_dir, page, stage_id, state)
         prompt_path = stage_prompt_path(run_dir, page, stage_id)
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
         prompt_path.write_text(prompt_text(run_dir, page, stage_id, state), encoding="utf-8")
@@ -3452,6 +3818,7 @@ def command_next_batch(args: argparse.Namespace) -> None:
             "created_at": now_iso(),
             "pages": [page["id"] for page in selected],
             "limit": limit,
+            "page_generation_mode": page_generation_mode(state),
         }
     )
     write_batch_plan(run_dir, state)
@@ -3467,6 +3834,8 @@ def command_next_batch(args: argparse.Namespace) -> None:
         print(f"PROMPT_FILE: {stage['prompt_file']}")
         print(f"SUBAGENT_PROMPT_FILE: {stage['subagent_prompt_file']}")
         print(f"OUTPUT: {stage['output_path']}")
+        for path in stage.get("visual_reference_paths", []):
+            print(f"VISUAL_REFERENCE_IMAGE: {path}")
 
 
 def command_import(args: argparse.Namespace) -> None:
@@ -3540,11 +3909,21 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
         stage["spatial_note"] = note
         stage["spatial_checked_at"] = now_iso()
         mark_page_stage_for_rerun(page, stage_id, f"Spatial inspection needs rerun: {note}")
+        downstream_pages = mark_downstream_prior_page_dependents_for_rerun(
+            state,
+            page,
+            stage_id,
+            f"Prior page {page['filename']} rerun invalidated this {stage_id} continuity reference.",
+        )
+        if is_stage_anchor_page(state, page, stage_id):
+            reset_stage_anchor_review(state, stage_id, f"Stage anchor review reset because {page['filename']} failed spatial inspection.")
         reset_stage_review(state, stage_id, f"Stage review reset because {page['filename']} failed spatial inspection.")
         reset_following_stage_gates(state, stage_id, f"Stage gate reset because {page['filename']} failed spatial inspection.")
         write_batch_plan(run_dir, state)
         save_state(run_dir, state)
         print(f"SPATIAL_RERUN_REQUIRED: {page['filename']} {stage_id}")
+        for downstream_page in downstream_pages:
+            print(f"DOWNSTREAM_RERUN_ITEM: {downstream_page['filename']}")
         print("NEXT: Resolve any other current items, then run next-batch.")
         return
     stage["status"] = "inspected_pass"
@@ -3559,17 +3938,88 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
     print(f"INSPECTED_PASS: {page['filename']} {stage_id}")
 
 
+def command_anchor_review(args: argparse.Namespace) -> None:
+    run_dir = Path(args.run_dir)
+    state = load_state(run_dir)
+    stage_id = args.stage
+    page = resolve_page(state, args.item)
+    if not sequential_prior_pages_mode(state):
+        raise SystemExit("anchor-review is only required for sequential_prior_pages mode.")
+    if not is_stage_anchor_page(state, page, stage_id):
+        anchor_page = stage_anchor_page(state, stage_id)
+        anchor_name = anchor_page["filename"] if anchor_page else "<none>"
+        raise SystemExit(f"Stage anchor review must target the first page in stage order: {anchor_name}")
+    stage = stage_state(page, stage_id)
+    if not page_complete_for_stage(page, stage_id):
+        raise SystemExit(
+            f"Stage anchor review requires parent-inspected pass first: {page['filename']} {stage_id} ({stage.get('status')})"
+        )
+    output = stage_output_path(run_dir, page, stage_id, prefer_recorded=True)
+    if not output.exists():
+        raise SystemExit(f"Output file does not exist: {output}")
+    if stage_id == STORYBOARD_BLOCKING_STAGE:
+        validate_blocking_description(recorded_stage_description_path(run_dir, page, stage_id), page)
+
+    review = state.setdefault("stage_anchor_reviews", {}).setdefault(stage_id, blank_stage_anchor_review())
+    issues = as_list(args.issue)
+    reviewed_at = now_iso()
+    review["anchor_item"] = page["filename"]
+    review["output_path"] = str(output)
+    review["note"] = args.note
+    review["issues"] = issues
+    review["reviewed_at"] = reviewed_at
+
+    downstream_pages: list[dict[str, Any]] = []
+    if args.status == "pass":
+        review["status"] = "passed"
+        review["anchor_level_note"] = args.note
+    elif args.status == "needs_rerun":
+        review["status"] = "needs_rerun"
+        review["anchor_level_note"] = ""
+        mark_page_stage_for_rerun(page, stage_id, f"Stage anchor review needs rerun: {args.note}")
+        downstream_pages = mark_downstream_prior_page_dependents_for_rerun(
+            state,
+            page,
+            stage_id,
+            f"Prior page {page['filename']} anchor rerun invalidated this {stage_id} continuity reference.",
+        )
+        reset_stage_review(state, stage_id, f"Stage review reset because {page['filename']} failed stage anchor review.")
+        reset_following_stage_gates(state, stage_id, f"Stage gate reset because {page['filename']} failed stage anchor review.")
+    else:
+        raise SystemExit(f"Invalid stage anchor review status: {args.status}")
+
+    write_batch_plan(run_dir, state)
+    save_state(run_dir, state)
+    print(f"STAGE_ANCHOR_REVIEW: {stage_id}")
+    print(f"ANCHOR_ITEM: {page['filename']}")
+    print(f"STATUS: {review['status']}")
+    if args.status == "needs_rerun":
+        print(f"RERUN_ITEM: {page['filename']}")
+        for downstream_page in downstream_pages:
+            print(f"DOWNSTREAM_RERUN_ITEM: {downstream_page['filename']}")
+
+
 def command_rerun(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
     page = resolve_page(state, args.item)
     stage_id = args.stage
     mark_page_stage_for_rerun(page, stage_id, args.note)
+    downstream_pages = mark_downstream_prior_page_dependents_for_rerun(
+        state,
+        page,
+        stage_id,
+        f"Prior page {page['filename']} rerun invalidated this {stage_id} continuity reference.",
+    )
+    if is_stage_anchor_page(state, page, stage_id):
+        reset_stage_anchor_review(state, stage_id, f"Stage anchor review reset because {page['filename']} was marked for rerun.")
     reset_stage_review(state, stage_id, f"Stage review reset because {page['filename']} was marked for rerun.")
     reset_following_stage_gates(state, stage_id, f"Stage gate reset because {page['filename']} was marked for rerun.")
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
     print(f"RERUN_PENDING: {page['filename']} {stage_id}")
+    for downstream_page in downstream_pages:
+        print(f"DOWNSTREAM_RERUN_ITEM: {downstream_page['filename']}")
     print("NEXT: Resolve any other current items, then run next-batch.")
 
 
@@ -3659,7 +4109,20 @@ def command_request_revisions(args: argparse.Namespace) -> None:
         mark_page_stage_for_rerun(page, stage_id, note)
         stage = stage_state(page, stage_id)
         stage["user_revision_overlays"] = overlays
-        updated_pages.append(page)
+        if is_stage_anchor_page(state, page, stage_id):
+            reset_stage_anchor_review(
+                state,
+                stage_id,
+                f"Stage anchor review reset because {page['filename']} received user revision overlays.",
+            )
+        append_unique_page(updated_pages, page)
+        for downstream_page in mark_downstream_prior_page_dependents_for_rerun(
+            state,
+            page,
+            stage_id,
+            f"Prior page {page['filename']} revision invalidated this {stage_id} continuity reference.",
+        ):
+            append_unique_page(updated_pages, downstream_page)
 
     if not updated_pages:
         raise SystemExit("Review manifest did not contain any overlay revision requests.")
@@ -3714,9 +4177,23 @@ def command_stage_review(args: argparse.Namespace) -> None:
         resolved_pages = []
         for item in rerun_items:
             page = resolve_page(state, item)
-            resolved_pages.append(page)
-        for page in resolved_pages:
+            append_unique_page(resolved_pages, page)
+        rerun_pages = list(resolved_pages)
+        for page in rerun_pages:
             mark_page_stage_for_rerun(page, stage_id, args.note)
+            if is_stage_anchor_page(state, page, stage_id):
+                reset_stage_anchor_review(
+                    state,
+                    stage_id,
+                    f"Stage anchor review reset because {page['filename']} stage-review requested rerun.",
+                )
+            for downstream_page in mark_downstream_prior_page_dependents_for_rerun(
+                state,
+                page,
+                stage_id,
+                f"Prior page {page['filename']} stage-review rerun invalidated this {stage_id} continuity reference.",
+            ):
+                append_unique_page(resolved_pages, downstream_page)
         review["status"] = "needs_rerun"
         review["note"] = args.note
         review["issues"] = issues + [f"rerun_item={page['filename']}" for page in resolved_pages]
@@ -3764,7 +4241,8 @@ def command_approve_next_stage(args: argparse.Namespace) -> None:
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
     print(f"NEXT_STAGE_APPROVED: {args.from_stage} -> {args.to_stage}")
-    print("NEXT: comic_storyboard_runner.py next-batch --run-dir <run-dir> --limit 4")
+    next_limit = 1 if sequential_prior_pages_mode(state) else 4
+    print(f"NEXT: comic_storyboard_runner.py next-batch --run-dir <run-dir> --limit {next_limit}")
 
 
 def command_stop_after_stage(args: argparse.Namespace) -> None:
@@ -3852,6 +4330,7 @@ def command_status(args: argparse.Namespace) -> None:
     print(f"PLAN_APPROVED: {state.get('plan_approved')}")
     print(f"PAGES: {len(state.get('pages', []))}")
     print(f"TARGET_STAGES: {', '.join(target_stages(state))}")
+    print(f"PAGE_GENERATION_MODE: {page_generation_mode(state)}")
     print(f"CURRENT_STAGE: {current_stage_id(state) or 'complete'}")
     for stage_id in STAGE_IDS:
         counts: dict[str, int] = {}
@@ -3862,6 +4341,10 @@ def command_status(args: argparse.Namespace) -> None:
         print(f"{stage_id}: {parts}")
         review = state.get("stage_reviews", {}).get(stage_id, blank_stage_review())
         print(f"{stage_id}_review: {review.get('status', 'pending')}")
+        anchor_review = state.get("stage_anchor_reviews", {}).get(stage_id, blank_stage_anchor_review())
+        print(f"{stage_id}_anchor_review: {anchor_review.get('status', 'pending')}")
+        if anchor_review.get("anchor_item"):
+            print(f"{stage_id}_anchor_item: {anchor_review.get('anchor_item')}")
     for key, gate in state.get("stage_gates", {}).items():
         print(f"{key}_gate: {gate.get('status', 'pending')}")
         if gate.get("feedback_request"):
@@ -3930,6 +4413,15 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_pass.add_argument("--spatial-verdict", choices=sorted(SPATIAL_VERDICT_VALUES), default="pass")
     inspect_pass.add_argument("--spatial-note", default="")
     inspect_pass.set_defaults(func=command_inspect_pass)
+
+    anchor_review = subparsers.add_parser("anchor-review")
+    anchor_review.add_argument("--run-dir", required=True)
+    anchor_review.add_argument("--stage", choices=STAGE_IDS, required=True)
+    anchor_review.add_argument("--item", required=True)
+    anchor_review.add_argument("--status", choices=sorted(ANCHOR_REVIEW_CLI_STATUSES), required=True)
+    anchor_review.add_argument("--note", required=True)
+    anchor_review.add_argument("--issue", action="append", default=[])
+    anchor_review.set_defaults(func=command_anchor_review)
 
     rerun = subparsers.add_parser("rerun")
     rerun.add_argument("--run-dir", required=True)

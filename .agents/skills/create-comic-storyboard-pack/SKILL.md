@@ -84,7 +84,9 @@ Use this format:
 
 승인 후 진행 방식:
 - 1단계: 만화 페이지 러프 블로킹 + 공간 검수 보조 storyboard_blocking
-- 각 페이지는 $create-comic-storyboard-blocking subagent가 생성/1차 검수
+- 각 페이지는 $create-comic-storyboard-blocking subagent가 생성/1차 검수하되, 새 run은 기본적으로 한 번에 한 페이지만 순차 예약한다.
+- 두 번째 페이지부터는 같은 stage에서 parent-inspection을 통과한 이전 페이지 이미지들을 모두 `Required image attachments` / `Prior page continuity references`로 함께 첨부해 연속성과 일관성을 유지한다.
+- 각 stage의 첫 페이지는 이후 페이지의 수준을 정하는 stage-level anchor다. 첫 페이지가 parent-inspection을 통과한 뒤 `anchor-review`를 통과해야 같은 stage의 두 번째 페이지 이후를 예약한다.
 - 1단계 이미지는 먼저 승인된 만화 페이지의 패널 구도, 장면 리듬, 독자 시선 흐름을 보존한다. 중요한 캐릭터/오브젝트/환경 1개당 펜으로 3초 정도 빠르게 그린 수준의 러프 형체를 사용하고, 사람/손에 든 물체/움직이는 물체/기준 랜드마크/가림 요소/벽/문/차량/가구/소품처럼 무엇인지 알아볼 수 있어야 한다. 위치/방향/벡터/관계 선, 화살표, 시선/방향선, 이동 궤적선, 가림/차단 표시는 검수에 필요한 만큼만 추가한다. 중요하지 않은 소품/배경 요소는 스토리 판독, 액션 판독, 가림/차단, 랜드마크 연속성, 페이지 구성에 필요하지 않으면 단순화하거나 생략한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
@@ -92,7 +94,7 @@ Use this format:
 - blocking 사용자 피드백 게이트 선택지: 그대로 sketch/ink 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_sketch_ink`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
 - approve-next-stage 전에는 storyboard_sketch_ink 예약 금지. `stage-review`, `approve-next-stage`, sketch/ink `next-batch`를 같은 병렬 실행이나 같은 사용자 응답 없이 연속 실행하지 않는다.
 - 사용자가 승인하면 2단계: 스케치/펜선 storyboard_sketch_ink
-- 2단계는 $create-comic-storyboard-sketch-ink subagent가 parent-inspected blocking 이미지와 `*_desc.md`를 필수 입력으로 사용
+- 2단계는 $create-comic-storyboard-sketch-ink subagent가 현재 페이지의 parent-inspected blocking 이미지와 `*_desc.md`, 그리고 이전 페이지들의 inspected sketch/ink 이미지를 필수 입력으로 사용
 - 2단계 모든 페이지 부모 검수와 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_sketch_ink_to_finish.json`과 2단계 산출물을 사용자에게 보고하고, finish 진행 여부를 반드시 별도로 확인
 - 처음 페이지 계획 승인, blocking 이후 sketch/ink 승인, 2단계 이후 finish 승인은 모두 별개의 승인이다. 초기 "승인"이나 blocking 승인을 다음 단계 승인으로 재사용하지 않는다.
 - sketch/ink 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_finish`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
@@ -101,7 +103,7 @@ Use this format:
 - 사용자 또는 에이전트가 수정을 요청하면 `$review-image-overlays`로 색상별 오버레이 PNG/TXT와 `revision_requests.json`을 저장하고, `request-revisions`로 해당 페이지를 rerun 처리
 - 사용자가 승인하면 3단계: 톤/채색/마무리 finish
 - 3단계는 $create-comic-storyboard-finish subagent가 생성/1차 검수
-- 3단계는 parent-inspected storyboard_sketch_ink 이미지와 blocking `*_desc.md` 공간/시간 잠금을 필수 입력으로 사용
+- 3단계는 현재 페이지의 parent-inspected storyboard_sketch_ink 이미지, blocking `*_desc.md` 공간/시간 잠금, 그리고 이전 페이지들의 inspected finish 이미지를 필수 입력으로 사용
 ```
 
 Do not call `approve-plan` or `next-batch` until the user approves this list. If the user edits generated-page details or rendered text, update the plan and ask approval again.
@@ -302,18 +304,23 @@ python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.js
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json> --target-stage finish
 ```
 
-Reserve and process a batch:
+Reserve and process a sequential page batch:
 
 ```bash
-python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
-# Spawn one fork_context=true subagent per printed item.
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
+# Spawn one fork_context=true subagent for the printed item.
 # Use the printed SUBAGENT_PROMPT_FILE content as the subagent task.
+# Attach every printed VISUAL_REFERENCE_IMAGE as a local image item when spawning the subagent.
 python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_blocking --generated <generated-path> --description <page_stem>_desc.md --worker-status pass --worker-note "<subagent note>"
 python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
+python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_blocking --item <first-page> --status pass --note "<stage-level blocking anchor pass>"
 python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<parent inspection note>" --spatial-verdict needs_rerun --spatial-note "<spatial/temporal contradiction found>"
+python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_blocking --item <first-page> --status needs_rerun --note "<stage level mismatch>" --issue "<issue>"
 python3 "$RUNNER" rerun --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<reason>"
 python3 "$RUNNER" batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
+
+For each stage in a new `sequential_prior_pages` run, page 1 follows `next-batch -> subagent -> import -> inspect-pass -> anchor-review -> next-batch page 2`. If `next-batch` prints `STAGE_ANCHOR_REVIEW_REQUIRED`, do not spawn page 2 yet; inspect the first page as the stage-level anchor and run `anchor-review`.
 
 After every page in `storyboard_blocking` passes parent inspection:
 
@@ -340,7 +347,7 @@ If the user approves sketch/ink:
 
 ```bash
 python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_blocking --to-stage storyboard_sketch_ink --feedback-request <run-dir>/feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json --feedback-choice approve_sketch_ink --note "<user approved sketch/ink>"
-python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 
 If the user wants the blocking revision UI:
@@ -355,7 +362,7 @@ Import blocking revision overlays the same way as later stages:
 
 ```bash
 python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_blocking/<review-id>/revision_requests.json
-python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 
 The approved next batch is `storyboard_sketch_ink`. Import/inspect it the same way, except no `--description` is used:
@@ -363,6 +370,7 @@ The approved next batch is `storyboard_sketch_ink`. Import/inspect it the same w
 ```bash
 python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
 python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
+python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_sketch_ink --item <first-page> --status pass --note "<stage-level sketch/ink anchor pass>"
 ```
 
 After every page in `storyboard_sketch_ink` passes parent inspection:
@@ -408,7 +416,7 @@ After the user saves in the browser or an agent creates markup, import the manif
 
 ```bash
 python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_sketch_ink/<review-id>/revision_requests.json
-python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 
 `request-revisions` resets the affected page stage to `pending`, records the color-specific overlay PNG/TXT paths and request text, resets stage-review and following gates, and injects a `User revision overlays` section into the next prompt/subagent prompt. Use the color-specific overlay files as canonical instructions; the combined overlay is only for quick visual review.
@@ -417,7 +425,10 @@ If the user approves finish:
 
 ```bash
 python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
-python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
+python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage finish --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage finish --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
+python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage finish --item <first-page> --status pass --note "<stage-level finish anchor pass>"
 ```
 
 If the user stops after sketch/ink:
@@ -432,7 +443,7 @@ For finish-only runs with an external sketch/ink image:
 python3 "$RUNNER" import-prior-stage --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <sketch-ink-image> --note "<external prior reference>"
 python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_sketch_ink --status pass --note "<external prior stage accepted>"
 python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
-python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 
 ## State Rules
@@ -440,6 +451,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 - `approve-plan` is the only transition from approval-gated planning into generation-ready state.
 - `target_stages` defaults to `["storyboard_blocking", "storyboard_sketch_ink", "finish"]`.
 - Existing already-approved legacy states keep their recorded `target_stages`; they are not force-migrated into blocking.
+- New approved runs default to `page_generation_mode: sequential_prior_pages`; already-approved legacy states without this field are treated as `parallel_batch`.
 - `storyboard_blocking` must finish parent inspection and stage-review before default `storyboard_sketch_ink` reservation.
 - `storyboard_sketch_ink` also requires `approve-next-stage` with the active runner-generated `storyboard_blocking_to_storyboard_sketch_ink` feedback request and `--feedback-choice approve_sketch_ink`; blocking stage-review pass alone is not enough.
 - `storyboard_blocking` imports require `--description <desc.md>`, and the runner validates required headings plus all active entity/constraint ids. Required heading text stays fixed, but the description body must be written in Korean.
@@ -447,7 +459,11 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 - `finish` also requires `approve-next-stage` with the active runner-generated feedback request and `--feedback-choice approve_finish`; stage-review pass or parent-only note is not enough.
 - `stop-after-stage` changes the completion target to the requested completed stage.
 - `finish` requires a parent-inspected or imported prior `storyboard_sketch_ink` image.
-- `next-batch --limit 4` reserves at most four eligible pages and writes both `prompts/<stage>/...prompt.txt` and `subagent_prompts/<stage>/...subagent.txt`.
+- `next-batch --limit 1` reserves one eligible page in `sequential_prior_pages` mode and writes both `prompts/<stage>/...prompt.txt` and `subagent_prompts/<stage>/...subagent.txt`. Legacy `parallel_batch` states may still reserve up to four pages.
+- `next-batch` records `visual_reference_paths` on the page stage and prints one `VISUAL_REFERENCE_IMAGE: <absolute path>` line per image that must be attached as a local image item when spawning the subagent.
+- In `sequential_prior_pages` mode, page N waits for pages 1..N-1 in the same stage to pass parent inspection before reservation. If an earlier page is rerun, later generated/imported/passed pages in that same stage are reset to rerun-pending because their continuity references may be stale.
+- In `sequential_prior_pages` mode, page 2 or later also waits for the same stage's first page to pass `anchor-review`. The runner records this in `stage_anchor_reviews` and injects `Stage level anchor reference` into prompts/subagent prompts.
+- Use `anchor-review --status pass` only after the first page has passed parent `inspect-pass`. Use `anchor-review --status needs_rerun` when the first page is too rough, too polished, or otherwise mismatched for the stage level; this routes the first page back to rerun and resets same-stage review/following gates.
 - `next-batch` injects narrative-first page design, spatial validation overlay, and `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved comic page design first, then preserve entity positions, vectors, visibility/occlusion, cover, line-of-sight, trajectory, landmark-relation constraints, and temporal state constraints as validation constraints.
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
@@ -462,6 +478,8 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, structured `spatial_contract` compliance, temporal continuity, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
 
 For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, meaningless pure-symbol blocking that makes entities impossible to identify, over-detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
+
+For a stage first page in `sequential_prior_pages`, perform `anchor-review` after parent inspection and before reserving page 2. The anchor check verifies stage level, not just local correctness: `storyboard_blocking` must stay rough comic-page blocking with recognizable 3-second forms and no final-art polish; `storyboard_sketch_ink` must preserve blocking while adding real sketch/ink line art without tone/color/final finish; `finish` must preserve sketch/ink structure while adding tone/color/final polish without redraw. All anchor checks also include text policy, character locks, character appearance/anatomy, visual text guard, `spatial_contract`, and page-to-page continuity.
 
 When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, temporal state field, and constraint. Reject target-opposite direction vectors, moving-object paths that do not move toward the approved destination, occluding elements that are not between the required subjects/sources, subjects that were specified as hidden but appear exposed, broken line-of-sight blocking, left/right relation flips, fixed landmark relation drift, a partial occluding element turning into a different barrier without cause, and pose/cover/location/held-prop/state-tag drift without an `allowed_transition`. Record the result with `--spatial-verdict` and `--spatial-note`.
 

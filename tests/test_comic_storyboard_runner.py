@@ -204,6 +204,7 @@ def approve_plan_with_target(root, run_dir, target_stage, page_count=5, panel_co
 
 
 def approve_finish_stage(root, run_dir, note="user approved finish"):
+    feedback_request = feedback_request_for(run_dir)
     return run_cli(
         "approve-next-stage",
         "--run-dir",
@@ -212,10 +213,20 @@ def approve_finish_stage(root, run_dir, note="user approved finish"):
         FIRST_STAGE,
         "--to-stage",
         FINISH_STAGE,
+        "--feedback-request",
+        str(feedback_request),
+        "--feedback-choice",
+        "approve_finish",
         "--note",
         note,
         cwd=root,
     )
+
+
+def feedback_request_for(run_dir, from_stage=FIRST_STAGE, to_stage=FINISH_STAGE):
+    state = json.loads((run_dir / "state.json").read_text())
+    gate = state["stage_gates"][f"{from_stage}_to_{to_stage}"]
+    return Path(gate.get("feedback_request") or run_dir / "feedback_requests" / f"{from_stage}_to_{to_stage}.json")
 
 
 def generate_file(root, name="generated.png", data=b"generated image"):
@@ -1071,6 +1082,201 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn(f"STAGE: {FINISH_STAGE}", finish.stdout)
             self.assertEqual(finish.stdout.count("ITEM: "), 4)
 
+    def test_stage_review_pass_creates_feedback_request_and_note_only_approval_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            review = run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "first stage continuity pass",
+                cwd=root,
+            )
+
+            self.assertIn("USER_FEEDBACK_REQUIRED", review.stdout)
+            feedback_request = feedback_request_for(run_dir)
+            feedback_markdown = feedback_request.with_suffix(".md")
+            self.assertTrue(feedback_request.exists())
+            self.assertTrue(feedback_markdown.exists())
+            self.assertIn(str(feedback_request), review.stdout)
+
+            request = json.loads(feedback_request.read_text(encoding="utf-8"))
+            self.assertEqual(request["from_stage"], FIRST_STAGE)
+            self.assertEqual(request["to_stage"], FINISH_STAGE)
+            self.assertEqual(request["gate_key"], f"{FIRST_STAGE}_to_{FINISH_STAGE}")
+            self.assertEqual(request["stage_review"]["status"], "passed")
+            self.assertEqual(request["choices"][0]["id"], "approve_finish")
+            self.assertEqual(request["outputs"][0]["filename"], "001-page-1.png")
+
+            state = json.loads((run_dir / "state.json").read_text())
+            gate = state["stage_gates"][f"{FIRST_STAGE}_to_{FINISH_STAGE}"]
+            self.assertEqual(gate["status"], "pending_user_feedback")
+            self.assertEqual(gate["feedback_request"], str(feedback_request.resolve(strict=False)))
+            self.assertEqual(gate["feedback_choice"], "")
+
+            note_only = run_cli_raw(
+                "approve-next-stage",
+                "--run-dir",
+                str(run_dir),
+                "--from-stage",
+                FIRST_STAGE,
+                "--to-stage",
+                FINISH_STAGE,
+                "--note",
+                "parent-only approval should fail",
+                cwd=root,
+            )
+            self.assertNotEqual(note_only.returncode, 0)
+            self.assertIn("--feedback-request", note_only.stderr)
+
+            blocked = run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn("USER_FEEDBACK_REQUIRED", blocked.stdout)
+            self.assertIn(f"FEEDBACK_REQUEST: {feedback_request}", blocked.stdout)
+            self.assertIn("FEEDBACK_CHOICES: approve_finish | open_overlay_ui | stop_after_stage", blocked.stdout)
+
+            approve_finish_stage(root, run_dir)
+            approved_state = json.loads((run_dir / "state.json").read_text())
+            approved_gate = approved_state["stage_gates"][f"{FIRST_STAGE}_to_{FINISH_STAGE}"]
+            self.assertEqual(approved_gate["status"], "approved")
+            self.assertEqual(approved_gate["feedback_choice"], "approve_finish")
+
+    def test_approve_next_stage_rejects_mismatched_feedback_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "pass",
+                "--note",
+                "first stage continuity pass",
+                cwd=root,
+            )
+
+            active_request = feedback_request_for(run_dir)
+            request = json.loads(active_request.read_text(encoding="utf-8"))
+            stale_request = dict(request)
+            stale_request["created_at"] = "2000-01-01T00:00:00"
+            active_request.write_text(json.dumps(stale_request), encoding="utf-8")
+
+            stale_result = run_cli_raw(
+                "approve-next-stage",
+                "--run-dir",
+                str(run_dir),
+                "--from-stage",
+                FIRST_STAGE,
+                "--to-stage",
+                FINISH_STAGE,
+                "--feedback-request",
+                str(active_request),
+                "--feedback-choice",
+                "approve_finish",
+                "--note",
+                "user approved finish",
+                cwd=root,
+            )
+
+            self.assertNotEqual(stale_result.returncode, 0)
+            self.assertIn("created_at does not match", stale_result.stderr)
+
+            request["to_stage"] = FIRST_STAGE
+            mismatched_request = run_dir / "feedback_requests" / "mismatched.json"
+            mismatched_request.write_text(json.dumps(request), encoding="utf-8")
+
+            result = run_cli_raw(
+                "approve-next-stage",
+                "--run-dir",
+                str(run_dir),
+                "--from-stage",
+                FIRST_STAGE,
+                "--to-stage",
+                FINISH_STAGE,
+                "--feedback-request",
+                str(mismatched_request),
+                "--feedback-choice",
+                "approve_finish",
+                "--note",
+                "user approved finish",
+                cwd=root,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("stage transition does not match", result.stderr)
+
     def test_storyboard_only_target_completes_after_first_stage_review(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1187,6 +1393,10 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             status = run_cli("status", "--run-dir", str(run_dir), cwd=root)
             self.assertIn("TARGET_STAGES: storyboard_sketch_ink", status.stdout)
             self.assertIn("COMPLETE: true", status.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            gate = state["stage_gates"][f"{FIRST_STAGE}_to_{FINISH_STAGE}"]
+            self.assertEqual(gate["status"], "stopped")
+            self.assertEqual(gate["feedback_choice"], "stop_after_stage")
 
     def test_finish_prompt_uses_first_stage_image_as_required_input(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1465,6 +1675,8 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertTrue(stage["rerun_pending"])
             self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
             self.assertEqual(state["stage_gates"][f"{FIRST_STAGE}_to_{FINISH_STAGE}"]["status"], "pending")
+            self.assertEqual(state["stage_gates"][f"{FIRST_STAGE}_to_{FINISH_STAGE}"]["feedback_request"], "")
+            self.assertEqual(state["stage_gates"][f"{FIRST_STAGE}_to_{FINISH_STAGE}"]["feedback_choice"], "")
             self.assertIn("user_revision_overlays", stage)
             self.assertEqual(stage["user_revision_overlays"][0]["overlay_path"], str(overlay.resolve(strict=False)))
 

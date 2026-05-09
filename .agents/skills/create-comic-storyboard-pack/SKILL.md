@@ -80,9 +80,10 @@ Use this format:
 - 각 페이지는 $create-comic-storyboard-sketch-ink subagent가 생성/1차 검수
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
-- 1단계 stage-review 통과 후 사용자 피드백을 받고 다음 단계 진행 여부 확인
-- 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
-- approve-next-stage 전에는 finish 예약 금지
+- 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_sketch_ink_to_finish.json`과 1단계 산출물을 사용자에게 보고하고, 다음 단계 진행 여부를 반드시 별도로 확인
+- 처음 페이지 계획 승인과 1단계 이후 finish 승인은 별개의 승인이다. 초기 "승인"을 finish 진행 승인으로 재사용하지 않는다.
+- 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_finish`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
+- approve-next-stage 전에는 finish 예약 금지. `stage-review`, `approve-next-stage`, finish `next-batch`를 같은 병렬 실행이나 같은 사용자 응답 없이 연속 실행하지 않는다.
 - 사용자가 중단하면 stop-after-stage로 1단계 산출물만 완료 처리
 - 사용자 또는 에이전트가 수정을 요청하면 `$review-image-overlays`로 색상별 오버레이 PNG/TXT와 `revision_requests.json`을 저장하고, `request-revisions`로 해당 페이지를 rerun 처리
 - 사용자가 승인하면 2단계: 톤/채색/마무리 finish
@@ -230,13 +231,22 @@ After every page in `storyboard_sketch_ink` passes parent inspection:
 python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_sketch_ink --status pass --note "<source consistency and continuity pass>"
 ```
 
-This sets `stage_gates.storyboard_sketch_ink_to_finish.status` to `pending_user_feedback`. At that point report the first-stage outputs to the user and ask whether to continue.
+This sets `stage_gates.storyboard_sketch_ink_to_finish.status` to `pending_user_feedback` and writes:
+
+```text
+<run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json
+<run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.md
+```
+
+At that point report the first-stage outputs and the feedback request path to the user, then wait for the user's explicit next-stage choice. The original page-plan approval is not a finish approval.
 
 Offer exactly these feedback choices:
 
-- Approve next stage: continue to `finish` with `approve-next-stage`.
+- Approve next stage: continue to `finish` with `approve-next-stage --feedback-request <json> --feedback-choice approve_finish`.
 - Open revision UI or create agent markup: use `$review-image-overlays` to collect color-coded overlay requests.
 - Stop after stage: keep only `storyboard_sketch_ink` with `stop-after-stage`.
+
+Do not run `approve-next-stage` in the same tool call, parallel group, or assistant turn as the `stage-review` unless the user has explicitly answered this feedback request after seeing the first-stage outputs. Do not reserve finish with `next-batch` until `approve-next-stage` has consumed the runner-generated feedback request.
 
 If the user wants the revision UI:
 
@@ -266,7 +276,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 If the user approves finish:
 
 ```bash
-python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_sketch_ink --to-stage finish --note "<user approved finish>"
+python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 ```
 
@@ -281,7 +291,7 @@ For finish-only runs with an external sketch/ink image:
 ```bash
 python3 "$RUNNER" import-prior-stage --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <sketch-ink-image> --note "<external prior reference>"
 python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_sketch_ink --status pass --note "<external prior stage accepted>"
-python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_sketch_ink --to-stage finish --note "<user approved finish>"
+python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 ```
 
@@ -290,7 +300,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 4
 - `approve-plan` is the only transition from approval-gated planning into generation-ready state.
 - `target_stages` defaults to `["storyboard_sketch_ink", "finish"]`.
 - `storyboard_sketch_ink` must finish parent inspection and stage-review before `finish`.
-- `finish` also requires `approve-next-stage`; stage-review pass alone is not enough.
+- `finish` also requires `approve-next-stage` with the active runner-generated feedback request and `--feedback-choice approve_finish`; stage-review pass or parent-only note is not enough.
 - `stop-after-stage` changes the completion target to the requested completed stage.
 - `finish` requires a parent-inspected or imported prior `storyboard_sketch_ink` image.
 - `next-batch --limit 4` reserves at most four eligible pages and writes both `prompts/<stage>/...prompt.txt` and `subagent_prompts/<stage>/...subagent.txt`.
@@ -337,6 +347,7 @@ After each batch or gate, report in Korean:
 - 공간/동선 검수: ...
 - 단계 마무리 검수 결과: ...
 - 다음 단계 사용자 피드백 게이트: pending_user_feedback | approved | stopped
+- 피드백 요청 파일: <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json
 - 보완 대상 페이지: ...
-- 다음 결정: approve-next-stage로 finish 진행 | $review-image-overlays로 수정 UI 열기/에이전트 마킹 생성 | stop-after-stage로 종료
+- 다음 결정: approve-next-stage --feedback-request ... --feedback-choice approve_finish로 finish 진행 | $review-image-overlays로 수정 UI 열기/에이전트 마킹 생성 | stop-after-stage로 종료
 ```

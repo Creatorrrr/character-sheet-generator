@@ -1,0 +1,4 @@
+interface:
+  display_name: "Intensify SD Character"
+  short_description: "Strengthen SD style without layout drift"
+  default_prompt: "Use $intensify-sd-character to make this sheet-annotation-free character sheet read more clearly as SD/chibi without changing layout, identity, outfit, image-slot meaning, or in-image typography."

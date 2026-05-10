@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create SD Character Base"
+  short_description: "Make a text-free layout-locked SD sheet"
+  default_prompt: "Use $create-sd-character-base to make a sheet-annotation-free SD/chibi character sheet with the same structure as this 2D character sheet while preserving identity, outfit, props, and in-image typography."

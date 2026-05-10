@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repair SD Sheet Text"
+  short_description: "Fix only text on final SD sheets"
+  default_prompt: "Use $repair-sd-sheet-text to improve only the sheet annotation text and labels on this finished SD/chibi character sheet without changing the approved SD image set or in-image typography."

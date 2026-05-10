@@ -1,0 +1,4 @@
+interface:
+  display_name: "2D Sheet to SD Character"
+  short_description: "Create text-free and text-restored SD sheets"
+  default_prompt: "Use $convert-2d-sheet-to-sd-character to convert this 2D character sheet into a layout-locked sheet-annotation-free SD/chibi sheet, then restore the original sheet annotation text onto it."

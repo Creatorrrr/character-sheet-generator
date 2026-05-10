@@ -1,6 +1,6 @@
 # Character Sheet Generator Skills
 
-이 저장소는 캐릭터 시트 제작, 2D 캐릭터 시트의 실사화, 영상 AI용 레퍼런스 팩 생성을 위한 Codex/agent skill 모음입니다. 각 skill은 `.agents/skills/<skill-name>/SKILL.md`에 정의되어 있으며, 필요한 경우 `$skill-name` 형식으로 호출해 작업을 시작할 수 있습니다.
+이 저장소는 캐릭터 시트 제작, 2D 캐릭터 시트의 실사화/SD화, 영상 AI용 레퍼런스 팩 생성을 위한 Codex/agent skill 모음입니다. 각 skill은 `.agents/skills/<skill-name>/SKILL.md`에 정의되어 있으며, 필요한 경우 `$skill-name` 형식으로 호출해 작업을 시작할 수 있습니다.
 
 ## 빠른 선택 가이드
 
@@ -9,6 +9,7 @@
 | 캐릭터 이미지와 설정을 바탕으로 새 마스터 캐릭터 시트를 만들기 | `$character-sheet-orchestrator` |
 | 승인된 캐릭터 시트에서 스타일을 유지한 클로즈업/디테일 팩 만들기 | `$create-character-sheet-closeup-reference-pack` |
 | 2D 캐릭터 시트를 실사 라이브액션 캐릭터 시트로 변환하기 | `$convert-2d-sheet-to-photoreal` |
+| 2D 캐릭터 시트를 SD/chibi 캐릭터 시트로 변환하기 | `$convert-2d-sheet-to-sd-character` |
 | 실사 캐릭터 시트나 마스터 얼굴을 바탕으로 영상 AI용 포토리얼 레퍼런스 팩 만들기 | `$create-video-closeup-reference-pack` |
 | 줄거리/시나리오를 여유 있는 자유형 컷 만화책 페이지로 단계별 생성하기 | `$create-comic-storyboard-pack` |
 | 승인된 만화 페이지의 콘티/스케치/펜선 단계만 생성하기 | `$create-comic-storyboard-sketch-ink` |
@@ -73,6 +74,17 @@
 2. `$intensify-photoreal-character`: anime, 3D, CGI, plastic 느낌이 남은 경우 실사감 강화
 3. `$restore-photoreal-sheet-layout`: 승인된 실사 base에 원본 시트 구조와 텍스트 영역 복원
 4. `$repair-photoreal-sheet-text`: 캐릭터는 좋지만 글자나 라벨만 깨진 경우 텍스트만 수리
+
+### `$convert-2d-sheet-to-sd-character`
+
+2D 캐릭터 시트를 SD/chibi 캐릭터 시트로 바꾸는 전체 workflow입니다. 여기서 SD는 Stable Diffusion이 아니라 super-deformed/chibi 스타일을 뜻합니다. 한 번에 모든 것을 바꾸지 않고, 무텍스트 SD base, SD 스타일 보정, 텍스트/레이아웃 복원을 분리합니다.
+
+사용하는 하위 단계:
+
+1. `$create-sd-character-base`: 텍스트 없는 SD 캐릭터 base 생성
+2. `$intensify-sd-character`: normal proportion, semi-real, photoreal, generic mascot 느낌이 남은 경우 SD 스타일 강화
+3. `$restore-sd-sheet-layout`: 승인된 SD base에 원본 시트 구조와 텍스트 영역 복원
+4. `$repair-sd-sheet-text`: 캐릭터는 좋지만 글자나 라벨만 깨진 경우 텍스트만 수리
 
 ### `$create-video-closeup-reference-pack`
 
@@ -165,6 +177,15 @@ python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_run
 | `$restore-photoreal-sheet-layout` | 승인된 실사 캐릭터 이미지를 유지하면서 원본 2D 시트의 패널 구조, 정보 구조, 라벨, 텍스트 박스를 복원합니다. |
 | `$repair-photoreal-sheet-text` | 최종 실사 시트의 캐릭터와 레이아웃은 유지하고 흐릿하거나 깨진 텍스트, 라벨, 정렬만 수리합니다. |
 
+## 2D to SD Character Stage Skills
+
+| Skill | 용도 |
+| --- | --- |
+| `$create-sd-character-base` | 원본 2D 캐릭터 시트를 텍스트 없는 SD/chibi 캐릭터 레퍼런스 base로 변환합니다. 캐릭터 정체성, 헤어, 의상, 포즈, 표정, 구성을 보존하되 글자는 임시로 제외합니다. |
+| `$intensify-sd-character` | base 결과가 아직 정상 비율, 반실사, 실사, 3D/toy, generic mascot처럼 보이거나 SD 비율이 일관되지 않을 때 SD/chibi 스타일을 강화합니다. |
+| `$restore-sd-sheet-layout` | 승인된 SD 캐릭터 이미지를 유지하면서 원본 2D 시트의 패널 구조, 정보 구조, 라벨, 텍스트 박스를 복원합니다. |
+| `$repair-sd-sheet-text` | 최종 SD 시트의 캐릭터와 레이아웃은 유지하고 흐릿하거나 깨진 텍스트, 라벨, 정렬만 수리합니다. |
+
 ## 개별 생성 Skills
 
 ### 얼굴과 표정
@@ -218,6 +239,14 @@ $character-sheet-orchestrator
 $convert-2d-sheet-to-photoreal
 이 2D 캐릭터 시트를 실사 라이브액션 캐릭터 시트로 변환해줘.
 단계별로 결과를 확인하고 진행해줘.
+```
+
+2D 시트 SD화:
+
+```text
+$convert-2d-sheet-to-sd-character
+이 2D 캐릭터 시트를 SD/chibi 캐릭터 시트로 변환해줘.
+원본 패널 구조와 캐릭터 정체성은 유지하고, 텍스트는 마지막 단계에서 복원해줘.
 ```
 
 영상용 레퍼런스 팩:

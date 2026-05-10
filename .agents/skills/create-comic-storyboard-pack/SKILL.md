@@ -33,7 +33,9 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Use six or more panels only for montage, comedy timing, quick action chains, or another explicit story reason.
 - Use experimental freeform panel design by default when readable: diagonal panels, asymmetry, tall vertical panels, half/full-page panels, borderless or open panels, inset panels, partial overlaps, and wide negative space.
 - Avoid generic uniform rectangular grids unless the user asks for them or the scene benefits from restraint.
-- Use a two-pass page planning flow. First, design each page and panel from the scenario, emotional beats, action rhythm, reader eye flow, panel density, negative space, detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines.
+- Before individual page composition, create a pre-page `spatial_continuity_plan` whenever pages share or revisit a location, move through connected spaces, or depend on landmark continuity. This is the location bible: decide the physical set, `location_id`s, entrances/exits, walls, doors, windows, furniture, props, fixed landmarks, camera/world axes, lighting sources, offscreen zones, movement path, allowed state changes, and page-to-page location transitions before planning individual pages. Same `location_id` means the same physical space unless a page records an explicit transition or allowed change.
+- Each page under an active `spatial_continuity_plan` must include `location_id` plus `location_continuity` fields such as `zone`, `camera_axis`, `fixed_landmarks_visible`, `offscreen_landmarks`, `must_preserve`, `changes_from_previous_page`, and `location_transition` when the location changes. Do not let a later page silently invent a different room, corridor, street, furniture layout, entrance/exit placement, or landmark arrangement for the same `location_id`.
+- Use a three-pass page planning flow. First, define the pre-page location/landmark continuity plan when applicable. Second, design each page and panel from the scenario, emotional beats, action rhythm, reader eye flow, panel density, negative space, detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines while respecting that location plan.
 - After the narrative-first page/panel design is chosen, extract only the spatial relations needed for validation into `spatial_contract`. `spatial_contract` is a validation overlay, not a page or composition driver.
 - Do not design panels just to make `spatial_contract` easy to draw. Do not turn action pages into tactical diagrams or place character/object coordinates at the center of page design unless the story itself calls for a diagram-like page.
 - Include page-level layout notes, panel-level composition/viewpoint notes, and optional `narrative_plan` fields such as `story_function`, `reader_experience`, `pacing_intent`, and `composition_intent`.
@@ -84,12 +86,13 @@ Use this format:
 - 캐릭터 고정 조건(character_locks): ...
 - 캐릭터 외형/해부 고정 조건(appearance/anatomy): 종족/신체 구조, 얼굴 구조, 눈 개수/배치, 손/손가락/팔/다리 개수, 실루엣, 체형 비율, 자세. 예: 두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 하며, 외눈 캐릭터처럼 보이면 rerun.
 - 이미지 내 문자 방지 조건(visual_text_guard): ...
-- 페이지/컷 구성 원칙: 먼저 시나리오, 감정선, 액션 리듬, 독자 시선, 컷 밀도, 여백, 디테일/강약/효과선 중심으로 만화 페이지를 설계함
+- 사전 공간 설계(spatial_continuity_plan): 같은 장소/이어지는 공간/랜드마크 연속성이 있는 경우 페이지별 컷 설계 전에 location_id, 물리적 세트, 출입구/벽/창/가구/고정 랜드마크, 카메라/세계 축, 조명, 이동 경로, 허용되는 변화, 페이지별 위치 전환을 먼저 확정함. 같은 location_id는 명시적 전환/허용 변화 없이는 같은 물리 공간으로 유지
+- 페이지/컷 구성 원칙: 사전 공간 설계를 지킨 상태에서 시나리오, 감정선, 액션 리듬, 독자 시선, 컷 밀도, 여백, 디테일/강약/효과선 중심으로 만화 페이지를 설계함
 - 구조화 공간/시간 계약(spatial_contract): 페이지 구성 이후 추출하는 검수 레이어. 방향/시선/이동체 경로/가림 요소/랜드마크/상태 유지 관계가 중요한 컷은 승인 전 벡터, 관계, 시간적 상태 검증을 통과해야 하지만, spatial_contract가 컷 설계의 목적이 되어서는 안 됨
 - 승인 전 공간 검수 미리보기(spatial-preview HTML): <run-dir>/proposed_storyboard_plan_spatial_preview.html | 구조화 spatial_contract 없음
 - 승인 전 공간 검수 결과(spatial-check): pass/fail, structured pages: ..., issues: ...
 
-| id | 파일명 | 장면 | 만화적 장면 목적 | 독자 경험/감정 리듬 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/상태유지/spatial_contract 검수 포인트 |
+| id | 파일명 | 장면 | 만화적 장면 목적 | 독자 경험/감정 리듬 | location_id/고정 랜드마크 | 페이지 구성 | 컷 수 | 컷 형태/여백 | 디테일/강약/효과선 연출 | 텍스트 정책/SFX | 캐릭터/외형/문자 고정 조건 | 공간/동선/상태유지/spatial_contract 검수 포인트 |
 | ... |
 
 승인 후 진행 방식:
@@ -133,12 +136,46 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
     "two-eyed character: keep two-eye structure unless a natural angle, hair, or object occlusion hides one eye"
   ],
   "visual_text_guard": ["no arbitrary text on buildings, books, flags, labels, or panel corners"],
+  "spatial_continuity_plan": {
+    "scope": "single recurring corridor set across pages 1-3",
+    "locations": [
+      {
+        "id": "main_corridor",
+        "name": "Main corridor",
+        "layout_summary": "Long interior passage with entrance near foreground, window light on the right wall, folding screen at mid-depth, and exit marker on the far wall.",
+        "camera_axis": "depth runs from lower-left foreground toward upper-right far wall",
+        "lighting": "right-wall window is the stable light source",
+        "fixed_landmarks": [
+          {"id": "entrance_frame", "description": "near foreground doorway", "relative_position": "near-left foreground"},
+          {"id": "folding_screen", "description": "mid-depth partial occluder", "relative_position": "middle corridor"},
+          {"id": "window_light", "description": "right-wall window light", "relative_position": "right wall"},
+          {"id": "exit_marker", "description": "far-wall destination marker", "relative_position": "far wall"}
+        ]
+      }
+    ],
+    "continuity_rules": [
+      "same location_id keeps the same physical set and landmark relations even when cropped",
+      "do not move the exit_marker to another wall without an explicit page transition or cause"
+    ],
+    "allowed_changes": ["door may open after a panel action causes it"]
+  },
   "pages": [
     {
       "id": "001-corridor-arrival",
       "filename": "001-corridor-arrival.png",
       "page_no": 1,
       "scene_refs": ["S01"],
+      "location_id": "main_corridor",
+      "location_continuity": {
+        "location_id": "main_corridor",
+        "zone": "entrance-to-mid-corridor",
+        "camera_axis": "matches main_corridor depth axis",
+        "fixed_landmarks_visible": ["entrance_frame", "folding_screen", "window_light", "exit_marker"],
+        "offscreen_landmarks": [],
+        "must_preserve": ["exit_marker remains on far wall", "window_light remains on right wall"],
+        "changes_from_previous_page": [],
+        "location_transition": ""
+      },
       "layout_brief": "Three-panel cinematic page with a wide establishing panel, diagonal action panel, and close reaction panel.",
       "narrative_plan": {
         "story_function": "Establish the protagonist's arrival and the quiet corridor mood.",
@@ -305,6 +342,8 @@ python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <run-dir>/propose
 ```
 
 `approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite direction vectors, forbidden firing/aim vectors, impossible moving-object paths, missing occluding elements between related subjects/sources, cover `screen_box` misses, non-firing pressure without `no_line_of_fire`, fixed-landmark relation drift, visibility/occlusion or state persistence drift, and missing allowed-transition causes fail before any generation is reserved. This validation checks the approved comic page design; it must not become the driver for page or panel composition. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
+
+When a top-level `spatial_continuity_plan` is present, `spatial-check` also verifies that every page declares a known `location_id`, references known fixed landmarks through `location_continuity`, and records an explicit `location_transition` or `transition_from_previous` when the location changes. This is a pre-page setting-continuity gate, separate from `spatial_contract`: it prevents accidental room/corridor/street drift before generation while still leaving panel composition narrative-first.
 
 `spatial-preview` writes a read-only static HTML diagram for human inspection of `spatial_contract` positions, vectors, cover/line-of-sight relations, landmark/state continuity constraints, and the current `spatial-check` pass/fail issues. Use `--plan-file`, `--plan-json --output <html>`, or `--run-dir`; the default output is `<plan-stem>_spatial_preview.html` for plan files or `<run-dir>/spatial_contract_preview.html` for approved runs.
 
@@ -476,6 +515,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 - In `sequential_prior_pages` mode, page N waits for pages 1..N-1 in the same stage to pass parent inspection before reservation. If an earlier page is rerun, later generated/imported/passed pages in that same stage are reset to rerun-pending because their continuity references may be stale.
 - In `sequential_prior_pages` mode, page 2 or later also waits for the same stage's first page to pass `anchor-review`. The runner records this in `stage_anchor_reviews` and injects `Stage level anchor reference` into prompts/subagent prompts.
 - Use `anchor-review --status pass` only after the first page has passed parent `inspect-pass`. Use `anchor-review --status needs_rerun` when the first page is too rough, too polished, or otherwise mismatched for the stage level; this routes the first page back to rerun and resets same-stage review/following gates.
+- `next-batch` injects the top-level `spatial_continuity_plan` and the page's `location_continuity` before narrative-first page design, so subagents keep the same physical set, fixed landmarks, entrances/exits, camera axis, lighting, and allowed page-to-page changes before applying page-specific composition.
 - `next-batch` injects narrative-first page design, spatial validation overlay, and `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved comic page design first, then preserve entity positions, vectors, visibility/occlusion, threat/viewpoint-based cover, line-of-sight, trajectory, negative firing/aim constraints, landmark-relation constraints, and temporal state constraints as validation constraints.
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
@@ -487,11 +527,13 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 
 ## Parent Verification
 
-Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, structured `spatial_contract` compliance, temporal continuity, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
+Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, pre-page `spatial_continuity_plan` / `location_continuity` compliance, structured `spatial_contract` compliance, temporal continuity, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
 
 For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, meaningless pure-symbol blocking that makes entities impossible to identify, over-detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
 
 For a stage first page in `sequential_prior_pages`, perform `anchor-review` after parent inspection and before reserving page 2. The anchor check verifies stage level, not just local correctness: `storyboard_blocking` must stay rough comic-page blocking with recognizable 3-second forms and no final-art polish; `storyboard_sketch_ink` must preserve blocking while adding real sketch/ink line art without tone/color/final finish; `finish` must preserve sketch/ink structure while adding tone/color/final polish without redraw. All anchor checks also include text policy, character locks, character appearance/anatomy, visual text guard, `spatial_contract`, and page-to-page continuity.
+
+When `spatial_continuity_plan` is active, inspect every generated page against the approved physical set before judging page-specific `spatial_contract`: same `location_id` must keep the same room/corridor/street, wall relationships, entrances/exits, windows, furniture layout, fixed landmarks, lighting sources, and allowed state changes. Reject pages that silently redraw the same `location_id` as a different space, move a fixed landmark to another wall/side/depth, duplicate or remove a required landmark without `offscreen_landmarks` or an approved crop, or change location without `location_transition`.
 
 When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, temporal state field, and constraint. Reject target-opposite direction vectors, forbidden firing/aim vectors, moving-object paths that do not move toward the approved destination, occluding elements that are not between the required subjects/sources, `behind_cover_from` that only works from reader POV, forbidden exposure around cover, subjects that were specified as hidden but appear exposed, broken line-of-sight blocking, left/right relation flips, fixed landmark relation drift, a partial occluding element turning into a different barrier without cause, and pose/cover/location/held-prop/state-tag drift without an `allowed_transition`. Record the result with `--spatial-verdict` and `--spatial-note`.
 
@@ -522,6 +564,7 @@ After each batch or gate, report in Korean:
 - 캐릭터 고정 조건 검수: ...
 - 캐릭터 외형/해부 검수: ...
 - 이미지 내 문자 방지 검수: ...
+- 사전 공간 설계/고정 랜드마크 검수: ...
 - 공간/동선/상태유지 검수: ...
 - 단계 마무리 검수 결과: ...
 - 다음 단계 사용자 피드백 게이트: storyboard_blocking_to_storyboard_sketch_ink 또는 storyboard_sketch_ink_to_finish = pending_user_feedback | approved | stopped

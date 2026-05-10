@@ -183,6 +183,54 @@ def sample_plan(page_count=5, panel_count=3):
     }
 
 
+def plan_with_spatial_continuity(page_count=2):
+    plan = sample_plan(page_count=page_count, panel_count=2)
+    plan["spatial_continuity_plan"] = {
+        "scope": "single recurring corridor set across all pages",
+        "locations": [
+            {
+                "id": "station-corridor",
+                "name": "Station corridor",
+                "layout_summary": "Long corridor with entrance foreground, ticket window on right wall, exit marker on far wall.",
+                "camera_axis": "depth runs from near-left foreground toward far-right background",
+                "fixed_landmarks": [
+                    {
+                        "id": "entrance-door",
+                        "description": "near foreground door frame",
+                        "relative_position": "near-left foreground",
+                    },
+                    {
+                        "id": "ticket-window",
+                        "description": "right wall service window",
+                        "relative_position": "mid-right wall",
+                    },
+                    {
+                        "id": "exit-marker",
+                        "description": "far wall destination marker",
+                        "relative_position": "far-right background",
+                    },
+                ],
+            }
+        ],
+        "continuity_rules": [
+            "same location_id means the same physical corridor and landmark layout",
+            "fixed landmarks may be cropped but must not move to a different wall",
+        ],
+        "allowed_changes": ["doors may open only after a panel action causes it"],
+    }
+    for page in plan["pages"]:
+        page["location_id"] = "station-corridor"
+        page["location_continuity"] = {
+            "location_id": "station-corridor",
+            "zone": "main corridor axis",
+            "fixed_landmarks_visible": ["ticket-window", "exit-marker"],
+            "offscreen_landmarks": ["entrance-door"],
+            "must_preserve": ["ticket-window remains on right wall", "exit-marker remains on far wall"],
+            "changes_from_previous_page": [],
+        }
+    return plan
+
+
 def action_spatial_contract():
     return {
         "coordinate_space": {
@@ -981,6 +1029,68 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "spatial_contract is a validation overlay, not a page or composition driver",
                 batch_plan,
             )
+
+    def test_spatial_continuity_plan_is_preserved_validated_and_prompted_before_page_design(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = plan_with_spatial_continuity(page_count=2)
+            plan_path = root / "spatial-continuity-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            check = run_cli("spatial-check", "--plan-file", str(plan_path), cwd=root)
+            self.assertIn("SPATIAL_CHECK: pass", check.stdout)
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            approved = json.loads((run_dir / "approved_storyboard_plan.json").read_text(encoding="utf-8"))
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(approved["spatial_continuity_plan"]["locations"][0]["id"], "station-corridor")
+            self.assertEqual(state["spatial_continuity_plan"]["locations"][0]["id"], "station-corridor")
+            self.assertEqual(state["pages"][0]["location_id"], "station-corridor")
+            self.assertEqual(
+                state["pages"][0]["location_continuity"]["fixed_landmarks_visible"],
+                ["ticket-window", "exit-marker"],
+            )
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            prompt = Path(stage["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+            batch_plan = (run_dir / "batch_plan.md").read_text(encoding="utf-8")
+
+            self.assertLess(
+                prompt.index("Pre-page spatial continuity plan:"),
+                prompt.index("Narrative-first page design:"),
+            )
+            self.assertIn("same location_id means the same physical set", prompt)
+            self.assertIn("station-corridor", prompt)
+            self.assertIn("ticket-window", prompt)
+            self.assertIn("Pre-page spatial continuity plan", subagent_prompt)
+            self.assertIn("spatial_continuity_plan is the pre-page location bible", batch_plan)
+
+    def test_spatial_check_rejects_incomplete_spatial_continuity_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            missing_location = plan_with_spatial_continuity(page_count=1)
+            missing_location["pages"][0].pop("location_id")
+            missing_location["pages"][0].pop("location_continuity")
+            missing_path = root / "missing-location-plan.json"
+            missing_path.write_text(json.dumps(missing_location, indent=2), encoding="utf-8")
+
+            missing_result = run_cli_raw("spatial-check", "--plan-file", str(missing_path), cwd=root)
+            self.assertNotEqual(missing_result.returncode, 0)
+            self.assertIn("requires location_id", missing_result.stdout)
+
+            unknown_landmark = plan_with_spatial_continuity(page_count=1)
+            unknown_landmark["pages"][0]["location_continuity"]["fixed_landmarks_visible"] = ["wrong-window"]
+            unknown_path = root / "unknown-landmark-plan.json"
+            unknown_path.write_text(json.dumps(unknown_landmark, indent=2), encoding="utf-8")
+
+            unknown_result = run_cli_raw("spatial-check", "--plan-file", str(unknown_path), cwd=root)
+            self.assertNotEqual(unknown_result.returncode, 0)
+            self.assertIn("unknown fixed landmark ids", unknown_result.stdout)
 
     def test_spatial_check_rejects_action_and_landmark_contradictions(self):
         with tempfile.TemporaryDirectory() as tmp:

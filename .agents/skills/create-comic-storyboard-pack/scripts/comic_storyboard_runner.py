@@ -172,6 +172,11 @@ DEFAULT_APPEARANCE_ANATOMY_NEGATIVE_TERMS = (
     "species, changed body type, broken joints, broken body proportions"
 )
 SPATIAL_VALIDATION_OVERLAY_NOTE = "spatial_contract is a validation overlay, not a page or composition driver."
+SPATIAL_CONTINUITY_PLAN_NOTE = (
+    "spatial_continuity_plan is the pre-page location bible for recurring or connected spaces; "
+    "same location_id means the same physical set, fixed landmarks, entrances/exits, camera axes, "
+    "and allowed state changes unless a page records an explicit transition."
+)
 
 
 def now_iso() -> str:
@@ -208,6 +213,120 @@ def merge_unique(*values: Any) -> list[str]:
             if item and item not in merged:
                 merged.append(item)
     return merged
+
+
+def normalize_named_entries(raw_entries: Any, default_prefix: str) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    if not raw_entries:
+        return entries
+    if isinstance(raw_entries, dict):
+        iterable = []
+        for entry_id, value in raw_entries.items():
+            if isinstance(value, dict):
+                entry = dict(value)
+                entry.setdefault("id", entry_id)
+            else:
+                entry = {"id": entry_id, "description": str(value)}
+            iterable.append(entry)
+    elif isinstance(raw_entries, list):
+        iterable = raw_entries
+    else:
+        iterable = as_list(raw_entries)
+
+    for index, raw in enumerate(iterable, start=1):
+        if isinstance(raw, dict):
+            entry = dict(raw)
+            entry_id = str(
+                entry.get("id")
+                or entry.get("location_id")
+                or entry.get("landmark_id")
+                or entry.get("name")
+                or f"{default_prefix}-{index}"
+            ).strip()
+            entry["id"] = entry_id
+            if entry.get("description") is None and entry.get("summary") is not None:
+                entry["description"] = str(entry.get("summary"))
+        else:
+            entry = {"id": str(raw).strip(), "description": str(raw).strip()}
+        if entry.get("id"):
+            entries.append(entry)
+    return entries
+
+
+def normalize_spatial_continuity_plan(raw_plan: Any) -> dict[str, Any]:
+    if not raw_plan:
+        return {
+            "scope": "",
+            "locations": [],
+            "page_sequence": [],
+            "continuity_rules": [],
+            "allowed_changes": [],
+        }
+    if not isinstance(raw_plan, dict):
+        raise SystemExit("spatial_continuity_plan must be an object when provided.")
+    plan = dict(raw_plan)
+    plan["scope"] = str(plan.get("scope") or "").strip()
+    plan["locations"] = normalize_named_entries(
+        plan.get("locations") or plan.get("spaces") or plan.get("sets"), "location"
+    )
+    for location in plan["locations"]:
+        landmarks = (
+            location.get("fixed_landmarks")
+            or location.get("landmarks")
+            or location.get("anchors")
+            or location.get("spatial_anchors")
+        )
+        location["fixed_landmarks"] = normalize_named_entries(landmarks, "landmark")
+    page_sequence = plan.get("page_sequence") or plan.get("page_locations") or []
+    if isinstance(page_sequence, dict):
+        plan["page_sequence"] = [
+            {"page": str(page_key), **(dict(value) if isinstance(value, dict) else {"location_id": str(value)})}
+            for page_key, value in page_sequence.items()
+        ]
+    elif isinstance(page_sequence, list):
+        plan["page_sequence"] = page_sequence
+    else:
+        plan["page_sequence"] = as_list(page_sequence)
+    plan["continuity_rules"] = merge_unique(plan.get("continuity_rules"))
+    plan["allowed_changes"] = merge_unique(plan.get("allowed_changes"))
+    return plan
+
+
+def spatial_continuity_plan_has_content(plan: Any) -> bool:
+    if not isinstance(plan, dict):
+        return False
+    return bool(
+        plan.get("scope")
+        or plan.get("locations")
+        or plan.get("page_sequence")
+        or plan.get("continuity_rules")
+        or plan.get("allowed_changes")
+    )
+
+
+def normalize_location_continuity(raw_continuity: Any) -> dict[str, Any]:
+    if not raw_continuity:
+        return {}
+    if not isinstance(raw_continuity, dict):
+        return {"location_id": str(raw_continuity).strip()}
+    continuity = dict(raw_continuity)
+    if "location_id" not in continuity:
+        for alias in ["location", "space_id", "set_id"]:
+            if continuity.get(alias):
+                continuity["location_id"] = str(continuity.get(alias)).strip()
+                break
+    for key in [
+        "fixed_landmarks_visible",
+        "visible_landmarks",
+        "anchor_landmarks",
+        "offscreen_landmarks",
+        "must_preserve",
+        "changes_from_previous_page",
+        "allowed_changes",
+    ]:
+        if key in continuity:
+            continuity[key] = merge_unique(continuity.get(key))
+    return continuity
 
 
 def normalize_text_policy(value: Any) -> str:
@@ -487,6 +606,87 @@ def spatial_contract_has_content(contract: Any) -> bool:
 
 def spatial_contract_page_count(pages: list[dict[str, Any]]) -> int:
     return sum(1 for page in pages if spatial_contract_has_content(page.get("spatial_contract")))
+
+
+def location_landmark_ids(location: dict[str, Any]) -> set[str]:
+    return {
+        str(landmark.get("id") or "")
+        for landmark in location.get("fixed_landmarks", [])
+        if str(landmark.get("id") or "")
+    }
+
+
+def page_location_continuity(page: dict[str, Any]) -> dict[str, Any]:
+    continuity = normalize_location_continuity(page.get("location_continuity"))
+    if page.get("location_id") and not continuity.get("location_id"):
+        continuity["location_id"] = str(page.get("location_id")).strip()
+    return continuity
+
+
+def page_location_transition_note(page: dict[str, Any], continuity: dict[str, Any]) -> str:
+    for key in [
+        "location_transition",
+        "transition_from_previous",
+        "transition_reason",
+        "changes_from_previous_page",
+    ]:
+        value = continuity.get(key)
+        if value:
+            return format_spatial_value(value)
+    return str(page.get("location_transition") or "").strip()
+
+
+def spatial_continuity_issues(spatial_continuity_plan: dict[str, Any], pages: list[dict[str, Any]]) -> list[str]:
+    plan = normalize_spatial_continuity_plan(spatial_continuity_plan)
+    if not spatial_continuity_plan_has_content(plan):
+        return []
+    issues: list[str] = []
+    locations = plan.get("locations", [])
+    if not locations:
+        issues.append("spatial_continuity_plan: at least one location is required when the plan is present.")
+        return issues
+
+    locations_by_id = {str(location.get("id") or ""): location for location in locations if location.get("id")}
+    previous_location_id = ""
+    for page_index, page in enumerate(pages, start=1):
+        label = f"{page['id']} location_continuity"
+        continuity = page_location_continuity(page)
+        location_id = str(continuity.get("location_id") or "").strip()
+        if not location_id:
+            issues.append(f"{label}: requires location_id from the pre-page spatial_continuity_plan.")
+            continue
+        if location_id not in locations_by_id:
+            issues.append(f"{label}: unknown location_id {location_id}.")
+            continue
+
+        location = locations_by_id[location_id]
+        landmark_ids = location_landmark_ids(location)
+        visible_landmarks = merge_unique(
+            continuity.get("fixed_landmarks_visible"),
+            continuity.get("visible_landmarks"),
+            continuity.get("anchor_landmarks"),
+        )
+        offscreen_landmarks = merge_unique(continuity.get("offscreen_landmarks"))
+        referenced_landmarks = visible_landmarks + [item for item in offscreen_landmarks if item not in visible_landmarks]
+        unknown_landmarks = [landmark_id for landmark_id in referenced_landmarks if landmark_id not in landmark_ids]
+        if unknown_landmarks:
+            issues.append(
+                f"{label}: unknown fixed landmark ids for {location_id}: {', '.join(unknown_landmarks)}."
+            )
+        if landmark_ids and not referenced_landmarks and not continuity.get("location_anchor"):
+            issues.append(
+                f"{label}: needs fixed_landmarks_visible, offscreen_landmarks, or location_anchor "
+                "so the page cannot drift into a different space."
+            )
+        if page_index > 1 and previous_location_id and location_id != previous_location_id:
+            transition_note = page_location_transition_note(page, continuity)
+            if not transition_note:
+                issues.append(
+                    f"{label}: location changed from {previous_location_id} to {location_id} "
+                    "without an explicit location_transition or transition_from_previous."
+                )
+        previous_location_id = location_id
+    return issues
 
 
 def spatial_constraint_value(constraint: dict[str, Any], *names: str) -> Any:
@@ -1237,8 +1437,17 @@ def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
     return issues
 
 
-def assert_spatial_contracts_pass(pages: list[dict[str, Any]]) -> None:
+def spatial_plan_issues(pages: list[dict[str, Any]], spatial_continuity_plan: dict[str, Any] | None = None) -> list[str]:
     issues = spatial_contract_issues(pages)
+    if spatial_continuity_plan is not None:
+        issues.extend(spatial_continuity_issues(spatial_continuity_plan, pages))
+    return issues
+
+
+def assert_spatial_contracts_pass(
+    pages: list[dict[str, Any]], spatial_continuity_plan: dict[str, Any] | None = None
+) -> None:
+    issues = spatial_plan_issues(pages, spatial_continuity_plan)
     if issues:
         details = "\n".join(f"- {issue}" for issue in issues)
         raise SystemExit(f"Spatial contract check failed:\n{details}")
@@ -1966,6 +2175,11 @@ def normalize_state(state: dict[str, Any]) -> None:
     state["text_policy"] = normalize_text_policy(state.get("text_policy"))
     state["character_locks"] = merge_unique(state.get("character_locks"))
     state["visual_text_guard"] = merge_unique(state.get("visual_text_guard"))
+    state["spatial_continuity_plan"] = normalize_spatial_continuity_plan(
+        state.get("spatial_continuity_plan")
+        or state.get("setting_continuity_plan")
+        or state.get("location_plan")
+    )
     state["stage_order"] = STAGE_IDS
     normalize_target_stages(state)
     normalize_page_generation_mode(state)
@@ -2001,6 +2215,14 @@ def normalize_state(state: dict[str, Any]) -> None:
         page.setdefault("visual_emphasis_notes", DEFAULT_VISUAL_EMPHASIS_NOTES)
         page.setdefault("comic_effects_notes", DEFAULT_COMIC_EFFECTS_NOTES)
         page["narrative_plan"] = normalize_optional_object(page.get("narrative_plan"), "narrative_plan")
+        page["location_continuity"] = normalize_location_continuity(
+            page.get("location_continuity") or page.get("setting_continuity")
+        )
+        page["location_id"] = str(
+            page.get("location_id") or page["location_continuity"].get("location_id") or ""
+        ).strip()
+        if page["location_id"] and not page["location_continuity"].get("location_id"):
+            page["location_continuity"]["location_id"] = page["location_id"]
         page["spatial_contract_extraction"] = normalize_optional_object(
             page.get("spatial_contract_extraction"), "spatial_contract_extraction"
         )
@@ -2990,6 +3212,60 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def location_summary(location: dict[str, Any]) -> str:
+    parts = [str(location.get("id") or "")]
+    if location.get("name"):
+        parts.append(f"name={location.get('name')}")
+    for key in ["layout_summary", "camera_axis", "lighting", "entrances_exits", "offscreen_zones"]:
+        if location.get(key):
+            parts.append(f"{key}={format_spatial_value(location.get(key))}")
+    landmark_summaries = []
+    for landmark in location.get("fixed_landmarks", []):
+        landmark_parts = [str(landmark.get("id") or "")]
+        for key in ["description", "relative_position", "screen_region", "must_persist"]:
+            if landmark.get(key) not in (None, ""):
+                landmark_parts.append(f"{key}={format_spatial_value(landmark.get(key))}")
+        landmark_summaries.append(" ".join(landmark_parts))
+    if landmark_summaries:
+        parts.append("fixed_landmarks=[" + "; ".join(landmark_summaries) + "]")
+    return "; ".join(part for part in parts if part)
+
+
+def spatial_continuity_prompt_text(state: dict[str, Any], page: dict[str, Any]) -> str:
+    plan = normalize_spatial_continuity_plan(state.get("spatial_continuity_plan"))
+    continuity = page_location_continuity(page)
+    if not spatial_continuity_plan_has_content(plan):
+        return "\n".join(
+            [
+                "- no top-level spatial_continuity_plan supplied.",
+                "- If adjacent pages imply the same place, do not invent a new room, corridor, street, furniture layout, entrance, exit, or landmark arrangement without an explicit transition.",
+            ]
+        )
+    lines = [
+        f"- {SPATIAL_CONTINUITY_PLAN_NOTE}",
+        "- Decide and preserve the physical set before drawing individual page compositions; page layout may crop or simplify the set, but must not relocate fixed landmarks.",
+    ]
+    if plan.get("scope"):
+        lines.append(f"- scope: {plan.get('scope')}")
+    for key in ["layout_summary", "camera_axis", "lighting", "movement_path", "temporal_state"]:
+        if plan.get(key):
+            lines.append(f"- {key}: {format_spatial_value(plan.get(key))}")
+    for location in plan.get("locations", []):
+        lines.append(f"- location: {location_summary(location)}")
+    if plan.get("page_sequence"):
+        lines.append(f"- page_sequence: {format_spatial_value(plan.get('page_sequence'))}")
+    if plan.get("continuity_rules"):
+        lines.append("- continuity_rules: " + "; ".join(plan.get("continuity_rules", [])))
+    if plan.get("allowed_changes"):
+        lines.append("- allowed_changes: " + "; ".join(plan.get("allowed_changes", [])))
+    if page:
+        if continuity:
+            lines.append(f"- this_page_location_continuity: {json.dumps(continuity, ensure_ascii=False, sort_keys=True)}")
+        else:
+            lines.append("- this_page_location_continuity: missing; parent plan approval should reject this when the top-level plan is active.")
+    return "\n".join(lines)
+
+
 def narrative_plan_prompt_text(page: dict[str, Any]) -> str:
     narrative_plan = normalize_optional_object(page.get("narrative_plan"), "narrative_plan")
     if narrative_plan:
@@ -3164,6 +3440,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     spatial_logic_notes = page.get("spatial_logic_notes") or "Keep character, object, prop, and environment positions physically plausible."
     motion_checks = "\n".join(f"- {entry}" for entry in as_list(page.get("motion_checks"))) or "- no impossible motion: thrown, kicked, or shot objects move in the direction implied by body pose and panel action"
     must_match = "\n".join(f"- {entry}" for entry in as_list(page.get("must_match"))) or "- preserve approved page layout, panel count, action direction, and character/object continuity"
+    spatial_continuity = spatial_continuity_prompt_text(state, page)
     narrative_plan = narrative_plan_prompt_text(page)
     spatial_validation_overlay = spatial_contract_extraction_prompt_text(page)
     spatial_contract = spatial_contract_prompt_text(page)
@@ -3266,6 +3543,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Page layout brief:",
             page.get("layout_brief") or page.get("visual_brief") or page.get("prompt") or "",
             "",
+            "Pre-page spatial continuity plan:",
+            spatial_continuity,
+            "",
             "Narrative-first page design:",
             narrative_plan,
             "",
@@ -3366,6 +3646,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Enforces every Visual text guard item listed above; reject arbitrary environmental text, labels, signs, or corner text when forbidden",
             "- Preserves story beat, reading order, composition, and continuity",
             "- Preserves source-data consistency for characters, props, profiles, locations, and page-layout references",
+            "- Preserves the pre-page spatial_continuity_plan: same location_id means the same physical set, fixed landmarks, entrances/exits, camera axis, lighting sources, and allowed state changes unless an explicit transition is listed",
             "- Preserves panel-to-panel and adjacent-page continuity for character/object placement, gaze, action direction, time flow, and lettering placement",
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
             "- Character/object positions, action direction, moving-object path, and cause-effect motion are physically plausible",
@@ -3398,6 +3679,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     character_locks = page_policy_items(state, page, "character_locks")
     visual_text_guard = page_policy_items(state, page, "visual_text_guard")
     appearance_anatomy_lock = DEFAULT_APPEARANCE_ANATOMY_LOCK_NOTES
+    spatial_continuity = spatial_continuity_prompt_text(state, page)
     narrative_plan = narrative_plan_prompt_text(page)
     spatial_validation_overlay = spatial_contract_extraction_prompt_text(page)
     spatial_contract = spatial_contract_prompt_text(page)
@@ -3443,6 +3725,8 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             appearance_anatomy_lock,
             "Visual text guard:",
             bullet_text(visual_text_guard),
+            "Pre-page spatial continuity plan:",
+            spatial_continuity,
             "Narrative-first page design:",
             narrative_plan,
             "Spatial validation overlay:",
@@ -3458,7 +3742,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, every Structured spatial contract constraint as a validation overlay, threat/viewpoint-based cover, forbidden_exposure, no_line_of_fire/not_aims_at negative constraints, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, the pre-page spatial_continuity_plan, every Structured spatial contract constraint as a validation overlay, threat/viewpoint-based cover, forbidden_exposure, no_line_of_fire/not_aims_at negative constraints, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- description path when stage is storyboard_blocking",
@@ -3484,6 +3768,7 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         "- Do not reserve images before approve-plan.",
         f"- Use {state.get('source_root') or DEFAULT_SOURCE_ROOT} as the default source data folder when the user did not specify source/reference paths.",
         f"- Do not use {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])} or any output/ subtree as source/reference data.",
+        f"- {SPATIAL_CONTINUITY_PLAN_NOTE}",
         "- Generate stages in order: storyboard_blocking, storyboard_sketch_ink, finish.",
         "- Plan page/panel composition from scenario, emotion, action rhythm, reader eye flow, pacing, negative space, detail density, visual emphasis, and comic effects before extracting spatial_contract.",
         f"- {SPATIAL_VALIDATION_OVERLAY_NOTE}",
@@ -3513,6 +3798,11 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         lines.append(f"- Character lock: {lock}")
     for guard in state.get("visual_text_guard", []):
         lines.append(f"- Visual text guard: {guard}")
+    spatial_continuity = normalize_spatial_continuity_plan(state.get("spatial_continuity_plan"))
+    if spatial_continuity_plan_has_content(spatial_continuity):
+        lines.extend(["", "Pre-page spatial continuity plan:"])
+        for line in spatial_continuity_prompt_text(state, {}).splitlines():
+            lines.append(f"- {line}" if not line.startswith("- ") else line)
     lines.append("")
     lines.extend(["Stage gates:", ""])
     for key, gate in state.get("stage_gates", {}).items():
@@ -3580,6 +3870,8 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
                 f"  detail_density: {page.get('detail_density_notes') or DEFAULT_DETAIL_DENSITY_NOTES}",
                 f"  visual_emphasis: {page.get('visual_emphasis_notes') or DEFAULT_VISUAL_EMPHASIS_NOTES}",
                 f"  comic_effects: {page.get('comic_effects_notes') or DEFAULT_COMIC_EFFECTS_NOTES}",
+                f"  location_id: {page.get('location_id') or ''}",
+                f"  location_continuity: {json.dumps(page.get('location_continuity') or {}, ensure_ascii=False, sort_keys=True)}",
                 f"  narrative_plan: {json.dumps(page.get('narrative_plan') or {}, ensure_ascii=False, sort_keys=True)}",
                 f"  spatial_contract_extraction: {json.dumps(page.get('spatial_contract_extraction') or {}, ensure_ascii=False, sort_keys=True)}",
                 f"  dialogue_notes: {page.get('page_dialogue_notes') or ''}",
@@ -3641,6 +3933,7 @@ def command_init(args: argparse.Namespace) -> None:
         "text_policy": TEXT_POLICY_DIALOGUE_SFX_CAPTIONS,
         "character_locks": [],
         "visual_text_guard": [],
+        "spatial_continuity_plan": normalize_spatial_continuity_plan({}),
         "stage_order": STAGE_IDS,
         "target_stages": STAGE_IDS,
         "page_generation_mode": PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES,
@@ -3738,6 +4031,12 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
     panels = [normalize_panel(panel, panel_index) for panel_index, panel in enumerate(raw_panels, start=1)]
     if not any(panel.get("visual_brief") or panel.get("prompt") for panel in panels):
         raise SystemExit(f"Page {page_id} needs at least one panel with visual_brief or prompt.")
+    location_continuity = normalize_location_continuity(
+        raw.get("location_continuity") or raw.get("setting_continuity")
+    )
+    location_id = str(raw.get("location_id") or location_continuity.get("location_id") or "").strip()
+    if location_id and not location_continuity.get("location_id"):
+        location_continuity["location_id"] = location_id
 
     return {
         "id": page_id,
@@ -3757,6 +4056,8 @@ def page_from_raw(raw: dict[str, Any], index: int) -> dict[str, Any]:
         "detail_density_notes": str(raw.get("detail_density_notes") or DEFAULT_DETAIL_DENSITY_NOTES),
         "visual_emphasis_notes": str(raw.get("visual_emphasis_notes") or DEFAULT_VISUAL_EMPHASIS_NOTES),
         "comic_effects_notes": str(raw.get("comic_effects_notes") or DEFAULT_COMIC_EFFECTS_NOTES),
+        "location_id": location_id,
+        "location_continuity": location_continuity,
         "narrative_plan": normalize_optional_object(raw.get("narrative_plan"), "narrative_plan"),
         "spatial_contract_extraction": normalize_optional_object(
             raw.get("spatial_contract_extraction"), "spatial_contract_extraction"
@@ -3834,22 +4135,37 @@ def normalize_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return pages
 
 
-def pages_for_spatial_check(args: argparse.Namespace) -> list[dict[str, Any]]:
+def plan_and_pages_for_spatial_check(args: argparse.Namespace) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if getattr(args, "plan_json", ""):
         try:
-            return normalize_plan(json.loads(args.plan_json))
+            plan = json.loads(args.plan_json)
+            return plan, normalize_plan(plan)
         except json.JSONDecodeError as exc:
             raise SystemExit(f"Invalid --plan-json: {exc}") from exc
     if getattr(args, "plan_file", ""):
-        return normalize_plan(load_json(Path(args.plan_file)))
+        plan = load_json(Path(args.plan_file))
+        return plan, normalize_plan(plan)
     if getattr(args, "run_dir", ""):
-        return load_state(Path(args.run_dir)).get("pages", [])
+        state = load_state(Path(args.run_dir))
+        return state, state.get("pages", [])
     raise SystemExit("Use --plan-file, --plan-json, or --run-dir.")
 
 
+def pages_for_spatial_check(args: argparse.Namespace) -> list[dict[str, Any]]:
+    return plan_and_pages_for_spatial_check(args)[1]
+
+
+def spatial_continuity_plan_from_context(plan_context: dict[str, Any]) -> dict[str, Any]:
+    return normalize_spatial_continuity_plan(
+        plan_context.get("spatial_continuity_plan")
+        or plan_context.get("setting_continuity_plan")
+        or plan_context.get("location_plan")
+    )
+
+
 def command_spatial_check(args: argparse.Namespace) -> None:
-    pages = pages_for_spatial_check(args)
-    issues = spatial_contract_issues(pages)
+    plan_context, pages = plan_and_pages_for_spatial_check(args)
+    issues = spatial_plan_issues(pages, spatial_continuity_plan_from_context(plan_context))
     if issues:
         print("SPATIAL_CHECK: fail")
         for issue in issues:
@@ -3860,8 +4176,8 @@ def command_spatial_check(args: argparse.Namespace) -> None:
 
 
 def command_spatial_preview(args: argparse.Namespace) -> None:
-    pages = pages_for_spatial_check(args)
-    issues = spatial_contract_issues(pages)
+    plan_context, pages = plan_and_pages_for_spatial_check(args)
+    issues = spatial_plan_issues(pages, spatial_continuity_plan_from_context(plan_context))
     model = build_spatial_preview_model(pages, issues)
     model["title"] = spatial_preview_title(args)
     model["source"] = spatial_preview_source(args)
@@ -3888,7 +4204,8 @@ def command_approve_plan(args: argparse.Namespace) -> None:
         raise SystemExit("Use --plan-file or --plan-json.")
 
     pages = normalize_plan(plan)
-    assert_spatial_contracts_pass(pages)
+    spatial_continuity_plan = spatial_continuity_plan_from_context(plan)
+    assert_spatial_contracts_pass(pages, spatial_continuity_plan)
     state["title"] = plan.get("scenario_title") or plan.get("story_title") or state.get("title")
     state["style_brief"] = str(plan.get("style_brief") or "")
     state["reading_order"] = str(plan.get("reading_order") or "right-to-left or top-to-bottom as approved")
@@ -3898,6 +4215,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
     state["text_policy"] = normalize_text_policy(plan.get("text_policy"))
     state["character_locks"] = merge_unique(plan.get("character_locks"))
     state["visual_text_guard"] = merge_unique(plan.get("visual_text_guard"))
+    state["spatial_continuity_plan"] = spatial_continuity_plan
     state["plan_approved"] = True
     state["approved_at"] = now_iso()
     state["target_stages"] = [args.target_stage] if args.target_stage else list(STAGE_IDS)
@@ -3923,6 +4241,7 @@ def command_approve_plan(args: argparse.Namespace) -> None:
             "text_policy": state.get("text_policy", TEXT_POLICY_DIALOGUE_SFX_CAPTIONS),
             "character_locks": state.get("character_locks", []),
             "visual_text_guard": state.get("visual_text_guard", []),
+            "spatial_continuity_plan": state.get("spatial_continuity_plan", normalize_spatial_continuity_plan({})),
             "target_stages": state.get("target_stages", STAGE_IDS),
             "page_generation_mode": state.get("page_generation_mode", PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES),
             "stage_anchor_reviews": state.get("stage_anchor_reviews", {}),

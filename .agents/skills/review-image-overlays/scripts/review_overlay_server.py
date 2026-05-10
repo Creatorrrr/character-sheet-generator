@@ -21,8 +21,9 @@ from typing import Any
 WORKFLOW = "review-image-overlays"
 EXPECTED_PACK_WORKFLOW = "create-comic-storyboard-pack"
 STAGE_DIRS = {
-    "storyboard_sketch_ink": "01_storyboard_sketch_ink",
-    "finish": "02_finish",
+        "storyboard_blocking": "01_storyboard_blocking",
+    "storyboard_sketch_ink": "02_storyboard_sketch_ink",
+    "finish": "03_finish",
 }
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 VALID_COORDINATE_SPACES = {"normalized", "pixel"}
@@ -91,6 +92,8 @@ def resolve_stage_image(run_dir: Path, page: dict[str, Any], stage: str) -> Path
     output_path = stage_record.get("output_path")
     if output_path:
         path = Path(output_path)
+        if not path.is_absolute() and path.exists():
+            path = path.resolve(strict=False)
     else:
         stage_dir = STAGE_DIRS.get(stage)
         if not stage_dir:

@@ -185,6 +185,11 @@ DEFAULT_APPEARANCE_ANATOMY_NEGATIVE_TERMS = (
     "species, changed body type, broken joints, broken body proportions"
 )
 SPATIAL_VALIDATION_OVERLAY_NOTE = "spatial_contract is a validation overlay, not a page or composition driver."
+SPATIAL_SCENE_3D_DEFAULT_POLICY = (
+    "spatially important panels default to scene_3d unless an exception is explicitly justified; "
+    "use panel_screen_2d mainly for graphic/UI shots, symbolic panels, emotion closeups, text/SFX layout, "
+    "or cases where 3D inference would create false constraints."
+)
 SPATIAL_CONTINUITY_PLAN_NOTE = (
     "spatial_continuity_plan is the pre-page location bible for recurring or connected spaces; "
     "same location_id means the same physical set, fixed landmarks, entrances/exits, camera axes, "
@@ -2191,9 +2196,11 @@ def render_spatial_preview_entity_legend(page: dict[str, Any]) -> str:
     rows = []
     for entity in contract.get("entities", []):
         blocking_symbol = entity.get("blocking_symbol")
+        entity_id = str(entity.get("id") or "")
+        targets_attr = preview_targets_attribute([entity_id])
         rows.append(
-            "<tr>"
-            f"<td><code>{escape_html(entity.get('id') or '')}</code></td>"
+            f"<tr{targets_attr}>"
+            f"<td><code>{escape_html(entity_id)}</code></td>"
             f"<td>{escape_html(entity.get('type') or '')}</td>"
             f"<td>{escape_html(entity.get('role') or '')}</td>"
             f"<td>{escape_html(format_spatial_value(blocking_symbol) if blocking_symbol else '')}</td>"
@@ -2217,8 +2224,9 @@ def render_spatial_preview_constraint_list(page: dict[str, Any]) -> str:
     }
     for constraint in contract.get("constraints", []):
         css_class = "constraint cross-panel" if constraint.get("type") in cross_panel_types else "constraint"
+        targets_attr = preview_targets_attribute(preview_target_entities(constraint))
         items.append(
-            f'<li class="{css_class}"><code>{escape_html(constraint.get("id") or "")}</code> '
+            f'<li class="{css_class}"{targets_attr}><code>{escape_html(constraint.get("id") or "")}</code> '
             f'<span>{escape_html(constraint.get("type") or "")}</span>'
             f'<small>{escape_html(preview_constraint_title(constraint))}</small></li>'
         )
@@ -2232,8 +2240,9 @@ def render_spatial_preview_lock_list(page: dict[str, Any]) -> str:
     items = []
     for lock in contract.get("locks", []):
         lock_type = str(lock.get("type") or "")
+        targets_attr = preview_targets_attribute(preview_target_entities(lock))
         items.append(
-            f'<li class="lock lock-{escape_html(lock_type)}"><code>{escape_html(lock.get("id") or "")}</code> '
+            f'<li class="lock lock-{escape_html(lock_type)}"{targets_attr}><code>{escape_html(lock.get("id") or "")}</code> '
             f'<span>{escape_html(lock_type)}</span>'
             f'<small>{escape_html(preview_constraint_title(lock))}</small></li>'
         )
@@ -2246,13 +2255,128 @@ def render_spatial_preview_transition_list(page: dict[str, Any]) -> str:
     contract = page.get("spatial_contract", {})
     items = []
     for transition in contract.get("transitions", []):
+        targets_attr = preview_targets_attribute(preview_target_entities(transition))
         items.append(
-            f'<li class="transition"><code>{escape_html(transition.get("id") or "")}</code> '
+            f'<li class="transition"{targets_attr}><code>{escape_html(transition.get("id") or "")}</code> '
             f'<small>{escape_html(preview_constraint_title(transition))}</small></li>'
         )
     if not items:
         items.append('<li class="empty">No transitions.</li>')
     return "\n".join(items)
+
+
+PREVIEW_TARGET_FIELDS = (
+    "actor",
+    "anchor",
+    "cover",
+    "destination_entity",
+    "entity",
+    "object",
+    "occluder",
+    "origin_entity",
+    "source",
+    "subject",
+    "target",
+    "threat",
+    "vector_entity",
+    "viewpoint_entity",
+)
+
+
+def preview_target_entities(item: dict[str, Any]) -> list[str]:
+    targets: set[str] = set()
+    for field in PREVIEW_TARGET_FIELDS:
+        value = item.get(field)
+        if isinstance(value, str) and value:
+            targets.add(value)
+        elif isinstance(value, list):
+            targets.update(str(entry) for entry in value if str(entry or ""))
+    entities = item.get("entities")
+    if isinstance(entities, list):
+        targets.update(str(entry) for entry in entities if str(entry or ""))
+    return sorted(targets)
+
+
+def preview_targets_attribute(targets: list[str]) -> str:
+    clean_targets = [target for target in targets if target]
+    if not clean_targets:
+        return ""
+    target_text = escape_html(" ".join(clean_targets))
+    return f' data-preview-targets="{target_text}" tabindex="0"'
+
+
+def preview_compact_label(entity_id: str, entity: dict[str, Any] | None = None) -> str:
+    entity = entity or {}
+    explicit = entity.get("preview_label")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()[:10]
+    tokens = [token for token in re.split(r"[^A-Za-z0-9]+", entity_id) if token]
+    priority_tokens = {
+        "apc",
+        "car",
+        "cover",
+        "door",
+        "mag",
+        "magazine",
+        "railing",
+        "shield",
+        "slab",
+        "stair",
+        "wall",
+        "window",
+    }
+    for token in reversed(tokens):
+        if token.lower() in priority_tokens:
+            return token.upper()[:10]
+    for token in tokens:
+        if token.lower() not in {"the", "a", "an", "of", "left", "right", "front", "back", "floor", "level"}:
+            return token.upper()[:10]
+    return entity_id[:10].upper()
+
+
+def scene_3d_level_for_position(scene: dict[str, Any] | None, position: Any) -> str:
+    point = vector3(position)
+    if point is None:
+        return ""
+    for level in (scene or {}).get("levels", []):
+        if scene_3d_level_contains_z(level, point[2]):
+            return str(level.get("id") or "")
+    return ""
+
+
+def render_scene_3d_status_strip(page: dict[str, Any], scene: dict[str, Any] | None) -> str:
+    contract = page.get("spatial_contract", {})
+    entity_defs = {str(entity.get("id") or ""): entity for entity in contract.get("entities", [])}
+    first_snapshot = (contract.get("panel_snapshots") or [{}])[0] or {}
+    level_items: list[str] = []
+    seen_level_items: set[str] = set()
+    for state in first_snapshot.get("entities", []):
+        entity_id = str(state.get("id") or "")
+        if not entity_id:
+            continue
+        entity = entity_defs.get(entity_id, {})
+        entity_type = str(entity.get("type") or "").lower()
+        role = str(entity.get("role") or "").lower()
+        level_id = str(state.get("level_id") or "") or scene_3d_level_for_position(scene, state.get("position"))
+        is_focus = entity_type == "character" or "cover" in role or bool(state.get("trajectory_vector")) or bool(level_id)
+        if is_focus:
+            label = preview_compact_label(entity_id, entity)
+            item = f"{label} {level_id}".strip()
+            if item not in seen_level_items:
+                level_items.append(item)
+                seen_level_items.add(item)
+    transitions = contract.get("transitions") or []
+    hard_locks = [lock for lock in contract.get("locks", []) if str(lock.get("type") or "") == "hard"]
+    chips = []
+    for item in level_items[:6]:
+        chips.append(f'<span>{escape_html(item)}</span>')
+    if transitions:
+        chips.append(f'<span>{len(transitions)} transition path(s)</span>')
+    if hard_locks:
+        chips.append(f'<span>{len(hard_locks)} hard lock(s)</span>')
+    if not chips:
+        chips.append("<span>scene_3d validation focus</span>")
+    return f'<div class="scene-3d-status-strip" data-scene3d-status-strip>{"".join(chips)}</div>'
 
 
 def scene_3d_preview_payload(page: dict[str, Any], scene: dict[str, Any] | None) -> str:
@@ -2285,8 +2409,37 @@ def render_scene_3d_preview(page: dict[str, Any], scene: dict[str, Any] | None) 
     </div>
     <span class="pill">validation-only provisional scene</span>
   </div>
-  <canvas class="scene-3d-canvas" width="720" height="420" data-scene3d="{scene_3d_preview_payload(page, scene)}"></canvas>
-  <p class="scene-3d-note">Hard locks are rerun criteria. Soft/inferred geometry may reconcile after approved storyboard inspection; the first panel can act as a calibration anchor when it has no prior continuity.</p>
+  <div class="scene-3d-controls" data-scene3d-controls>
+    <button type="button" data-scene3d-control="reset">Reset</button>
+    <button type="button" data-scene3d-control="top">Top</button>
+    <button type="button" data-scene3d-control="front">Front</button>
+    <button type="button" data-scene3d-control="side">Side</button>
+    <button type="button" data-scene3d-control="camera">Camera</button>
+    <span class="scene-3d-label-mode" data-scene3d-label-controls>
+      Labels:
+      <button type="button" data-scene3d-label-mode="key">key</button>
+      <button type="button" data-scene3d-label-mode="all">all</button>
+      <button type="button" data-scene3d-label-mode="off">off</button>
+    </span>
+    <span class="scene-3d-layer-controls" data-scene3d-layer-controls>
+      Layers:
+      <button type="button" data-scene3d-layer="actors">Actors</button>
+      <button type="button" data-scene3d-layer="obstacles">Obstacles</button>
+      <button type="button" data-scene3d-layer="landmarks">Landmarks</button>
+      <button type="button" data-scene3d-layer="relations">Relations</button>
+      <button type="button" data-scene3d-layer="vectors">Vectors</button>
+      <button type="button" data-scene3d-layer="levels">Levels</button>
+      <button type="button" data-scene3d-layer="camera">Camera</button>
+      <button type="button" data-scene3d-layer="ghosts">Ghosts</button>
+    </span>
+    <label class="scene-3d-sync"><input type="checkbox" data-scene3d-control="sync"> Sync scene view</label>
+    <span class="scene-3d-status" data-scene3d-status>yaw: 0 | pitch: 0 | zoom: 1.00 | panel: none</span>
+    <span class="scene-3d-panel-buttons" data-scene3d-panels></span>
+  </div>
+  {render_scene_3d_status_strip(page, scene)}
+  <canvas class="scene-3d-canvas" width="720" height="420" data-scene-id="{escape_html(scene_id)}" data-scene3d="{scene_3d_preview_payload(page, scene)}" tabindex="0" aria-label="Scene 3D orbit preview"></canvas>
+  <div class="scene-3d-level-rail" data-scene3d-level-rail></div>
+  <p class="scene-3d-note">Drag to orbit, shift-drag or middle-drag to pan, wheel to zoom. Hard locks are rerun criteria. Soft/inferred geometry may reconcile after approved storyboard inspection; the first panel can act as a calibration anchor when it has no prior continuity.</p>
 </section>"""
 
 
@@ -2303,8 +2456,9 @@ def render_spatial_preview_page(page: dict[str, Any], issues: list[str], scenes_
         snapshots = "\n".join(render_spatial_preview_snapshot(page, snapshot) for snapshot in contract.get("panel_snapshots", []))
     scene_id = str((contract.get("coordinate_space") or {}).get("scene_id") or "")
     scene_preview = render_scene_3d_preview(page, (scenes_by_id or {}).get(scene_id))
+    snapshot_preview = "" if scene_preview else f'<div class="panel-grid">{snapshots}</div>'
     return f"""
-<article class="page-card" id="page-{escape_html(page.get('id') or '')}">
+<article class="page-card" id="page-{escape_html(page.get('id') or '')}" data-preview-page-id="{escape_html(page.get('id') or '')}">
   <header class="page-card-header">
     <div>
       <h2>{escape_html(page.get('filename') or page.get('id') or '')}</h2>
@@ -2315,7 +2469,7 @@ def render_spatial_preview_page(page: dict[str, Any], issues: list[str], scenes_
   <div class="page-grid">
     <div>
       {scene_preview}
-      <div class="panel-grid">{snapshots}</div>
+      {snapshot_preview}
     </div>
     <aside class="legend">
       <h3>Entities</h3>
@@ -2416,6 +2570,8 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
     .constraint-list, .issue-list {{ margin: 0; padding-left: 18px; font-size: 13px; }}
     .constraint-list li {{ margin-bottom: 8px; }}
     .constraint-list small {{ display: block; color: #526071; word-break: break-word; }}
+    [data-preview-targets] {{ border-radius: 4px; outline: none; }}
+    [data-preview-targets]:hover, [data-preview-targets]:focus {{ background: #f8fafc; box-shadow: 0 0 0 2px rgba(14, 165, 233, .16); }}
     .cross-panel span {{ background: #ede9fe; color: #5b21b6; border-radius: 999px; padding: 1px 6px; }}
     .lock-hard span {{ background: #fee2e2; color: #991b1b; border-radius: 999px; padding: 1px 6px; }}
     .lock-soft span {{ background: #fef3c7; color: #92400e; border-radius: 999px; padding: 1px 6px; }}
@@ -2423,7 +2579,25 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
     .scene-3d-preview {{ border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; margin-bottom: 12px; padding: 10px; }}
     .scene-3d-header {{ display: flex; align-items: start; justify-content: space-between; gap: 12px; }}
     .scene-3d-header h3 {{ margin-top: 0; }}
-    .scene-3d-canvas {{ display: block; width: 100%; max-height: 420px; border: 1px solid #d8dee8; background: #ffffff; margin-top: 10px; }}
+    .scene-3d-controls {{ display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }}
+    .scene-3d-controls button {{ border: 1px solid #cbd5e1; border-radius: 6px; background: #ffffff; color: #17202a; padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer; }}
+    .scene-3d-controls button:hover, .scene-3d-controls button.active {{ background: #e2e8f0; }}
+    .scene-3d-label-mode {{ display: inline-flex; align-items: center; gap: 4px; border-left: 1px solid #cbd5e1; margin-left: 4px; padding-left: 10px; font-size: 12px; color: #334155; }}
+    .scene-3d-layer-controls {{ display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; border-left: 1px solid #cbd5e1; margin-left: 4px; padding-left: 10px; font-size: 12px; color: #334155; }}
+    .scene-3d-layer-controls button:not(.active) {{ color: #64748b; background: #f8fafc; }}
+    .scene-3d-status-strip {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }}
+    .scene-3d-status-strip span {{ border: 1px solid #d8dee8; border-radius: 999px; background: #ffffff; color: #334155; padding: 3px 8px; font-size: 12px; }}
+    .scene-3d-sync {{ display: inline-flex; align-items: center; gap: 4px; border-left: 1px solid #cbd5e1; margin-left: 4px; padding-left: 10px; font-size: 12px; color: #334155; }}
+    .scene-3d-status {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #475569; background: #ffffff; border: 1px solid #d8dee8; border-radius: 6px; padding: 4px 7px; }}
+    .scene-3d-panel-buttons {{ display: inline-flex; flex-wrap: wrap; gap: 4px; }}
+    .scene-3d-canvas {{ display: block; width: 100%; max-height: 420px; border: 1px solid #d8dee8; background: #ffffff; margin-top: 10px; cursor: grab; touch-action: none; outline: none; }}
+    .scene-3d-canvas:focus {{ border-color: #64748b; box-shadow: 0 0 0 2px rgba(100, 116, 139, .16); }}
+    .scene-3d-canvas.is-dragging {{ cursor: grabbing; }}
+    .scene-3d-level-rail {{ display: grid; gap: 6px; margin-top: 8px; font-size: 12px; }}
+    .scene-3d-level-row {{ display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 8px; color: #475569; }}
+    .scene-3d-level-bar {{ min-height: 8px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }}
+    .scene-3d-level-fill {{ display: block; min-height: 8px; background: #bae6fd; }}
+    .scene-3d-level-entities {{ color: #17202a; font-weight: 600; }}
     .scene-3d-note {{ font-size: 13px; }}
     .empty {{ color: #6b7280; font-size: 13px; }}
     @media (max-width: 980px) {{
@@ -2458,26 +2632,909 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
   </div>
   <script>
     (function () {{
-      function project(point) {{
-        const x = Number(point[0] || 0);
-        const y = Number(point[1] || 0);
-        const z = Number(point[2] || 0);
-        return [x * 46 - y * 28, z * -54 + y * 18];
+      const sceneViewers = [];
+      const DEFAULT_YAW = 0;
+      const DEFAULT_PITCH = -Math.PI / 2;
+      const MIN_PITCH = -1.45;
+      const MAX_PITCH = 1.45;
+
+      function clamp(value, minimum, maximum) {{
+        return Math.max(minimum, Math.min(maximum, value));
       }}
-      function allPositions(payload) {{
-        const positions = [];
-        const contract = payload.contract || {{}};
-        (contract.panel_snapshots || []).forEach(snapshot => {{
-          (snapshot.entities || []).forEach(entity => {{
-            if (Array.isArray(entity.position) && entity.position.length >= 3) positions.push(entity.position);
-          }});
+
+      function numberAt(values, index, fallback) {{
+        if (!Array.isArray(values) || values.length <= index) return fallback;
+        const value = Number(values[index]);
+        return Number.isFinite(value) ? value : fallback;
+      }}
+
+      function vec3(value) {{
+        if (!Array.isArray(value) || value.length < 3) return null;
+        return [numberAt(value, 0, 0), numberAt(value, 1, 0), numberAt(value, 2, 0)];
+      }}
+
+      function addVec(a, b) {{
+        return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+      }}
+
+      function subVec(a, b) {{
+        return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+      }}
+
+      function scaleVec(a, scale) {{
+        return [a[0] * scale, a[1] * scale, a[2] * scale];
+      }}
+
+      function lengthVec(a) {{
+        return Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+      }}
+
+      function normalizeVec(a) {{
+        const length = lengthVec(a) || 1;
+        return [a[0] / length, a[1] / length, a[2] / length];
+      }}
+
+      function panelKey(value) {{
+        return value == null ? "" : String(value);
+      }}
+
+      function panelSnapshots(payload) {{
+        return (((payload || {{}}).contract || {{}}).panel_snapshots || []);
+      }}
+
+      function activeSnapshot(viewer) {{
+        const snapshots = panelSnapshots(viewer.payload);
+        return snapshots.find(snapshot => panelKey(snapshot.panel) === viewer.state.activePanel) || snapshots[0] || null;
+      }}
+
+      function defaultViewState(payload) {{
+        const firstSnapshot = panelSnapshots(payload)[0] || {{}};
+        return {{
+          yaw: DEFAULT_YAW,
+          pitch: DEFAULT_PITCH,
+          zoom: 1,
+          panX: 0,
+          panY: 0,
+          activePanel: panelKey(firstSnapshot.panel),
+          sync: false,
+          labelMode: 'key',
+          visibleLayers: {{
+            actors: true,
+            obstacles: true,
+            landmarks: false,
+            relations: true,
+            vectors: false,
+            camera: false,
+            ghosts: false,
+            levels: true
+          }},
+          highlightTargets: []
+        }};
+      }}
+
+      function entityDefinitions(payload) {{
+        const definitions = {{}};
+        ((((payload || {{}}).contract || {{}}).entities) || []).forEach(entity => {{
+          if (entity && entity.id) definitions[String(entity.id)] = entity;
         }});
-        ((payload.scene || {{}}).fixed_entities || []).forEach(entity => {{
-          if (Array.isArray(entity.position) && entity.position.length >= 3) positions.push(entity.position);
+        return definitions;
+      }}
+
+      function layerVisible(viewer, layer) {{
+        return Boolean(viewer && viewer.state && viewer.state.visibleLayers && viewer.state.visibleLayers[layer]);
+      }}
+
+      function mergedEntityMeta(definitions, entity) {{
+        const entityId = String((entity || {{}}).id || '');
+        return Object.assign({{}}, definitions[entityId] || {{}}, entity || {{}});
+      }}
+
+      function entityLayer(meta, fixed) {{
+        const type = String((meta || {{}}).type || '').toLowerCase();
+        const role = String((meta || {{}}).role || '').toLowerCase();
+        const id = String((meta || {{}}).id || '').toLowerCase();
+        if (type === 'character' || role.indexOf('protagonist') !== -1 || role.indexOf('observer') !== -1) return 'actors';
+        if (/building|wall|pillar|debris|slab|apc|vehicle|cover|railing|door|stair|ramp/.test(id + ' ' + role + ' ' + type)) return 'obstacles';
+        if (type === 'landmark' && role.indexOf('cover') === -1) return 'landmarks';
+        return 'obstacles';
+      }}
+
+      function entityStyle(meta) {{
+        const geometry = ((meta || {{}}).preview_geometry || {{}});
+        const explicit = String(geometry.style || '').toLowerCase();
+        if (explicit) return explicit;
+        const type = String((meta || {{}}).type || '').toLowerCase();
+        const role = String((meta || {{}}).role || '').toLowerCase();
+        const id = String((meta || {{}}).id || '').toLowerCase();
+        if (/building|wall|pillar|breach/.test(id + ' ' + role + ' ' + type)) return 'building';
+        if (/apc|vehicle|car/.test(id + ' ' + role + ' ' + type)) return 'vehicle';
+        if (/slab|ramp|slope/.test(id + ' ' + role + ' ' + type)) return 'slab';
+        if (/debris|server|cover|railing/.test(id + ' ' + role + ' ' + type)) return 'cover';
+        if (type === 'character') return 'actor';
+        return type || 'object';
+      }}
+
+      function defaultGeometryFor(meta) {{
+        const style = entityStyle(meta);
+        const descriptor = String(((meta || {{}}).id || '') + ' ' + ((meta || {{}}).role || '') + ' ' + ((meta || {{}}).type || '')).toLowerCase();
+        if (style === 'building' && /floor2|floor_2|breach/.test(descriptor)) return {{ shape: 'box', size: [4.8, 2.4, 2.3], anchor: 'center', style }};
+        if (style === 'building' && /wall/.test(descriptor)) return {{ shape: 'box', size: [0.45, 2.4, 2.2], anchor: 'center', style }};
+        if (style === 'building' && /pillar/.test(descriptor)) return {{ shape: 'box', size: [0.75, 0.75, 2.6], anchor: 'center', style }};
+        if (style === 'building') return {{ shape: 'box', size: [1.2, 0.55, 3.8], anchor: 'base_center', style }};
+        if (style === 'vehicle') return {{ shape: 'box', size: [3.4, 1.7, 1.35], anchor: 'base_center', style }};
+        if (style === 'slab') return {{ shape: 'box', size: [3.6, 1.45, 0.35], anchor: 'base_center', style }};
+        if (style === 'cover') return {{ shape: 'box', size: [2.0, 0.8, 1.0], anchor: 'base_center', style }};
+        if (style === 'door') return {{ shape: 'box', size: [1.1, 0.22, 2.0], anchor: 'base_center', style }};
+        if (style === 'landmark') return {{ shape: 'box', size: [1.0, 1.0, 0.45], anchor: 'base_center', style }};
+        return null;
+      }}
+
+      function geometryForEntity(meta) {{
+        const explicit = (meta || {{}}).preview_geometry;
+        const fallback = defaultGeometryFor(meta);
+        if (!explicit && !fallback) return null;
+        const source = Object.assign({{}}, fallback || {{}}, explicit || {{}});
+        if (source.shape && source.shape !== 'box') return null;
+        const rawSize = Array.isArray(source.size) ? source.size : (fallback ? fallback.size : null);
+        if (!rawSize) return null;
+        const size = [
+          Math.max(0.05, numberAt(rawSize, 0, 1)),
+          Math.max(0.05, numberAt(rawSize, 1, 1)),
+          Math.max(0.05, numberAt(rawSize, 2, 0.5))
+        ];
+        return {{
+          shape: 'box',
+          size,
+          yaw: Number(source.yaw_degrees || source.yaw || 0) * Math.PI / 180,
+          anchor: String(source.anchor || 'base_center'),
+          style: String(source.style || entityStyle(meta))
+        }};
+      }}
+
+      function boxCorners(position, geometry) {{
+        const base = vec3(position);
+        if (!base || !geometry) return [];
+        const sx = geometry.size[0] / 2;
+        const sy = geometry.size[1] / 2;
+        const sz = geometry.size[2] / 2;
+        const centerZ = geometry.anchor === 'center' ? base[2] : base[2] + sz;
+        const center = [base[0], base[1], centerZ];
+        const cosYaw = Math.cos(geometry.yaw || 0);
+        const sinYaw = Math.sin(geometry.yaw || 0);
+        const local = [
+          [-sx, -sy, -sz], [sx, -sy, -sz], [sx, sy, -sz], [-sx, sy, -sz],
+          [-sx, -sy, sz], [sx, -sy, sz], [sx, sy, sz], [-sx, sy, sz]
+        ];
+        return local.map(point => [
+          center[0] + point[0] * cosYaw - point[1] * sinYaw,
+          center[1] + point[0] * sinYaw + point[1] * cosYaw,
+          center[2] + point[2]
+        ]);
+      }}
+
+      function snapshotPositions(snapshot, definitions) {{
+        const positions = [];
+        ((snapshot || {{}}).entities || []).forEach(entity => {{
+          const position = vec3(entity.position);
+          if (position) {{
+            positions.push(position);
+            const meta = mergedEntityMeta(definitions || {{}}, entity);
+            boxCorners(position, geometryForEntity(meta)).forEach(corner => positions.push(corner));
+            const trajectory = vec3(entity.trajectory_vector);
+            if (trajectory) positions.push(addVec(position, trajectory));
+          }}
         }});
         return positions;
       }}
-      function drawCanvas(canvas, payload) {{
+
+      function referencedFixedIds(payload, snapshot) {{
+        const ids = new Set();
+        ((snapshot || {{}}).entities || []).forEach(entity => {{
+          if (entity && entity.id) ids.add(String(entity.id));
+        }});
+        ((((payload || {{}}).contract || {{}}).constraints) || []).forEach(item => {{
+          ['actor', 'anchor', 'cover', 'destination_entity', 'entity', 'object', 'occluder', 'origin_entity', 'source', 'subject', 'target', 'threat', 'vector_entity', 'viewpoint_entity'].forEach(field => {{
+            if (item && item[field]) ids.add(String(item[field]));
+          }});
+        }});
+        ((((payload || {{}}).contract || {{}}).transitions) || []).forEach(item => {{
+          if (item && item.entity) ids.add(String(item.entity));
+        }});
+        return ids;
+      }}
+
+      function entityPositions(payload, state) {{
+        const positions = [];
+        const snapshots = panelSnapshots(payload);
+        const active = snapshots.find(snapshot => panelKey(snapshot.panel) === state.activePanel) || snapshots[0] || null;
+        const definitions = entityDefinitions(payload);
+        if (active) positions.push.apply(positions, snapshotPositions(active, definitions));
+        else snapshots.forEach(snapshot => positions.push.apply(positions, snapshotPositions(snapshot, definitions)));
+        const fixedIds = referencedFixedIds(payload, active);
+        const fixedEntities = ((payload.scene || {{}}).fixed_entities || []);
+        fixedEntities.forEach((entity, index) => {{
+          const entityId = String((entity || {{}}).id || '');
+          if (fixedIds.has(entityId) || index < 8) {{
+            const position = vec3(entity.position);
+            if (position) {{
+              positions.push(position);
+              const meta = mergedEntityMeta(definitions, entity);
+              boxCorners(position, geometryForEntity(meta)).forEach(corner => positions.push(corner));
+            }}
+          }}
+        }});
+        return positions;
+      }}
+
+      function contentBounds(payload, state) {{
+        const positions = entityPositions(payload, state || defaultViewState(payload));
+        const xs = positions.map(point => point[0]);
+        const ys = positions.map(point => point[1]);
+        const minX = xs.length ? Math.min.apply(null, xs) : -3;
+        const maxX = xs.length ? Math.max.apply(null, xs) : 3;
+        const minY = ys.length ? Math.min.apply(null, ys) : -3;
+        const maxY = ys.length ? Math.max.apply(null, ys) : 3;
+        const padX = Math.max(1.5, (maxX - minX) * 0.25);
+        const padY = Math.max(1.5, (maxY - minY) * 0.25);
+        return {{ minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY }};
+      }}
+
+      function levelFootprintPositions(payload, state, level) {{
+        const positions = [];
+        const levelId = String((level || {{}}).id || '');
+        if (!levelId) return positions;
+        const definitions = entityDefinitions(payload);
+        const active = activeSnapshot({{ payload, state: state || defaultViewState(payload) }});
+        const addEntity = entity => {{
+          if (!entity || levelForEntity(payload, entity) !== levelId) return;
+          const position = vec3(entity.position);
+          if (!position) return;
+          positions.push(position);
+          const meta = mergedEntityMeta(definitions, entity);
+          boxCorners(position, geometryForEntity(meta)).forEach(corner => positions.push(corner));
+        }};
+        ((active || {{}}).entities || []).forEach(addEntity);
+        const fixedIds = referencedFixedIds(payload, active);
+        (((payload || {{}}).scene || {{}}).fixed_entities || []).forEach((entity, index) => {{
+          const entityId = String((entity || {{}}).id || '');
+          if (!fixedIds.has(entityId) && index >= 8) return;
+          addEntity(entity);
+        }});
+        return positions;
+      }}
+
+      function levelPlaneBounds(payload, state, level) {{
+        const positions = levelFootprintPositions(payload, state, level);
+        if (!positions.length) return null;
+        const xs = positions.map(point => point[0]);
+        const ys = positions.map(point => point[1]);
+        const minX = Math.min.apply(null, xs);
+        const maxX = Math.max.apply(null, xs);
+        const minY = Math.min.apply(null, ys);
+        const maxY = Math.max.apply(null, ys);
+        const padX = Math.max(0.85, (maxX - minX) * 0.28);
+        const padY = Math.max(0.85, (maxY - minY) * 0.28);
+        return {{ minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY }};
+      }}
+
+      function levelPlaneCorners(payload, state) {{
+        const levels = (((payload || {{}}).scene || {{}}).levels || []);
+        const corners = [];
+        levels.forEach(level => {{
+          const bounds = levelPlaneBounds(payload, state, level);
+          if (!bounds) return;
+          const range = Array.isArray(level.z_range) ? level.z_range : [0, 0];
+          const z = Number(range[0] || 0);
+          corners.push([bounds.minX, bounds.minY, z]);
+          corners.push([bounds.maxX, bounds.minY, z]);
+          corners.push([bounds.maxX, bounds.maxY, z]);
+          corners.push([bounds.minX, bounds.maxY, z]);
+        }});
+        return corners;
+      }}
+
+      function allPositions(payload, state) {{
+        return entityPositions(payload, state).concat(levelPlaneCorners(payload, state));
+      }}
+
+      function fixedEntityPositions(payload, state) {{
+        const positions = [];
+        const snapshots = panelSnapshots(payload);
+        const active = snapshots.find(snapshot => panelKey(snapshot.panel) === state.activePanel) || snapshots[0] || null;
+        const fixedIds = referencedFixedIds(payload, active);
+        const definitions = entityDefinitions(payload);
+        ((payload.scene || {{}}).fixed_entities || []).forEach((entity, index) => {{
+          const entityId = String((entity || {{}}).id || '');
+          if (!fixedIds.has(entityId) && index >= 8) return;
+          const position = vec3(entity.position);
+          if (position) {{
+            positions.push(position);
+            const meta = mergedEntityMeta(definitions, entity);
+            boxCorners(position, geometryForEntity(meta)).forEach(corner => positions.push(corner));
+          }}
+        }});
+        return positions;
+      }}
+
+      function rotatePoint(point, state) {{
+        const source = vec3(point) || [0, 0, 0];
+        const cosYaw = Math.cos(state.yaw);
+        const sinYaw = Math.sin(state.yaw);
+        const x1 = source[0] * cosYaw - source[1] * sinYaw;
+        const y1 = source[0] * sinYaw + source[1] * cosYaw;
+        const z1 = source[2];
+        const cosPitch = Math.cos(state.pitch);
+        const sinPitch = Math.sin(state.pitch);
+        const y2 = y1 * cosPitch - z1 * sinPitch;
+        const z2 = y1 * sinPitch + z1 * cosPitch;
+        return {{ x: x1, y: -z2, depth: y2 }};
+      }}
+
+      function makeProjector(canvas, payload, state) {{
+        const width = canvas.width;
+        const height = canvas.height;
+        const rotated = allPositions(payload, state).map(point => rotatePoint(point, state));
+        const xs = rotated.map(point => point.x);
+        const ys = rotated.map(point => point.y);
+        const minX = xs.length ? Math.min.apply(null, xs) : -3;
+        const maxX = xs.length ? Math.max.apply(null, xs) : 3;
+        const minY = ys.length ? Math.min.apply(null, ys) : -3;
+        const maxY = ys.length ? Math.max.apply(null, ys) : 3;
+        const rangeX = Math.max(1, maxX - minX);
+        const rangeY = Math.max(1, maxY - minY);
+        const scale = Math.min((width - 96) / rangeX, (height - 72) / rangeY) * state.zoom;
+        const midX = (minX + maxX) / 2;
+        const midY = (minY + maxY) / 2;
+        return {{
+          point(point) {{
+            const rotatedPoint = rotatePoint(point, state);
+            return {{
+              x: width / 2 + (rotatedPoint.x - midX) * scale + state.panX,
+              y: height / 2 + (rotatedPoint.y - midY) * scale + state.panY,
+              depth: rotatedPoint.depth
+            }};
+          }},
+          scale,
+          state,
+          bounds: contentBounds(payload, state)
+        }};
+      }}
+
+      function drawLine(ctx, projector, startPoint, endPoint, color, alpha, width, dashed) {{
+        const start = projector.point(startPoint);
+        const end = projector.point(endPoint);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width || 1.4;
+        ctx.setLineDash(dashed ? [5, 4] : []);
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+        ctx.restore();
+      }}
+
+      function drawArrowHead(ctx, start, end, color, alpha, size) {{
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        if (length < 0.1) return;
+        const ux = dx / length;
+        const uy = dy / length;
+        const px = -uy;
+        const py = ux;
+        const arrowSize = size || 8;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y);
+        ctx.lineTo(end.x - ux * arrowSize + px * arrowSize * 0.45, end.y - uy * arrowSize + py * arrowSize * 0.45);
+        ctx.lineTo(end.x - ux * arrowSize - px * arrowSize * 0.45, end.y - uy * arrowSize - py * arrowSize * 0.45);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }}
+
+      function drawArrowLine(ctx, projector, startPoint, endPoint, color, alpha, width, dashed) {{
+        const start = projector.point(startPoint);
+        const end = projector.point(endPoint);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width || 1.4;
+        ctx.setLineDash(dashed ? [6, 4] : []);
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+        ctx.restore();
+        drawArrowHead(ctx, start, end, color, alpha, width && width > 1.5 ? 9 : 7);
+      }}
+
+      function drawBlockedMark(ctx, projector, startPoint, endPoint, color, alpha) {{
+        const start = projector.point(startPoint);
+        const end = projector.point(endPoint);
+        const mid = {{ x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }};
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.sqrt(dx * dx + dy * dy) || 1;
+        const px = -dy / length;
+        const py = dx / length;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(mid.x - px * 6, mid.y - py * 6);
+        ctx.lineTo(mid.x + px * 6, mid.y + py * 6);
+        ctx.stroke();
+        ctx.restore();
+      }}
+
+      function geometryColors(style) {{
+        const key = String(style || '').toLowerCase();
+        if (key === 'building') return {{ stroke: '#475569', fill: 'rgba(148, 163, 184, .15)' }};
+        if (key === 'vehicle') return {{ stroke: '#334155', fill: 'rgba(59, 130, 246, .14)' }};
+        if (key === 'slab') return {{ stroke: '#7c2d12', fill: 'rgba(251, 146, 60, .14)' }};
+        if (key === 'cover') return {{ stroke: '#166534', fill: 'rgba(34, 197, 94, .13)' }};
+        if (key === 'door') return {{ stroke: '#92400e', fill: 'rgba(245, 158, 11, .14)' }};
+        if (key === 'actor') return {{ stroke: '#92400e', fill: 'rgba(251, 191, 36, .18)' }};
+        return {{ stroke: '#64748b', fill: 'rgba(203, 213, 225, .16)' }};
+      }}
+
+      function drawWireBox(ctx, projector, position, geometry, meta, viewer, entityId, alpha) {{
+        const corners = boxCorners(position, geometry);
+        if (!corners.length) return;
+        const projected = corners.map(point => projector.point(point));
+        const colors = geometryColors((geometry || {{}}).style || entityStyle(meta));
+        const drawAlpha = viewer ? alphaForHighlight(viewer, entityId, alpha) : alpha;
+        const faces = [
+          [0, 1, 2, 3],
+          [4, 5, 6, 7]
+        ];
+        const edges = [
+          [0, 1], [1, 2], [2, 3], [3, 0],
+          [4, 5], [5, 6], [6, 7], [7, 4],
+          [0, 4], [1, 5], [2, 6], [3, 7]
+        ];
+        ctx.save();
+        ctx.globalAlpha = drawAlpha;
+        faces.forEach((face, index) => {{
+          ctx.fillStyle = index === 1 ? colors.fill : 'rgba(255, 255, 255, .04)';
+          ctx.beginPath();
+          face.forEach((cornerIndex, pointIndex) => {{
+            const point = projected[cornerIndex];
+            if (pointIndex === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+          }});
+          ctx.closePath();
+          ctx.fill();
+        }});
+        ctx.strokeStyle = colors.stroke;
+        ctx.lineWidth = 1.25;
+        ctx.setLineDash([5, 3]);
+        edges.forEach(edge => {{
+          const start = projected[edge[0]];
+          const end = projected[edge[1]];
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+        }});
+        ctx.restore();
+      }}
+
+      function directionVector(entity) {{
+        return vec3((entity || {{}}).aim_vector) || vec3((entity || {{}}).trajectory_vector) || vec3((entity || {{}}).facing_vector) || vec3((entity || {{}}).gaze_vector);
+      }}
+
+      function drawDirectionShape(ctx, projector, position, direction, fill, stroke, alpha, size) {{
+        const center = projector.point(position);
+        let dx = 1;
+        let dy = 0;
+        const vector = vec3(direction);
+        if (vector) {{
+          const normalized = normalizeVec(vector);
+          const end = projector.point(addVec(position, scaleVec(normalized, 0.8)));
+          dx = end.x - center.x;
+          dy = end.y - center.y;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          if (length > 0.1) {{
+            dx /= length;
+            dy /= length;
+          }} else {{
+            dx = 1;
+            dy = 0;
+          }}
+        }}
+        const px = -dy;
+        const py = dx;
+        const length = size || 10;
+        const width = length * 0.72;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = fill;
+        ctx.strokeStyle = stroke || '#111827';
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(center.x + dx * length, center.y + dy * length);
+        ctx.lineTo(center.x - dx * length * 0.58 + px * width, center.y - dy * length * 0.58 + py * width);
+        ctx.lineTo(center.x - dx * length * 0.28, center.y - dy * length * 0.28);
+        ctx.lineTo(center.x - dx * length * 0.58 - px * width, center.y - dy * length * 0.58 - py * width);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        return center;
+      }}
+
+      function drawOrientedEntity(ctx, projector, entity, meta, label, fill, alpha, viewer, entityId, priority, active) {{
+        const position = vec3((entity || {{}}).position);
+        if (!position) return;
+        const vector = directionVector(entity);
+        const drawAlpha = viewer ? alphaForHighlight(viewer, entityId, alpha) : alpha;
+        const center = drawDirectionShape(ctx, projector, position, vector, fill, '#111827', drawAlpha, active ? 9.5 : 7.5);
+        if (label) drawSceneLabel(ctx, viewer, center, label, priority || 1, drawAlpha, entityId || label);
+        if (vector && layerVisible(viewer, 'vectors')) {{
+          const vectorAlpha = viewer ? alphaForHighlight(viewer, entityId, active ? 0.86 : 0.24) : alpha;
+          drawArrowLine(ctx, projector, position, addVec(position, scaleVec(normalizeVec(vector), active ? 1.0 : 0.72)), '#0f766e', vectorAlpha, active ? 1.8 : 1.1, !active);
+        }}
+      }}
+
+      function compactEntityLabel(entityId, meta) {{
+        const entity = meta || {{}};
+        if (entity.preview_label) return String(entity.preview_label).slice(0, 10);
+        const tokens = String(entityId || 'entity').split(/[^A-Za-z0-9]+/).filter(Boolean);
+        const priority = new Set(['apc', 'car', 'cover', 'door', 'mag', 'magazine', 'railing', 'shield', 'slab', 'stair', 'wall', 'window']);
+        for (let index = tokens.length - 1; index >= 0; index -= 1) {{
+          if (priority.has(tokens[index].toLowerCase())) return tokens[index].toUpperCase().slice(0, 10);
+        }}
+        const stop = new Set(['the', 'a', 'an', 'of', 'left', 'right', 'front', 'back', 'floor', 'level']);
+        const token = tokens.find(item => !stop.has(item.toLowerCase())) || tokens[0] || String(entityId || 'entity');
+        return token.toUpperCase().slice(0, 10);
+      }}
+
+      function labelsOverlap(a, b) {{
+        return !(a.x + a.width + 4 < b.x || b.x + b.width + 4 < a.x || a.y + a.height + 3 < b.y || b.y + b.height + 3 < a.y);
+      }}
+
+      function clampLabelBox(box, width, height) {{
+        const x = clamp(box.x, 4, Math.max(4, width - box.width - 4));
+        const y = clamp(box.y, 4, Math.max(4, height - box.height - 4));
+        return {{ x, y, width: box.width, height: box.height, baseline: y + 12 }};
+      }}
+
+      function placeSceneLabel(ctx, viewer, anchor, label, priority, entityId) {{
+        if (!viewer || !label || viewer.state.labelMode === 'off') return null;
+        const targets = viewer.state.highlightTargets || [];
+        if (viewer.state.labelMode === 'key' && priority < 2 && !(targets.length && isHighlighted(viewer, entityId))) return null;
+        ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+        const textWidth = Math.ceil(ctx.measureText(label).width);
+        const labelWidth = textWidth + 6;
+        const labelHeight = 16;
+        const candidates = [
+          {{ x: anchor.x + 9, y: anchor.y - 12, width: labelWidth, height: labelHeight }},
+          {{ x: anchor.x - labelWidth - 9, y: anchor.y - 12, width: labelWidth, height: labelHeight }},
+          {{ x: anchor.x + 9, y: anchor.y + 8, width: labelWidth, height: labelHeight }},
+          {{ x: anchor.x - labelWidth - 9, y: anchor.y + 8, width: labelWidth, height: labelHeight }},
+          {{ x: anchor.x - labelWidth / 2, y: anchor.y - 24, width: labelWidth, height: labelHeight }},
+          {{ x: anchor.x - labelWidth / 2, y: anchor.y + 14, width: labelWidth, height: labelHeight }}
+        ].map(box => clampLabelBox(box, viewer.canvas.width, viewer.canvas.height));
+        let best = null;
+        let bestScore = Number.POSITIVE_INFINITY;
+        candidates.forEach(candidate => {{
+          const overlaps = viewer.labelBoxes.filter(box => labelsOverlap(candidate, box)).length;
+          const distance = Math.abs(candidate.x - anchor.x) + Math.abs(candidate.baseline - anchor.y);
+          const score = overlaps * 1000 + distance;
+          if (score < bestScore) {{
+            best = candidate;
+            bestScore = score;
+          }}
+        }});
+        if (!best) return null;
+        if (viewer.state.labelMode === 'key' && bestScore >= 1000 && priority < 4) return null;
+        viewer.labelBoxes.push(best);
+        return best;
+      }}
+
+      function drawSceneLabel(ctx, viewer, anchor, label, priority, alpha, entityId) {{
+        const box = placeSceneLabel(ctx, viewer, anchor, label, priority, entityId);
+        if (!box) return;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = 'rgba(71, 85, 105, .55)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(anchor.x, anchor.y);
+        ctx.lineTo(box.x + 3, box.baseline - 8);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255, 255, 255, .86)';
+        ctx.strokeStyle = 'rgba(203, 213, 225, .92)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {{
+          ctx.roundRect(box.x, box.y, box.width, box.height, 4);
+        }} else {{
+          ctx.rect(box.x, box.y, box.width, box.height);
+        }}
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#111827';
+        ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+        ctx.fillText(label, box.x + 3, box.baseline);
+        ctx.restore();
+      }}
+
+      function isHighlighted(viewer, entityId) {{
+        const targets = (viewer.state.highlightTargets || []);
+        if (!targets.length) return true;
+        return targets.indexOf(String(entityId || '')) !== -1;
+      }}
+
+      function alphaForHighlight(viewer, entityId, alpha) {{
+        const targets = (viewer.state.highlightTargets || []);
+        if (!targets.length) return alpha;
+        return isHighlighted(viewer, entityId) ? Math.max(alpha, 0.92) : alpha * 0.18;
+      }}
+
+      function alphaForTargets(viewer, entityIds, alpha) {{
+        const targets = (viewer.state.highlightTargets || []);
+        if (!targets.length) return alpha;
+        const ids = (entityIds || []).map(value => String(value || '')).filter(Boolean);
+        return ids.some(id => targets.indexOf(id) !== -1) ? Math.max(alpha, 0.88) : alpha * 0.16;
+      }}
+
+      function pointLabelFor(viewer, entityId, meta, panel, active, fixed) {{
+        if (viewer.state.labelMode === 'off') return '';
+        if (viewer.state.labelMode === 'all') {{
+          if (fixed) return 'fixed:' + (entityId || 'entity');
+          return (active ? '' : 'ghost ') + panelKey(panel) + ':' + (entityId || 'entity');
+        }}
+        return compactEntityLabel(entityId, meta);
+      }}
+
+      function pointPriority(entityId, meta, state, active, fixed) {{
+        const entityType = String((meta || {{}}).type || '').toLowerCase();
+        const role = String((meta || {{}}).role || '').toLowerCase();
+        if (active && entityType === 'character') return 5;
+        if (active && (state.trajectory_vector || role.indexOf('cover') !== -1 || role.indexOf('moving') !== -1)) return 4;
+        if (active) return 3;
+        if (fixed) return 1;
+        return 1;
+      }}
+
+      function drawPoint(ctx, projector, point, label, fill, alpha, radius, viewer, entityId, priority) {{
+        const canvasPoint = projector.point(point);
+        const drawAlpha = viewer ? alphaForHighlight(viewer, entityId || label, alpha) : alpha;
+        ctx.save();
+        ctx.globalAlpha = drawAlpha;
+        ctx.fillStyle = fill;
+        ctx.strokeStyle = '#111827';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(canvasPoint.x, canvasPoint.y, radius || 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        if (label) drawSceneLabel(ctx, viewer, canvasPoint, label, priority || 1, drawAlpha, entityId || label);
+      }}
+
+      function levelColors(level, index) {{
+        const descriptor = String(((level || {{}}).id || '') + ' ' + ((level || {{}}).label || '')).toLowerCase();
+        if (/floor_2|floor2|2층|upper/.test(descriptor)) return {{ fill: 'rgba(196, 181, 253, .46)', stroke: '#7c3aed', text: '#4c1d95', emphasis: true }};
+        if (/slope|rubble|slab|ramp|경사/.test(descriptor)) return {{ fill: 'rgba(254, 240, 138, .42)', stroke: '#d97706', text: '#92400e', emphasis: true }};
+        if (/street|road|도로|ground/.test(descriptor)) return {{ fill: 'rgba(224, 242, 254, .36)', stroke: '#38bdf8', text: '#075985', emphasis: false }};
+        const palette = [
+          {{ fill: 'rgba(224, 242, 254, .34)', stroke: '#38bdf8', text: '#075985', emphasis: false }},
+          {{ fill: 'rgba(196, 181, 253, .38)', stroke: '#7c3aed', text: '#4c1d95', emphasis: true }},
+          {{ fill: 'rgba(254, 240, 138, .36)', stroke: '#d97706', text: '#92400e', emphasis: true }}
+        ];
+        return palette[index % palette.length];
+      }}
+
+      function drawLevelPlanes(ctx, projector, viewer) {{
+        const payload = (viewer || {{}}).payload || {{}};
+        const levels = (((payload || {{}}).scene || {{}}).levels || []);
+        levels.forEach((level, index) => {{
+          const bounds = levelPlaneBounds(payload, projector.state, level);
+          if (!bounds) return;
+          const range = Array.isArray(level.z_range) ? level.z_range : [0, 0];
+          const z = Number(range[0] || 0);
+          const colors = levelColors(level, index);
+          const corners = [
+            [bounds.minX, bounds.minY, z],
+            [bounds.maxX, bounds.minY, z],
+            [bounds.maxX, bounds.maxY, z],
+            [bounds.minX, bounds.maxY, z]
+          ];
+          const canvasCorners = corners.map(point => projector.point(point));
+          ctx.save();
+          ctx.fillStyle = colors.fill;
+          ctx.strokeStyle = colors.stroke;
+          ctx.lineWidth = colors.emphasis ? 2.2 : 1;
+          ctx.globalAlpha = colors.emphasis ? 0.9 : 0.7;
+          ctx.setLineDash(colors.emphasis ? [8, 4] : []);
+          ctx.beginPath();
+          canvasCorners.forEach((point, index) => {{
+            if (index === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+          }});
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          if (!viewer || viewer.state.labelMode !== 'off') {{
+            const labelPoint = projector.point([(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2, z]);
+            ctx.fillStyle = colors.text;
+            ctx.font = colors.emphasis ? '12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' : '10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+            ctx.fillText(String(level.id || level.label || 'level'), labelPoint.x + 5, labelPoint.y - 5);
+          }}
+          ctx.restore();
+        }});
+      }}
+
+      function drawCamera(ctx, projector, snapshot, alpha, viewer) {{
+        const camera = (snapshot || {{}}).camera || {{}};
+        const position = vec3(camera.position);
+        const lookAt = vec3(camera.look_at);
+        if (!position || !lookAt) return;
+        const label = viewer && viewer.state.labelMode === 'all' ? 'camera' : '';
+        drawPoint(ctx, projector, position, label, '#a78bfa', alpha, 5, viewer, 'camera', 1);
+        drawLine(ctx, projector, position, lookAt, '#7c3aed', alpha, 1.5, false);
+        const direction = normalizeVec(subVec(lookAt, position));
+        const side = normalizeVec([-direction[1], direction[0], 0]);
+        const up = [0, 0, 1];
+        const distance = Math.max(0.8, Math.min(3.5, lengthVec(subVec(lookAt, position)) * 0.55));
+        const fov = clamp(Number(camera.fov || 45), 18, 100) * Math.PI / 180;
+        const spread = Math.tan(fov / 2) * distance;
+        const center = addVec(position, scaleVec(direction, distance));
+        const left = addVec(center, scaleVec(side, spread));
+        const right = addVec(center, scaleVec(side, -spread));
+        const top = addVec(center, scaleVec(up, spread * 0.5));
+        drawLine(ctx, projector, position, left, '#7c3aed', alpha * 0.65, 1, true);
+        drawLine(ctx, projector, position, right, '#7c3aed', alpha * 0.65, 1, true);
+        drawLine(ctx, projector, position, top, '#7c3aed', alpha * 0.65, 1, true);
+        drawLine(ctx, projector, left, right, '#7c3aed', alpha * 0.5, 1, true);
+        drawLine(ctx, projector, right, top, '#7c3aed', alpha * 0.45, 1, true);
+        drawLine(ctx, projector, top, left, '#7c3aed', alpha * 0.45, 1, true);
+      }}
+
+      function drawTransitionPaths(ctx, projector, payload, viewer) {{
+        const snapshots = panelSnapshots(payload);
+        const transitions = (((payload || {{}}).contract || {{}}).transitions || []);
+        transitions.forEach(transition => {{
+          const fromPanel = panelKey(transition.from_panel);
+          const toPanel = panelKey(transition.to_panel);
+          const entityId = transition.entity;
+          const fromSnapshot = snapshots.find(snapshot => panelKey(snapshot.panel) === fromPanel);
+          const toSnapshot = snapshots.find(snapshot => panelKey(snapshot.panel) === toPanel);
+          const fromEntity = ((fromSnapshot || {{}}).entities || []).find(entity => entity.id === entityId);
+          const toEntity = ((toSnapshot || {{}}).entities || []).find(entity => entity.id === entityId);
+          const fromPosition = vec3((fromEntity || {{}}).position);
+          const toPosition = vec3((toEntity || {{}}).position);
+          const alpha = viewer ? alphaForHighlight(viewer, entityId, 0.58) : 0.58;
+          if (fromPosition && toPosition) drawLine(ctx, projector, fromPosition, toPosition, '#475569', alpha, 1.2, true);
+        }});
+      }}
+
+      function itemMatchesActivePanel(item, activePanel) {{
+        const panel = panelKey((item || {{}}).panel);
+        if (panel) return panel === activePanel;
+        if (Array.isArray((item || {{}}).panels) && item.panels.length) {{
+          return item.panels.map(panelKey).indexOf(activePanel) !== -1;
+        }}
+        return true;
+      }}
+
+      function entityPositionMap(payload, snapshot) {{
+        const positions = {{}};
+        (((payload || {{}}).scene || {{}}).fixed_entities || []).forEach(entity => {{
+          if (!entity || !entity.id) return;
+          const position = vec3(entity.position);
+          if (position) positions[String(entity.id)] = position;
+        }});
+        ((snapshot || {{}}).entities || []).forEach(entity => {{
+          if (!entity || !entity.id) return;
+          const position = vec3(entity.position);
+          if (position) positions[String(entity.id)] = position;
+        }});
+        return positions;
+      }}
+
+      function relationTargetIds(item) {{
+        const ids = [];
+        ['actor', 'anchor', 'cover', 'destination_entity', 'entity', 'object', 'occluder', 'origin_entity', 'source', 'subject', 'target', 'threat', 'vector_entity', 'viewpoint_entity'].forEach(field => {{
+          const value = (item || {{}})[field];
+          if (typeof value === 'string' && value) ids.push(value);
+          else if (Array.isArray(value)) value.forEach(entry => {{ if (entry) ids.push(String(entry)); }});
+        }});
+        if (Array.isArray((item || {{}}).entities)) item.entities.forEach(entry => {{ if (entry) ids.push(String(entry)); }});
+        return Array.from(new Set(ids));
+      }}
+
+      function firstPosition(positions, ids) {{
+        for (const id of ids || []) {{
+          const key = String(id || '');
+          if (key && positions[key]) return positions[key];
+        }}
+        return null;
+      }}
+
+      function drawRelationOverlay(ctx, projector, payload, viewer) {{
+        if (!layerVisible(viewer, 'relations')) return;
+        const snapshot = activeSnapshot(viewer);
+        if (!snapshot) return;
+        const positions = entityPositionMap(payload, snapshot);
+        const activePanel = viewer.state.activePanel;
+        const constraints = ((((payload || {{}}).contract || {{}}).constraints) || []);
+        constraints.forEach(constraint => {{
+          if (!itemMatchesActivePanel(constraint, activePanel)) return;
+          const type = String(constraint.type || '').toLowerCase();
+          const targets = relationTargetIds(constraint);
+          const alpha = alphaForTargets(viewer, targets, 0.68);
+          if (type === 'trajectory_to') {{
+            const start = firstPosition(positions, [constraint.object, constraint.entity, constraint.actor, constraint.source, constraint.origin_entity]);
+            const end = firstPosition(positions, [constraint.target, constraint.destination_entity, constraint.anchor]);
+            if (start && end) drawArrowLine(ctx, projector, start, end, '#2563eb', alpha, 1.55, true);
+            return;
+          }}
+          if (type === 'cover_between' || type === 'behind_cover_from' || type === 'line_of_sight_blocked') {{
+            const actor = firstPosition(positions, [constraint.actor, constraint.subject, constraint.entity, constraint.target]);
+            const cover = firstPosition(positions, [constraint.cover, constraint.occluder, constraint.anchor]);
+            const threat = firstPosition(positions, [constraint.threat, constraint.source, constraint.viewpoint_entity]);
+            if (threat && cover) drawLine(ctx, projector, threat, cover, '#64748b', alpha, 1.25, true);
+            if (cover && actor) drawLine(ctx, projector, cover, actor, '#16a34a', alpha, 1.45, true);
+            return;
+          }}
+          if (type === 'no_line_of_fire' || type === 'not_aims_at') {{
+            const source = firstPosition(positions, [constraint.actor, constraint.source, constraint.entity, constraint.vector_entity]);
+            const target = firstPosition(positions, [constraint.target, constraint.subject, constraint.threat]);
+            if (source && target) {{
+              drawLine(ctx, projector, source, target, '#dc2626', alpha, 1.35, true);
+              drawBlockedMark(ctx, projector, source, target, '#dc2626', alpha);
+            }}
+            return;
+          }}
+          if (type === 'above' || type === 'below' || type === 'vertical_separation' || type === 'on_level') {{
+            const subject = firstPosition(positions, [constraint.subject, constraint.entity, constraint.actor]);
+            const anchor = firstPosition(positions, [constraint.anchor, constraint.target]);
+            if (subject && anchor) drawLine(ctx, projector, anchor, subject, '#7c3aed', alpha, 1.25, true);
+            else if (subject) {{
+              const levelTarget = [subject[0], subject[1], subject[2] + (type === 'on_level' ? 0.65 : 1.0)];
+              drawLine(ctx, projector, subject, levelTarget, '#7c3aed', alpha, 1.1, true);
+            }}
+          }}
+        }});
+      }}
+
+      function drawSnapshotEntities(ctx, projector, snapshot, active, viewer) {{
+        if (!active && !layerVisible(viewer, 'ghosts')) return;
+        const alpha = active ? 1 : 0.28;
+        const pointFill = active ? '#fbbf24' : '#fde68a';
+        const definitions = entityDefinitions(viewer.payload);
+        (snapshot.entities || []).forEach(entity => {{
+          const position = vec3(entity.position);
+          if (!position) return;
+          const entityId = String(entity.id || 'entity');
+          const meta = mergedEntityMeta(definitions, entity);
+          const layer = entityLayer(meta, false);
+          if (!layerVisible(viewer, layer)) return;
+          const label = pointLabelFor(viewer, entityId, meta, snapshot.panel, active, false);
+          const priority = pointPriority(entityId, meta, entity, active, false);
+          const geometry = geometryForEntity(meta);
+          if (geometry && layer !== 'actors') drawWireBox(ctx, projector, position, geometry, meta, viewer, entityId, active ? 0.58 : 0.18);
+          if (layer === 'actors' || directionVector(entity)) {{
+            const fill = layer === 'actors' ? pointFill : (active ? '#67e8f9' : '#bae6fd');
+            drawOrientedEntity(ctx, projector, entity, meta, label, fill, alpha, viewer, entityId, priority, active);
+          }} else {{
+            drawPoint(ctx, projector, position, label, pointFill, alpha, active ? 5.4 : 4.2, viewer, entityId, priority);
+          }}
+        }});
+      }}
+
+      function drawSceneViewer(viewer, shouldSync) {{
+        const canvas = viewer.canvas;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
         const width = canvas.width;
@@ -2485,81 +3542,378 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
         ctx.clearRect(0, 0, width, height);
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
-        const projected = allPositions(payload).map(project);
-        const xs = projected.map(point => point[0]);
-        const ys = projected.map(point => point[1]);
-        const minX = xs.length ? Math.min.apply(null, xs) : -80;
-        const maxX = xs.length ? Math.max.apply(null, xs) : 80;
-        const minY = ys.length ? Math.min.apply(null, ys) : -80;
-        const maxY = ys.length ? Math.max.apply(null, ys) : 80;
-        const scale = Math.min(width / Math.max(1, maxX - minX + 160), height / Math.max(1, maxY - minY + 120));
-        function toCanvas(point) {{
-          const projectedPoint = project(point);
-          return [
-            (projectedPoint[0] - minX + 80) * scale,
-            (projectedPoint[1] - minY + 60) * scale
-          ];
-        }}
-        ctx.strokeStyle = '#d8dee8';
-        ctx.lineWidth = 1;
-        const scene = payload.scene || {{}};
-        (scene.levels || []).forEach(level => {{
-          const range = level.z_range || [0, 0];
-          const z = Number(range[0] || 0);
-          const corners = [[-3, -3, z], [3, -3, z], [3, 3, z], [-3, 3, z]];
-          ctx.beginPath();
-          corners.forEach((point, index) => {{
-            const canvasPoint = toCanvas(point);
-            if (index === 0) ctx.moveTo(canvasPoint[0], canvasPoint[1]);
-            else ctx.lineTo(canvasPoint[0], canvasPoint[1]);
-          }});
-          ctx.closePath();
-          ctx.stroke();
-          const labelPoint = toCanvas(corners[0]);
-          ctx.fillStyle = '#64748b';
-          ctx.fillText(level.id || 'level', labelPoint[0], labelPoint[1] - 4);
+        viewer.labelBoxes = [];
+        const projector = makeProjector(canvas, viewer.payload, viewer.state);
+        if (layerVisible(viewer, 'levels')) drawLevelPlanes(ctx, projector, viewer);
+        const scene = viewer.payload.scene || {{}};
+        const definitions = entityDefinitions(viewer.payload);
+        const active = activeSnapshot(viewer);
+        const fixedIds = referencedFixedIds(viewer.payload, active);
+        (scene.fixed_entities || []).forEach((entity, index) => {{
+          const position = vec3(entity.position);
+          if (!position) return;
+          const entityId = String(entity.id || 'fixed');
+          if (!fixedIds.has(entityId) && index >= 8) return;
+          const meta = mergedEntityMeta(definitions, entity);
+          const layer = entityLayer(meta, true);
+          if (!layerVisible(viewer, layer)) return;
+          const geometry = geometryForEntity(meta);
+          const alpha = fixedIds.has(entityId) ? 0.48 : 0.24;
+          if (geometry) drawWireBox(ctx, projector, position, geometry, meta, viewer, entityId, alpha);
+          const label = pointLabelFor(viewer, entityId, meta, '', false, true);
+          const priority = pointPriority(entityId, meta, entity, false, true);
+          drawPoint(ctx, projector, position, label, '#93c5fd', geometry ? alpha * 0.88 : alpha, geometry ? 3.2 : 4.6, viewer, entityId, priority);
         }});
-        function drawPoint(point, label, color) {{
-          const canvasPoint = toCanvas(point);
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.arc(canvasPoint[0], canvasPoint[1], 5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#111827';
-          ctx.fillText(label, canvasPoint[0] + 7, canvasPoint[1] + 3);
+        if (layerVisible(viewer, 'relations')) {{
+          drawTransitionPaths(ctx, projector, viewer.payload, viewer);
+          drawRelationOverlay(ctx, projector, viewer.payload, viewer);
         }}
-        (scene.fixed_entities || []).forEach(entity => {{
-          if (Array.isArray(entity.position)) drawPoint(entity.position, entity.id || 'fixed', '#93c5fd');
+        const snapshots = panelSnapshots(viewer.payload);
+        snapshots.forEach(snapshot => {{
+          if (panelKey(snapshot.panel) !== viewer.state.activePanel) drawSnapshotEntities(ctx, projector, snapshot, false, viewer);
         }});
-        const contract = payload.contract || {{}};
-        (contract.panel_snapshots || []).forEach(snapshot => {{
-          (snapshot.entities || []).forEach(entity => {{
-            if (Array.isArray(entity.position)) drawPoint(entity.position, `${{snapshot.panel}}:${{entity.id}}`, '#fbbf24');
-            if (Array.isArray(entity.position) && Array.isArray(entity.trajectory_vector)) {{
-              const start = toCanvas(entity.position);
-              const endPoint = [
-                Number(entity.position[0] || 0) + Number(entity.trajectory_vector[0] || 0),
-                Number(entity.position[1] || 0) + Number(entity.trajectory_vector[1] || 0),
-                Number(entity.position[2] || 0) + Number(entity.trajectory_vector[2] || 0)
-              ];
-              const end = toCanvas(endPoint);
-              ctx.strokeStyle = '#0ea5e9';
-              ctx.beginPath();
-              ctx.moveTo(start[0], start[1]);
-              ctx.lineTo(end[0], end[1]);
-              ctx.stroke();
-            }}
-          }});
+        snapshots.forEach(snapshot => {{
+          if (panelKey(snapshot.panel) === viewer.state.activePanel) {{
+            drawSnapshotEntities(ctx, projector, snapshot, true, viewer);
+            if (layerVisible(viewer, 'camera')) drawCamera(ctx, projector, snapshot, 0.9, viewer);
+          }}
+        }});
+        updateSceneStatus(viewer);
+        updatePanelButtons(viewer);
+        updateLabelButtons(viewer);
+        updateLayerButtons(viewer);
+        updateLevelRail(viewer);
+        if (shouldSync) propagateSceneSync(viewer);
+      }}
+
+      function updateSceneStatus(viewer) {{
+        if (!viewer.status) return;
+        viewer.status.textContent =
+          'yaw: ' + Math.round(viewer.state.yaw * 180 / Math.PI) + 'deg | ' +
+          'pitch: ' + Math.round(viewer.state.pitch * 180 / Math.PI) + 'deg | ' +
+          'zoom: ' + viewer.state.zoom.toFixed(2) + ' | ' +
+          'panel: ' + (viewer.state.activePanel || 'none');
+      }}
+
+      function updatePanelButtons(viewer) {{
+        if (!viewer.panelHost) return;
+        Array.from(viewer.panelHost.querySelectorAll('button[data-scene3d-panel]')).forEach(button => {{
+          button.classList.toggle('active', button.dataset.scene3dPanel === viewer.state.activePanel);
         }});
       }}
-      document.querySelectorAll('canvas[data-scene3d]').forEach(canvas => {{
+
+      function updateLabelButtons(viewer) {{
+        if (!viewer.labelHost) return;
+        Array.from(viewer.labelHost.querySelectorAll('button[data-scene3d-label-mode]')).forEach(button => {{
+          button.classList.toggle('active', button.dataset.scene3dLabelMode === viewer.state.labelMode);
+        }});
+      }}
+
+      function updateLayerButtons(viewer) {{
+        if (!viewer.layerHost) return;
+        Array.from(viewer.layerHost.querySelectorAll('button[data-scene3d-layer]')).forEach(button => {{
+          const layer = button.dataset.scene3dLayer;
+          button.classList.toggle('active', layerVisible(viewer, layer));
+        }});
+      }}
+
+      function levelForEntity(payload, entity) {{
+        if (entity.level_id) return String(entity.level_id);
+        const position = vec3(entity.position);
+        if (!position) return '';
+        const levels = (((payload || {{}}).scene || {{}}).levels || []);
+        const z = position[2];
+        for (const level of levels) {{
+          const range = Array.isArray(level.z_range) ? level.z_range : [0, 0];
+          const minZ = Number(range[0] || 0);
+          const maxZ = Number(range[1] || minZ);
+          if (z >= minZ && z <= maxZ) return String(level.id || '');
+        }}
+        return '';
+      }}
+
+      function updateLevelRail(viewer) {{
+        if (!viewer.levelRail) return;
+        if (!layerVisible(viewer, 'levels')) {{
+          viewer.levelRail.innerHTML = '';
+          viewer.levelRail.style.display = 'none';
+          return;
+        }}
+        viewer.levelRail.style.display = '';
+        const levels = (((viewer.payload || {{}}).scene || {{}}).levels || []);
+        const snapshot = activeSnapshot(viewer);
+        const definitions = entityDefinitions(viewer.payload);
+        const entitiesByLevel = {{}};
+        ((snapshot || {{}}).entities || []).forEach(entity => {{
+          const levelId = levelForEntity(viewer.payload, entity);
+          if (!levelId) return;
+          const entityId = String(entity.id || 'entity');
+          const label = compactEntityLabel(entityId, definitions[entityId] || {{}});
+          if (!entitiesByLevel[levelId]) entitiesByLevel[levelId] = [];
+          if (entitiesByLevel[levelId].indexOf(label) === -1) entitiesByLevel[levelId].push(label);
+        }});
+        viewer.levelRail.innerHTML = '';
+        if (!levels.length) return;
+        levels.forEach(level => {{
+          const range = Array.isArray(level.z_range) ? level.z_range : [0, 0];
+          const label = document.createElement('div');
+          label.className = 'scene-3d-level-row';
+          const name = document.createElement('span');
+          const activeLabels = entitiesByLevel[String(level.id || '')] || [];
+          name.textContent = (level.label || level.id || 'level') + ' z=' + String(range[0] || 0) + (activeLabels.length ? ' | ' + activeLabels.join(', ') : '');
+          const bar = document.createElement('span');
+          bar.className = 'scene-3d-level-bar';
+          const fill = document.createElement('span');
+          fill.className = 'scene-3d-level-fill';
+          fill.style.width = activeLabels.length ? '100%' : '18%';
+          bar.appendChild(fill);
+          label.appendChild(name);
+          label.appendChild(bar);
+          viewer.levelRail.appendChild(label);
+        }});
+      }}
+
+      function setupPanelButtons(viewer) {{
+        if (!viewer.panelHost) return;
+        const seen = [];
+        panelSnapshots(viewer.payload).forEach(snapshot => {{
+          const panel = panelKey(snapshot.panel);
+          if (panel && seen.indexOf(panel) === -1) seen.push(panel);
+        }});
+        viewer.panelHost.innerHTML = '';
+        seen.forEach(panel => {{
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.dataset.scene3dPanel = panel;
+          button.textContent = 'Panel ' + panel;
+          button.addEventListener('click', () => {{
+            viewer.state.activePanel = panel;
+            drawSceneViewer(viewer, true);
+          }});
+          viewer.panelHost.appendChild(button);
+        }});
+      }}
+
+      function copyViewState(source, target) {{
+        target.yaw = source.yaw;
+        target.pitch = source.pitch;
+        target.zoom = source.zoom;
+        target.panX = source.panX;
+        target.panY = source.panY;
+      }}
+
+      function propagateSceneSync(source) {{
+        if (!source.state.sync) return;
+        sceneViewers.forEach(viewer => {{
+          if (viewer === source) return;
+          if (!viewer.state.sync) return;
+          if (viewer.sceneId !== source.sceneId) return;
+          copyViewState(source.state, viewer.state);
+          drawSceneViewer(viewer, false);
+        }});
+      }}
+
+      function resetViewer(viewer) {{
+        const activePanel = viewer.state.activePanel;
+        const sync = viewer.state.sync;
+        const labelMode = viewer.state.labelMode;
+        const visibleLayers = Object.assign({{}}, viewer.state.visibleLayers || {{}});
+        const highlightTargets = viewer.state.highlightTargets || [];
+        viewer.state = defaultViewState(viewer.payload);
+        viewer.state.activePanel = activePanel || viewer.state.activePanel;
+        viewer.state.sync = sync;
+        viewer.state.labelMode = labelMode || viewer.state.labelMode;
+        viewer.state.visibleLayers = Object.assign(viewer.state.visibleLayers || {{}}, visibleLayers);
+        viewer.state.highlightTargets = highlightTargets;
+      }}
+
+      function applyPreset(viewer, action) {{
+        if (action === 'reset') {{
+          resetViewer(viewer);
+        }} else if (action === 'top') {{
+          viewer.state.yaw = 0;
+          viewer.state.pitch = -Math.PI / 2;
+          viewer.state.zoom = 1;
+          viewer.state.panX = 0;
+          viewer.state.panY = 0;
+        }} else if (action === 'front') {{
+          viewer.state.yaw = 0;
+          viewer.state.pitch = 0;
+          viewer.state.zoom = 1;
+          viewer.state.panX = 0;
+          viewer.state.panY = 0;
+        }} else if (action === 'side') {{
+          viewer.state.yaw = Math.PI / 2;
+          viewer.state.pitch = 0;
+          viewer.state.zoom = 1;
+          viewer.state.panX = 0;
+          viewer.state.panY = 0;
+        }} else if (action === 'camera') {{
+          const snapshot = activeSnapshot(viewer);
+          const camera = (snapshot || {{}}).camera || {{}};
+          const position = vec3(camera.position);
+          const lookAt = vec3(camera.look_at);
+          if (position && lookAt) {{
+            const direction = subVec(lookAt, position);
+            const horizontal = Math.sqrt(direction[0] * direction[0] + direction[1] * direction[1]) || 1;
+            viewer.state.yaw = Math.atan2(direction[0], direction[1]);
+            viewer.state.pitch = clamp(-Math.atan2(direction[2], horizontal), MIN_PITCH, MAX_PITCH);
+          }} else {{
+            viewer.state.yaw = DEFAULT_YAW;
+            viewer.state.pitch = DEFAULT_PITCH;
+          }}
+          viewer.state.zoom = 1;
+          viewer.state.panX = 0;
+          viewer.state.panY = 0;
+        }}
+        drawSceneViewer(viewer, true);
+      }}
+
+      function setupControls(viewer) {{
+        if (!viewer.container) return;
+        Array.from(viewer.container.querySelectorAll('button[data-scene3d-control]')).forEach(button => {{
+          button.addEventListener('click', () => applyPreset(viewer, button.dataset.scene3dControl));
+        }});
+        Array.from(viewer.container.querySelectorAll('button[data-scene3d-label-mode]')).forEach(button => {{
+          button.addEventListener('click', () => {{
+            viewer.state.labelMode = button.dataset.scene3dLabelMode || 'key';
+            drawSceneViewer(viewer, true);
+          }});
+        }});
+        Array.from(viewer.container.querySelectorAll('button[data-scene3d-layer]')).forEach(button => {{
+          button.addEventListener('click', () => {{
+            const layer = button.dataset.scene3dLayer;
+            viewer.state.visibleLayers[layer] = !layerVisible(viewer, layer);
+            drawSceneViewer(viewer, true);
+          }});
+        }});
+        if (viewer.syncControl) {{
+          viewer.syncControl.addEventListener('change', () => {{
+            viewer.state.sync = viewer.syncControl.checked;
+            drawSceneViewer(viewer, true);
+          }});
+        }}
+      }}
+
+      function bindCanvasInput(viewer) {{
+        const canvas = viewer.canvas;
+        canvas.addEventListener('pointerdown', event => {{
+          canvas.focus();
+          viewer.drag = {{
+            pointerId: event.pointerId,
+            lastX: event.clientX,
+            lastY: event.clientY,
+            mode: (event.shiftKey || event.button === 1) ? 'pan' : 'rotate'
+          }};
+          canvas.classList.add('is-dragging');
+          try {{ canvas.setPointerCapture(event.pointerId); }} catch (error) {{}}
+        }});
+        canvas.addEventListener('pointermove', event => {{
+          if (!viewer.drag || viewer.drag.pointerId !== event.pointerId) return;
+          const dx = event.clientX - viewer.drag.lastX;
+          const dy = event.clientY - viewer.drag.lastY;
+          viewer.drag.lastX = event.clientX;
+          viewer.drag.lastY = event.clientY;
+          const panMode = viewer.drag.mode === 'pan' || event.shiftKey || event.buttons === 4;
+          if (panMode) {{
+            viewer.state.panX += dx;
+            viewer.state.panY += dy;
+          }} else {{
+            viewer.state.yaw += dx * 0.01;
+            viewer.state.pitch = clamp(viewer.state.pitch + dy * 0.01, MIN_PITCH, MAX_PITCH);
+          }}
+          drawSceneViewer(viewer, true);
+        }});
+        function endDrag(event) {{
+          if (!viewer.drag || viewer.drag.pointerId !== event.pointerId) return;
+          viewer.drag = null;
+          canvas.classList.remove('is-dragging');
+          try {{ canvas.releasePointerCapture(event.pointerId); }} catch (error) {{}}
+        }}
+        canvas.addEventListener('pointerup', endDrag);
+        canvas.addEventListener('pointercancel', endDrag);
+        canvas.addEventListener('wheel', event => {{
+          event.preventDefault();
+          const direction = event.deltaY > 0 ? 0.9 : 1.1;
+          viewer.state.zoom = clamp(viewer.state.zoom * direction, 0.25, 8);
+          drawSceneViewer(viewer, true);
+        }}, {{ passive: false }});
+        canvas.addEventListener('dblclick', () => {{
+          resetViewer(viewer);
+          drawSceneViewer(viewer, true);
+        }});
+        canvas.addEventListener('keydown', event => {{
+          let handled = true;
+          if (event.key === 'ArrowLeft') viewer.state.yaw -= 0.08;
+          else if (event.key === 'ArrowRight') viewer.state.yaw += 0.08;
+          else if (event.key === 'ArrowUp') viewer.state.pitch = clamp(viewer.state.pitch - 0.08, MIN_PITCH, MAX_PITCH);
+          else if (event.key === 'ArrowDown') viewer.state.pitch = clamp(viewer.state.pitch + 0.08, MIN_PITCH, MAX_PITCH);
+          else if (event.key === '+' || event.key === '=') viewer.state.zoom = clamp(viewer.state.zoom * 1.1, 0.25, 8);
+          else if (event.key === '-' || event.key === '_') viewer.state.zoom = clamp(viewer.state.zoom * 0.9, 0.25, 8);
+          else if (event.key === '0') resetViewer(viewer);
+          else handled = false;
+          if (handled) {{
+            event.preventDefault();
+            drawSceneViewer(viewer, true);
+          }}
+        }});
+      }}
+
+      function createSceneViewer(canvas) {{
+        let payload = {{}};
         try {{
-          const payload = JSON.parse(canvas.dataset.scene3d || '{{}}');
-          drawCanvas(canvas, payload);
+          payload = JSON.parse(canvas.dataset.scene3d || '{{}}');
         }} catch (error) {{
           const ctx = canvas.getContext('2d');
           if (ctx) ctx.fillText('Scene 3D preview data could not be parsed.', 16, 24);
+          return null;
         }}
+        const container = canvas.closest('.scene-3d-preview');
+        const viewer = {{
+          canvas,
+          payload,
+          container,
+          sceneId: canvas.dataset.sceneId || (((payload.contract || {{}}).coordinate_space || {{}}).scene_id || ''),
+          state: defaultViewState(payload),
+          status: container ? container.querySelector('[data-scene3d-status]') : null,
+          panelHost: container ? container.querySelector('[data-scene3d-panels]') : null,
+          labelHost: container ? container.querySelector('[data-scene3d-label-controls]') : null,
+          layerHost: container ? container.querySelector('[data-scene3d-layer-controls]') : null,
+          levelRail: container ? container.querySelector('[data-scene3d-level-rail]') : null,
+          syncControl: container ? container.querySelector('input[data-scene3d-control="sync"]') : null,
+          drag: null,
+          labelBoxes: []
+        }};
+        canvas._scene3dViewer = viewer;
+        setupPanelButtons(viewer);
+        setupControls(viewer);
+        bindCanvasInput(viewer);
+        sceneViewers.push(viewer);
+        drawSceneViewer(viewer, false);
+        return viewer;
+      }}
+
+      document.querySelectorAll('canvas[data-scene3d]').forEach(canvas => {{
+        createSceneViewer(canvas);
+      }});
+
+      function setPageHighlight(element, targets) {{
+        const pageCard = element.closest('.page-card');
+        if (!pageCard) return;
+        pageCard.querySelectorAll('canvas[data-scene3d]').forEach(canvas => {{
+          const viewer = canvas._scene3dViewer;
+          if (!viewer) return;
+          viewer.state.highlightTargets = targets;
+          drawSceneViewer(viewer, false);
+        }});
+      }}
+
+      document.querySelectorAll('[data-preview-targets]').forEach(element => {{
+        const targets = String(element.dataset.previewTargets || '').split(/\\s+/).filter(Boolean);
+        element.addEventListener('pointerenter', () => setPageHighlight(element, targets));
+        element.addEventListener('pointerleave', () => setPageHighlight(element, []));
+        element.addEventListener('focus', () => setPageHighlight(element, targets));
+        element.addEventListener('blur', () => setPageHighlight(element, []));
       }});
     }})();
   </script>
@@ -3932,6 +5286,7 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
     lines = [
         f"- structured spatial_contract is active; {SPATIAL_VALIDATION_OVERLAY_NOTE}",
         "- Treat entries as validation constraints unless they contradict the approved narrative/page design.",
+        f"- coordinate_space default policy: {SPATIAL_SCENE_3D_DEFAULT_POLICY}",
     ]
     coordinate_space = contract.get("coordinate_space") or {}
     if coordinate_space:
@@ -4091,6 +5446,7 @@ def spatial_contract_extraction_prompt_text(page: dict[str, Any]) -> str:
     lines = [
         f"- {SPATIAL_VALIDATION_OVERLAY_NOTE}",
         "- Extract spatial_contract only after page/panel narrative design is chosen.",
+        f"- coordinate_space default policy: {SPATIAL_SCENE_3D_DEFAULT_POLICY}",
     ]
     if not extraction:
         lines.extend(

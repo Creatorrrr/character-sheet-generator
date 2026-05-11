@@ -368,9 +368,39 @@ def scene_3d_plan():
                     {"id": "floor_2_balcony", "level_id": "floor_2"},
                 ],
                 "fixed_entities": [
-                    {"id": "stairwell", "type": "landmark", "position": [0, 1.5, 0]},
-                    {"id": "balcony_railing", "type": "landmark", "position": [0, 0.5, 3.2]},
-                    {"id": "lobby_door", "type": "door", "position": [-2, -2, 1]},
+                    {
+                        "id": "stairwell",
+                        "type": "landmark",
+                        "position": [0, 1.5, 0],
+                        "preview_geometry": {
+                            "shape": "box",
+                            "size": [1.2, 2.6, 3.4],
+                            "anchor": "base_center",
+                            "style": "building",
+                        },
+                    },
+                    {
+                        "id": "balcony_railing",
+                        "type": "landmark",
+                        "position": [0, 0.5, 3.2],
+                        "preview_geometry": {
+                            "shape": "box",
+                            "size": [3.2, 0.22, 0.9],
+                            "anchor": "base_center",
+                            "style": "cover",
+                        },
+                    },
+                    {
+                        "id": "lobby_door",
+                        "type": "door",
+                        "position": [-2, -2, 1],
+                        "preview_geometry": {
+                            "shape": "box",
+                            "size": [1.1, 0.22, 2.1],
+                            "anchor": "center",
+                            "style": "door",
+                        },
+                    },
                 ],
                 "reconciliation_policy": {
                     "mode": "adjust_soft_geometry_preserve_hard_invariants",
@@ -1187,13 +1217,25 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "spatial_contract is a validation overlay, not a page or composition driver",
                 prompt,
             )
+            self.assertIn(
+                "spatially important panels default to scene_3d unless an exception is explicitly justified",
+                prompt,
+            )
             self.assertIn("Narrative-first page design", subagent_prompt)
             self.assertIn(
                 "spatial_contract is a validation overlay, not a page or composition driver",
                 subagent_prompt,
             )
             self.assertIn(
+                "spatially important panels default to scene_3d unless an exception is explicitly justified",
+                subagent_prompt,
+            )
+            self.assertIn(
                 "spatial_contract is a validation overlay, not a page or composition driver",
+                batch_plan,
+            )
+            self.assertIn(
+                "spatially important panels default to scene_3d unless an exception is explicitly justified",
                 batch_plan,
             )
 
@@ -1270,6 +1312,36 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("camera FOV is provisional", html)
             self.assertIn("first panel can calibrate soft scene geometry", html)
             self.assertIn("floor-readability", html)
+            self.assertIn('data-scene-id="school-building-main"', html)
+            self.assertIn("data-scene3d-control", html)
+            self.assertIn("pointerdown", html)
+            self.assertIn("wheel", html)
+            self.assertIn("Sync scene view", html)
+            self.assertIn("Camera", html)
+            self.assertIn('data-scene3d-label-mode="key"', html)
+            self.assertIn('data-scene3d-label-mode="all"', html)
+            self.assertIn('data-scene3d-label-mode="off"', html)
+            self.assertIn('data-scene3d-layer="actors"', html)
+            self.assertIn('data-scene3d-layer="obstacles"', html)
+            self.assertIn('data-scene3d-layer="relations"', html)
+            self.assertIn('data-scene3d-layer="vectors"', html)
+            self.assertIn('data-scene3d-layer="ghosts"', html)
+            self.assertIn('data-scene3d-status-strip', html)
+            self.assertIn('data-scene3d-level-rail', html)
+            self.assertNotIn('class="raw-2d-projection"', html)
+            self.assertNotIn("Raw 2D Projection", html)
+            self.assertIn("preview_geometry", html)
+            self.assertIn("visibleLayers", html)
+            self.assertIn("levelPlaneBounds", html)
+            self.assertIn("levelColors", html)
+            self.assertIn("drawWireBox", html)
+            self.assertIn("drawOrientedEntity", html)
+            self.assertIn("drawRelationOverlay", html)
+            self.assertIn("placeSceneLabel", html)
+            self.assertIn("labelBoxes", html)
+            self.assertIn("compactEntityLabel", html)
+            self.assertIn("data-preview-targets", html)
+            self.assertIn("HERO floor_1", html)
 
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))

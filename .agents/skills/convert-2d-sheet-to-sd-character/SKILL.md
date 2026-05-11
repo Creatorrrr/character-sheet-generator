@@ -71,15 +71,19 @@ Use `structure-inventory.md` during prompt construction and self-verification. I
 
 ## Turn Protocol for Image Generation
 
-Image generation calls end the current assistant turn. Because of that, each generation must be split across turns:
+Direct image generation calls in the parent Codex session can end the visible assistant turn and hide the follow-up report. Because of that, when subagents are available, the parent workflow manager must delegate every Stage 1-4 image generation or image editing call to a context-forked generation subagent instead of calling the image tool directly.
 
-1. Before generating or editing an image, send a Korean `[N단계 실행 예정]` report with the current input, run folder, stage goal, resume behavior, and final-only feedback note.
-2. Before the image tool call, update `workflow-state.json` and create or update a temporary thread heartbeat so this same thread wakes up shortly after the image generation turn ends.
-3. Submit only the current stage prompt and required image inputs to the image generation or editing tool.
-4. Treat the image generation call as the last action of that turn. Do not append a result report, quality claim, or next-step question after the tool call.
-5. On the next user message or heartbeat resume, copy or reference the generated artifact under the run folder when possible, inspect the image if available, then send the Korean `[N단계 결과]` or `[N단계 자체 검수]` report.
-6. Do not ask for mid-stage feedback. Decide the next action from the self-verification rules, record the decision in `verification-notes.md`, then either start the next generation or finish with the final report.
-7. Delete or pause the temporary heartbeat when the workflow reaches a terminal final report.
+Required parent/subagent split:
+
+1. The parent session owns intake, inventory creation, `workflow-state.json`, `verification-notes.md`, Korean progress reports, self-verification, retry decisions, and final reporting.
+2. The generation subagent owns only one image generation or image editing call for the current stage. It must not decide pass/fail, update workflow state, write verification notes, advance stages, ask the user for feedback, or produce a final workflow report.
+3. Spawn the generation subagent only after the parent has sent the Korean `[N단계 실행 예정]` report and updated `workflow-state.json`. Use `fork_context=true` so the subagent receives the current conversation, source image context, structure inventory, stage goal, and constraints.
+4. The parent must give the subagent a narrow handoff: current stage number, run folder, current input image path(s), `structure-inventory.md` path, the sibling stage skill/prompt to follow, the exact text-free or text-restoration goal, and an instruction to submit only the current stage image prompt plus required image inputs.
+5. The subagent must treat the image generation or editing tool call as its final action. It must not append a result report, quality claim, next-step question, or stage decision after the image tool call.
+6. After the subagent completes, the parent locates the generated artifact, copies or references it under the run folder when possible, inspects it, then sends the Korean `[N단계 결과]` or `[N단계 자체 검수]` report in the parent session.
+7. The parent decides the next action from the self-verification rules, records the decision in `verification-notes.md`, updates `workflow-state.json`, and either spawns a new generation subagent for the next retry/stage or finishes with the final report.
+8. If subagent spawning is unavailable in the current runtime, explicitly note the fallback in the Korean execution report, then use the direct one-generation-per-turn protocol: update state, call the image tool as the last action, and resume from the next user message or heartbeat.
+9. Delete or pause the temporary heartbeat when the workflow reaches a terminal final report.
 
 ## Autonomous Continuation
 
@@ -284,6 +288,8 @@ Text check:
 - Preserve only the latest self-approved image as the next stage input.
 - Advance only after self-verification, state update, and attempt-limit check. Ask for feedback only in the final report.
 - Do not chain multiple image generation stages in one assistant turn. Run one generation per turn and resume on the next user message or temporary heartbeat.
+- When subagents are available, do not call the image generation or image editing tool directly from the parent session. Use a context-forked generation subagent for each generation attempt so the parent session remains available for result reporting, inspection, state updates, and final feedback.
+- Keep generation subagents narrowly scoped: one stage, one attempt, one image tool call, no workflow-state edits, no verification decision, and no user-facing final report.
 - When using an image generation or editing tool, submit only the current stage prompt plus the required image inputs. Do not mix future-stage layout or sheet annotation text restoration instructions into Stage 1 or Stage 2.
 - When a model struggles with sheet annotation text, keep the character image stable and isolate sheet annotation text repair in Stage 4.
 - Do not claim sheet annotation text is readable, exact, repaired, or complete unless it was inspected and verified.

@@ -2414,6 +2414,7 @@ def render_scene_3d_preview(page: dict[str, Any], scene: dict[str, Any] | None) 
     <button type="button" data-scene3d-control="top">Top</button>
     <button type="button" data-scene3d-control="front">Front</button>
     <button type="button" data-scene3d-control="side">Side</button>
+    <button type="button" data-scene3d-control="iso">Iso</button>
     <button type="button" data-scene3d-control="camera">Camera</button>
     <span class="scene-3d-label-mode" data-scene3d-label-controls>
       Labels:
@@ -2433,7 +2434,7 @@ def render_scene_3d_preview(page: dict[str, Any], scene: dict[str, Any] | None) 
       <button type="button" data-scene3d-layer="ghosts">Ghosts</button>
     </span>
     <label class="scene-3d-sync"><input type="checkbox" data-scene3d-control="sync"> Sync scene view</label>
-    <span class="scene-3d-status" data-scene3d-status>yaw: 0 | pitch: 0 | zoom: 1.00 | panel: none</span>
+    <span class="scene-3d-status" data-scene3d-status>yaw: -45deg | pitch: -35deg | zoom: 1.00 | panel: none</span>
     <span class="scene-3d-panel-buttons" data-scene3d-panels></span>
   </div>
   {render_scene_3d_status_strip(page, scene)}
@@ -2633,8 +2634,10 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
   <script>
     (function () {{
       const sceneViewers = [];
-      const DEFAULT_YAW = 0;
-      const DEFAULT_PITCH = -Math.PI / 2;
+      const ISOMETRIC_YAW = -Math.PI / 4;
+      const ISOMETRIC_PITCH = -Math.atan(1 / Math.sqrt(2));
+      const DEFAULT_YAW = ISOMETRIC_YAW;
+      const DEFAULT_PITCH = ISOMETRIC_PITCH;
       const MIN_PITCH = -1.45;
       const MAX_PITCH = 1.45;
 
@@ -3745,6 +3748,12 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
         }} else if (action === 'side') {{
           viewer.state.yaw = Math.PI / 2;
           viewer.state.pitch = 0;
+          viewer.state.zoom = 1;
+          viewer.state.panX = 0;
+          viewer.state.panY = 0;
+        }} else if (action === 'iso') {{
+          viewer.state.yaw = ISOMETRIC_YAW;
+          viewer.state.pitch = ISOMETRIC_PITCH;
           viewer.state.zoom = 1;
           viewer.state.panX = 0;
           viewer.state.panY = 0;

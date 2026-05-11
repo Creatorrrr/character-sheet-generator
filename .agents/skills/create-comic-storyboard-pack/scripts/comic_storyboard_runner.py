@@ -97,7 +97,7 @@ REVIEW_STATUSES = {"pending", "passed", "needs_rerun"}
 REVIEW_CLI_STATUSES = {"pass", "needs_rerun"}
 ANCHOR_REVIEW_STATUSES = REVIEW_STATUSES
 ANCHOR_REVIEW_CLI_STATUSES = REVIEW_CLI_STATUSES
-SPATIAL_VERDICT_VALUES = {"pass", "needs_rerun"}
+SPATIAL_VERDICT_VALUES = {"pass", "needs_rerun", "reconciled"}
 SPATIAL_CONSTRAINT_TYPES = {
     "aims_at",
     "trajectory_to",
@@ -114,6 +114,19 @@ SPATIAL_CONSTRAINT_TYPES = {
     "occlusion_persists_from",
     "allowed_transition",
     "requires_cause",
+    "on_level",
+    "above",
+    "below",
+    "vertical_separation",
+    "same_location_as",
+    "visual_evidence_required",
+}
+SCENE_3D_ONLY_CONSTRAINT_TYPES = {
+    "on_level",
+    "above",
+    "below",
+    "vertical_separation",
+    "same_location_as",
 }
 NON_FIRING_CUES = (
     "not_firing",
@@ -265,6 +278,7 @@ def normalize_spatial_continuity_plan(raw_plan: Any) -> dict[str, Any]:
         return {
             "scope": "",
             "locations": [],
+            "scene_3d_scenes": [],
             "page_sequence": [],
             "continuity_rules": [],
             "allowed_changes": [],
@@ -284,6 +298,41 @@ def normalize_spatial_continuity_plan(raw_plan: Any) -> dict[str, Any]:
             or location.get("spatial_anchors")
         )
         location["fixed_landmarks"] = normalize_named_entries(landmarks, "landmark")
+    plan["scene_3d_scenes"] = normalize_named_entries(
+        plan.get("scene_3d_scenes") or plan.get("scene_3d") or plan.get("scenes_3d"),
+        "scene_3d",
+    )
+    for scene in plan["scene_3d_scenes"]:
+        scene["status"] = str(scene.get("status") or "provisional").strip()
+        scene["usage"] = str(scene.get("usage") or "validation_only").strip()
+        scene["levels"] = normalize_named_entries(scene.get("levels"), "level")
+        scene["locations"] = normalize_named_entries(scene.get("locations"), "location")
+        scene["fixed_entities"] = normalize_named_entries(
+            scene.get("fixed_entities") or scene.get("landmarks") or scene.get("anchors"),
+            "fixed_entity",
+        )
+        for location in scene["locations"]:
+            location["fixed_landmarks"] = normalize_named_entries(
+                location.get("fixed_landmarks") or location.get("landmarks"),
+                "landmark",
+            )
+        for collection_name in ["levels", "locations", "fixed_entities"]:
+            for entry in scene.get(collection_name, []):
+                if "position" in entry:
+                    entry["position"] = normalized_vector(entry.get("position"))
+                if "size" in entry:
+                    entry["size"] = normalized_vector(entry.get("size"))
+                if "z_range" in entry:
+                    entry["z_range"] = normalized_vector(entry.get("z_range"))
+        if plan["locations"]:
+            existing_location_ids = {str(location.get("id") or "") for location in plan["locations"]}
+        else:
+            existing_location_ids = set()
+        for location in scene["locations"]:
+            location_id = str(location.get("id") or "")
+            if location_id and location_id not in existing_location_ids:
+                plan["locations"].append(location)
+                existing_location_ids.add(location_id)
     page_sequence = plan.get("page_sequence") or plan.get("page_locations") or []
     if isinstance(page_sequence, dict):
         plan["page_sequence"] = [
@@ -305,6 +354,7 @@ def spatial_continuity_plan_has_content(plan: Any) -> bool:
     return bool(
         plan.get("scope")
         or plan.get("locations")
+        or plan.get("scene_3d_scenes")
         or plan.get("page_sequence")
         or plan.get("continuity_rules")
         or plan.get("allowed_changes")
@@ -420,6 +470,13 @@ def vector2(value: Any) -> tuple[float, float] | None:
     return (numbers[0], numbers[1])
 
 
+def vector3(value: Any) -> tuple[float, float, float] | None:
+    numbers = vector_numbers(value)
+    if not numbers or len(numbers) < 3:
+        return None
+    return (numbers[0], numbers[1], numbers[2])
+
+
 def rect4(value: Any) -> tuple[float, float, float, float] | None:
     if isinstance(value, str):
         parts = [part.strip() for part in re.split(r"[, ]+", value.strip()) if part.strip()]
@@ -516,6 +573,7 @@ def normalize_spatial_entity_state(raw_state: Any, index: int) -> dict[str, Any]
         "visibility",
         "occlusion",
         "occluded_by",
+        "level_id",
         "location_anchor",
         "held_props",
         "state_tags",
@@ -571,12 +629,44 @@ def normalize_spatial_constraint(raw_constraint: Any, index: int) -> dict[str, A
     return constraint
 
 
+def normalize_spatial_records(raw_records: Any, default_prefix: str) -> list[dict[str, Any]]:
+    if not raw_records:
+        return []
+    if isinstance(raw_records, dict):
+        iterable = []
+        for record_id, value in raw_records.items():
+            if isinstance(value, dict):
+                entry = dict(value)
+                entry.setdefault("id", record_id)
+            else:
+                entry = {"id": record_id, "value": value}
+            iterable.append(entry)
+    elif isinstance(raw_records, list):
+        iterable = raw_records
+    else:
+        iterable = as_list(raw_records)
+    records: list[dict[str, Any]] = []
+    for index, raw in enumerate(iterable, start=1):
+        if isinstance(raw, dict):
+            record = dict(raw)
+        else:
+            record = {"rule": str(raw)}
+        record["id"] = str(record.get("id") or f"{default_prefix}-{index}").strip()
+        if record.get("type") is not None:
+            record["type"] = str(record.get("type") or "").strip()
+        if record["id"]:
+            records.append(record)
+    return records
+
+
 def normalize_spatial_contract(raw_contract: Any) -> dict[str, Any]:
     if not raw_contract:
         return {
             "entities": [],
             "coordinate_space": {},
             "panel_snapshots": [],
+            "transitions": [],
+            "locks": [],
             "constraints": [],
         }
     if not isinstance(raw_contract, dict):
@@ -593,6 +683,8 @@ def normalize_spatial_contract(raw_contract: Any) -> dict[str, Any]:
             normalize_spatial_panel_snapshot(snapshot, index)
             for index, snapshot in enumerate(snapshots, start=1)
         ],
+        "transitions": normalize_spatial_records(raw_contract.get("transitions"), "transition"),
+        "locks": normalize_spatial_records(raw_contract.get("locks"), "lock"),
         "constraints": [
             normalize_spatial_constraint(constraint, index)
             for index, constraint in enumerate(constraints, start=1)
@@ -607,6 +699,8 @@ def spatial_contract_has_content(contract: Any) -> bool:
         contract.get("entities")
         or contract.get("coordinate_space")
         or contract.get("panel_snapshots")
+        or contract.get("transitions")
+        or contract.get("locks")
         or contract.get("constraints")
     )
 
@@ -756,6 +850,15 @@ def state_position(state: dict[str, Any] | None, issues: list[str], label: str) 
     return position
 
 
+def state_position3(state: dict[str, Any] | None, issues: list[str], label: str) -> tuple[float, float, float] | None:
+    if not state:
+        return None
+    position = vector3(state.get("position"))
+    if position is None:
+        issues.append(f"{label}: entity {state.get('id')} needs a numeric 3D position [x, y, z].")
+    return position
+
+
 def state_vector(
     state: dict[str, Any] | None,
     fields: list[str],
@@ -772,8 +875,28 @@ def state_vector(
     return None
 
 
+def state_vector3(
+    state: dict[str, Any] | None,
+    fields: list[str],
+    issues: list[str],
+    label: str,
+) -> tuple[float, float, float] | None:
+    if not state:
+        return None
+    for field in fields:
+        vector = vector3(state.get(field))
+        if vector is not None:
+            return vector
+    issues.append(f"{label}: entity {state.get('id')} needs one of {', '.join(fields)}.")
+    return None
+
+
 def vector_length(vector: tuple[float, float]) -> float:
     return math.hypot(vector[0], vector[1])
+
+
+def vector3_length(vector: tuple[float, float, float]) -> float:
+    return math.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)
 
 
 def dot_matches_direction(
@@ -793,6 +916,31 @@ def dot_matches_direction(
         issues.append(f"{label}: cannot validate a zero-length vector.")
         return
     dot = (actual[0] / actual_len) * (expected[0] / expected_len) + (actual[1] / actual_len) * (expected[1] / expected_len)
+    if dot < min_dot:
+        issues.append(f"{label}: vector points away from the target direction (dot={dot:.3f}, min={min_dot:.3f}).")
+
+
+def dot_matches_direction3(
+    actual: tuple[float, float, float] | None,
+    origin: tuple[float, float, float] | None,
+    target: tuple[float, float, float] | None,
+    issues: list[str],
+    label: str,
+    min_dot: float,
+) -> None:
+    if actual is None or origin is None or target is None:
+        return
+    expected = (target[0] - origin[0], target[1] - origin[1], target[2] - origin[2])
+    actual_len = vector3_length(actual)
+    expected_len = vector3_length(expected)
+    if actual_len == 0 or expected_len == 0:
+        issues.append(f"{label}: cannot validate a zero-length vector.")
+        return
+    dot = (
+        (actual[0] / actual_len) * (expected[0] / expected_len)
+        + (actual[1] / actual_len) * (expected[1] / expected_len)
+        + (actual[2] / actual_len) * (expected[2] / expected_len)
+    )
     if dot < min_dot:
         issues.append(f"{label}: vector points away from the target direction (dot={dot:.3f}, min={min_dot:.3f}).")
 
@@ -1265,6 +1413,298 @@ def validate_requires_cause(
         issues.append(f"{label}: requires_cause points to a missing cause panel ({cause_page}:{cause_panel}).")
 
 
+def spatial_contract_coordinate_type(contract: dict[str, Any]) -> str:
+    coordinate_space = contract.get("coordinate_space") or {}
+    return str(coordinate_space.get("type") or "").strip()
+
+
+def scene_3d_scenes_by_id(spatial_continuity_plan: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    plan = normalize_spatial_continuity_plan(spatial_continuity_plan)
+    return {
+        str(scene.get("id") or ""): scene
+        for scene in plan.get("scene_3d_scenes", [])
+        if str(scene.get("id") or "")
+    }
+
+
+def scene_3d_levels_by_id(scene: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {str(level.get("id") or ""): level for level in scene.get("levels", []) if str(level.get("id") or "")}
+
+
+def scene_3d_locations_by_id(scene: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(location.get("id") or ""): location
+        for location in scene.get("locations", [])
+        if str(location.get("id") or "")
+    }
+
+
+def scene_3d_level_contains_z(level: dict[str, Any], z: float) -> bool:
+    z_range = vector_numbers(level.get("z_range"))
+    if not z_range or len(z_range) < 2:
+        return True
+    lower, upper = sorted((float(z_range[0]), float(z_range[1])))
+    return lower <= z <= upper
+
+
+def scene_3d_transition_matches(
+    transition: dict[str, Any],
+    *,
+    entity: str,
+    from_panel: Any = None,
+    to_panel: Any = None,
+    state_change: str = "",
+    from_location: str = "",
+    to_location: str = "",
+) -> bool:
+    if entity and str(transition.get("entity") or "") != entity:
+        return False
+    if from_panel not in (None, "") and panel_key(transition.get("from_panel")) != panel_key(from_panel):
+        return False
+    if to_panel not in (None, "") and panel_key(transition.get("to_panel")) != panel_key(to_panel):
+        return False
+    if state_change and str(transition.get("state_change") or "") not in {"", state_change}:
+        from_state = str(transition.get("from_state") or "")
+        to_state = str(transition.get("to_state") or "")
+        if f"{from_state}_to_{to_state}" != state_change:
+            return False
+    if from_location and str(transition.get("from_location") or "") not in {"", from_location}:
+        return False
+    if to_location and str(transition.get("to_location") or "") not in {"", to_location}:
+        return False
+    return True
+
+
+def validate_scene_3d_contract(
+    page: dict[str, Any],
+    contract: dict[str, Any],
+    spatial_continuity_plan: dict[str, Any] | None,
+    issues: list[str],
+) -> None:
+    coordinate_space = contract.get("coordinate_space") or {}
+    scene_id = str(coordinate_space.get("scene_id") or "").strip()
+    label_prefix = f"{page['id']} spatial_contract scene_3d"
+    scenes = scene_3d_scenes_by_id(spatial_continuity_plan)
+    scene = scenes.get(scene_id)
+    if not scene_id:
+        issues.append(f"{label_prefix}: requires coordinate_space.scene_id.")
+        return
+    if scene is None:
+        issues.append(f"{label_prefix}: unknown scene_3d scene_id {scene_id}.")
+        return
+
+    levels = scene_3d_levels_by_id(scene)
+    locations = scene_3d_locations_by_id(scene)
+    contract_location_id = str(coordinate_space.get("location_id") or "").strip()
+    if contract_location_id and contract_location_id not in locations:
+        issues.append(f"{label_prefix}: unknown location_id {contract_location_id} for scene {scene_id}.")
+    snapshots = spatial_snapshots_by_panel(contract)
+    entity_id_set = {str(entity.get("id") or "") for entity in contract.get("entities", []) if str(entity.get("id") or "")}
+
+    for snapshot in contract.get("panel_snapshots", []):
+        panel = panel_key(snapshot.get("panel"))
+        snapshot_location_id = str(snapshot.get("location_id") or contract_location_id or "").strip()
+        if snapshot_location_id and snapshot_location_id not in locations:
+            issues.append(f"{label_prefix} panel {panel}: unknown location_id {snapshot_location_id} for scene {scene_id}.")
+        camera = snapshot.get("camera") or {}
+        if camera:
+            if vector3(camera.get("position")) is None:
+                issues.append(f"{label_prefix} panel {panel}: camera.position must be numeric [x, y, z].")
+            if vector3(camera.get("look_at")) is None:
+                issues.append(f"{label_prefix} panel {panel}: camera.look_at must be numeric [x, y, z].")
+        for state in snapshot.get("entities", []):
+            entity_id = str(state.get("id") or "")
+            if entity_id not in entity_id_set:
+                issues.append(f"{label_prefix} panel {panel}: unknown entity {entity_id}.")
+            position = vector3(state.get("position"))
+            if position is None:
+                issues.append(f"{label_prefix} panel {panel}: entity {entity_id} has invalid 3D position.")
+                continue
+            level_id = str(state.get("level_id") or "").strip()
+            if level_id:
+                level = levels.get(level_id)
+                if level is None:
+                    issues.append(f"{label_prefix} panel {panel}: entity {entity_id} references unknown level_id {level_id}.")
+                elif not scene_3d_level_contains_z(level, position[2]):
+                    issues.append(
+                        f"{label_prefix} panel {panel}: entity {entity_id} level_id {level_id} "
+                        f"does not match z_range for z={position[2]:.1f}."
+                    )
+            for field in ["facing_vector", "gaze_vector", "aim_vector", "trajectory_vector"]:
+                if field in state and vector3(state.get(field)) is None:
+                    issues.append(f"{label_prefix} panel {panel}: entity {entity_id} has invalid 3D {field}.")
+
+    ordered_snapshots = sorted(contract.get("panel_snapshots", []), key=lambda snapshot: panel_key(snapshot.get("panel")))
+    transitions = contract.get("transitions", [])
+    for previous, current in zip(ordered_snapshots, ordered_snapshots[1:]):
+        previous_panel = panel_key(previous.get("panel"))
+        current_panel = panel_key(current.get("panel"))
+        previous_location = str(previous.get("location_id") or contract_location_id or "")
+        current_location = str(current.get("location_id") or contract_location_id or "")
+        if previous_location and current_location and previous_location != current_location:
+            if not any(
+                scene_3d_transition_matches(
+                    transition,
+                    entity=str(transition.get("entity") or ""),
+                    from_panel=previous_panel,
+                    to_panel=current_panel,
+                    from_location=previous_location,
+                    to_location=current_location,
+                )
+                for transition in transitions
+            ):
+                issues.append(
+                    f"{label_prefix}: location changed from {previous_location} to {current_location} "
+                    f"between panel {previous_panel} and {current_panel} without a matching transition."
+                )
+        previous_states = {str(state.get("id") or ""): state for state in previous.get("entities", [])}
+        for state in current.get("entities", []):
+            entity_id = str(state.get("id") or "")
+            previous_state = previous_states.get(entity_id)
+            if not previous_state:
+                continue
+            previous_level = str(previous_state.get("level_id") or "")
+            current_level = str(state.get("level_id") or "")
+            if previous_level and current_level and previous_level != current_level:
+                if not any(
+                    scene_3d_transition_matches(
+                        transition,
+                        entity=entity_id,
+                        from_panel=previous_panel,
+                        to_panel=current_panel,
+                    )
+                    for transition in transitions
+                ):
+                    issues.append(
+                        f"{label_prefix}: entity {entity_id} changed level from {previous_level} to {current_level} "
+                        f"between panel {previous_panel} and {current_panel} without a matching transition."
+                    )
+
+    for lock in contract.get("locks", []):
+        lock_type = str(lock.get("type") or "").strip()
+        lock_label = f"{label_prefix} lock {lock.get('id')}"
+        if lock_type not in {"hard", "soft", "inferred"}:
+            issues.append(f"{lock_label}: lock type must be hard, soft, or inferred.")
+            continue
+        for entity_id in merge_unique(lock.get("entities")):
+            if entity_id not in entity_id_set:
+                issues.append(f"{lock_label}: unknown entity {entity_id}.")
+
+    for index, constraint in enumerate(contract.get("constraints", []), start=1):
+        constraint_type = str(constraint.get("type") or "")
+        label = f"{page['id']} spatial_contract constraint {index} ({constraint_type or 'missing_type'})"
+        if constraint_type not in SPATIAL_CONSTRAINT_TYPES:
+            issues.append(f"{label}: unsupported constraint type.")
+            continue
+        if constraint_type == "visual_evidence_required":
+            continue
+        if constraint_type == "requires_cause":
+            entity_id = str(spatial_constraint_value(constraint, "entity", "object", "subject") or "")
+            cause_panel = spatial_constraint_value(constraint, "cause_panel", "to_panel", "panel")
+            state_change = str(spatial_constraint_value(constraint, "state_change") or "")
+            if not any(
+                scene_3d_transition_matches(
+                    transition,
+                    entity=entity_id,
+                    to_panel=cause_panel,
+                    state_change=state_change,
+                )
+                for transition in transitions
+            ):
+                issues.append(f"{label}: requires_cause has no matching transition cause.")
+            continue
+        if constraint_type == "allowed_transition":
+            entity_id = str(spatial_constraint_value(constraint, "entity", "object", "subject") or "")
+            from_panel = spatial_constraint_value(constraint, "from_panel")
+            to_panel = spatial_constraint_value(constraint, "to_panel")
+            if not any(
+                scene_3d_transition_matches(
+                    transition,
+                    entity=entity_id,
+                    from_panel=from_panel,
+                    to_panel=to_panel,
+                )
+                for transition in transitions
+            ):
+                issues.append(f"{label}: allowed_transition has no matching scene_3d transition.")
+            continue
+        if constraint_type not in {"on_level", "above", "below", "vertical_separation", "same_location_as", "trajectory_to"}:
+            issues.append(f"{label}: unsupported scene_3d constraint type.")
+            continue
+
+        panel = constraint_panel(contract, constraint, issues, label)
+        if not panel:
+            continue
+        if constraint_type == "on_level":
+            entity_id = str(spatial_constraint_value(constraint, "entity", "subject", "actor") or "")
+            expected_level = str(spatial_constraint_value(constraint, "level", "level_id") or "")
+            state = snapshot_state(snapshots, panel, entity_id, issues, label)
+            actual_level = str((state or {}).get("level_id") or "")
+            position = state_position3(state, issues, label)
+            if actual_level != expected_level:
+                issues.append(f"{label}: entity {entity_id} is on {actual_level or 'no level'}, expected {expected_level}.")
+            level = levels.get(expected_level)
+            if position is not None and level is not None and not scene_3d_level_contains_z(level, position[2]):
+                issues.append(f"{label}: entity {entity_id} z={position[2]:.1f} is outside level {expected_level}.")
+        elif constraint_type in {"above", "below", "vertical_separation"}:
+            subject_id = str(spatial_constraint_value(constraint, "subject", "actor", "entity") or "")
+            anchor_id = str(spatial_constraint_value(constraint, "anchor", "target", "of") or "")
+            subject = state_position3(snapshot_state(snapshots, panel, subject_id, issues, label), issues, label)
+            anchor = state_position3(snapshot_state(snapshots, panel, anchor_id, issues, label), issues, label)
+            if subject is None or anchor is None:
+                continue
+            tolerance = float(constraint.get("tolerance", 0.001))
+            if constraint_type == "above" and not subject[2] > anchor[2] + tolerance:
+                issues.append(f"{label}: {subject_id} is not above {anchor_id}.")
+            elif constraint_type == "below" and not subject[2] < anchor[2] - tolerance:
+                issues.append(f"{label}: {subject_id} is not below {anchor_id}.")
+            elif constraint_type == "vertical_separation":
+                min_delta_z = float(constraint.get("min_delta_z", constraint.get("min_z_delta", 0)))
+                if abs(subject[2] - anchor[2]) < min_delta_z:
+                    issues.append(
+                        f"{label}: vertical separation between {subject_id} and {anchor_id} "
+                        f"is {abs(subject[2] - anchor[2]):.3f}, min={min_delta_z:.3f}."
+                    )
+        elif constraint_type == "same_location_as":
+            subject_id = str(spatial_constraint_value(constraint, "subject", "entity", "actor") or "")
+            anchor_id = str(spatial_constraint_value(constraint, "anchor", "target", "of") or "")
+            subject_state = snapshot_state(snapshots, panel, subject_id, issues, label)
+            anchor_state = snapshot_state(snapshots, panel, anchor_id, issues, label)
+            snapshot_location = ""
+            for snapshot in contract.get("panel_snapshots", []):
+                if panel_key(snapshot.get("panel")) == panel:
+                    snapshot_location = str(snapshot.get("location_id") or "")
+                    break
+            subject_location = str((subject_state or {}).get("location_id") or snapshot_location or contract_location_id or "")
+            anchor_location = str((anchor_state or {}).get("location_id") or snapshot_location or contract_location_id or "")
+            if subject_location != anchor_location:
+                issues.append(f"{label}: {subject_id} is not in the same location as {anchor_id}.")
+        elif constraint_type == "trajectory_to":
+            object_id = str(spatial_constraint_value(constraint, "object", "projectile", "source", "entity") or "")
+            target_id = str(spatial_constraint_value(constraint, "target", "to") or "")
+            object_state = snapshot_state(snapshots, panel, object_id, issues, label)
+            target_state = snapshot_state(snapshots, panel, target_id, issues, label)
+            origin = state_position3(object_state, issues, label)
+            target = state_position3(target_state, issues, label)
+            actual = state_vector3(object_state, ["trajectory_vector", "motion_vector", "velocity_vector"], issues, label)
+            min_dot = float(constraint.get("min_dot", 0.5))
+            dot_matches_direction3(actual, origin, target, issues, label, min_dot)
+
+
+def scene_3d_contract_warnings(page: dict[str, Any], contract: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    if spatial_contract_coordinate_type(contract) != "scene_3d":
+        return warnings
+    for lock in contract.get("locks", []):
+        lock_type = str(lock.get("type") or "")
+        if lock_type not in {"soft", "inferred"}:
+            continue
+        note = str(lock.get("warning") or lock.get("rule") or "")
+        if note:
+            warnings.append(f"{page['id']} spatial_contract lock {lock.get('id')}: {lock_type} geometry warning: {note}.")
+    return warnings
+
+
 def contains_non_firing_cue(value: Any) -> bool:
     if isinstance(value, dict):
         return any(contains_non_firing_cue(entry) for entry in value.values())
@@ -1278,7 +1718,9 @@ def has_no_line_of_fire_constraint(contract: dict[str, Any]) -> bool:
     return any(str(constraint.get("type") or "") == "no_line_of_fire" for constraint in contract.get("constraints", []))
 
 
-def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
+def spatial_contract_issues(
+    pages: list[dict[str, Any]], spatial_continuity_plan: dict[str, Any] | None = None
+) -> list[str]:
     issues: list[str] = []
     pages_by_id = page_lookup_aliases(pages)
     for page in pages:
@@ -1292,6 +1734,9 @@ def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
             issues.append(f"{page['id']} spatial_contract: duplicate entity ids are not allowed.")
         if not entity_id_set:
             issues.append(f"{page['id']} spatial_contract: at least one entity is required when spatial_contract is present.")
+        if spatial_contract_coordinate_type(contract) == "scene_3d":
+            validate_scene_3d_contract(page, contract, spatial_continuity_plan, issues)
+            continue
         snapshots = spatial_snapshots_by_panel(contract)
         non_firing_payload = {
             "narrative_plan": page.get("narrative_plan"),
@@ -1322,6 +1767,9 @@ def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
             label = f"{page['id']} spatial_contract constraint {index} ({constraint_type or 'missing_type'})"
             if constraint_type not in SPATIAL_CONSTRAINT_TYPES:
                 issues.append(f"{label}: unsupported constraint type.")
+                continue
+            if constraint_type in SCENE_3D_ONLY_CONSTRAINT_TYPES:
+                issues.append(f"{label}: {constraint_type} requires coordinate_space.type scene_3d.")
                 continue
             if constraint_type == "same_landmark_relation_as":
                 validate_same_landmark_relation(pages_by_id, page, constraint, index, issues)
@@ -1445,10 +1893,25 @@ def spatial_contract_issues(pages: list[dict[str, Any]]) -> list[str]:
 
 
 def spatial_plan_issues(pages: list[dict[str, Any]], spatial_continuity_plan: dict[str, Any] | None = None) -> list[str]:
-    issues = spatial_contract_issues(pages)
+    issues = spatial_contract_issues(pages, spatial_continuity_plan)
     if spatial_continuity_plan is not None:
         issues.extend(spatial_continuity_issues(spatial_continuity_plan, pages))
     return issues
+
+
+def spatial_contract_warnings(pages: list[dict[str, Any]]) -> list[str]:
+    warnings: list[str] = []
+    for page in pages:
+        contract = page.get("spatial_contract", {})
+        if not spatial_contract_has_content(contract):
+            continue
+        warnings.extend(scene_3d_contract_warnings(page, contract))
+    return warnings
+
+
+def spatial_plan_warnings(pages: list[dict[str, Any]], spatial_continuity_plan: dict[str, Any] | None = None) -> list[str]:
+    del spatial_continuity_plan
+    return spatial_contract_warnings(pages)
 
 
 def assert_spatial_contracts_pass(
@@ -1484,13 +1947,14 @@ def preview_issue_map(pages: list[dict[str, Any]], issues: list[str]) -> dict[st
     return mapped
 
 
-def build_spatial_preview_model(pages: list[dict[str, Any]], issues: list[str]) -> dict[str, Any]:
+def build_spatial_preview_model(pages: list[dict[str, Any]], issues: list[str], warnings: list[str] | None = None) -> dict[str, Any]:
     issue_map = preview_issue_map(pages, issues)
     return {
         "title": "Spatial contract preview",
         "source": "",
         "status": "fail" if issues else "pass",
         "issues": issues,
+        "warnings": warnings or [],
         "issue_map": issue_map,
         "page_count": len(pages),
         "structured_page_count": spatial_contract_page_count(pages),
@@ -1763,7 +2227,70 @@ def render_spatial_preview_constraint_list(page: dict[str, Any]) -> str:
     return "\n".join(items)
 
 
-def render_spatial_preview_page(page: dict[str, Any], issues: list[str]) -> str:
+def render_spatial_preview_lock_list(page: dict[str, Any]) -> str:
+    contract = page.get("spatial_contract", {})
+    items = []
+    for lock in contract.get("locks", []):
+        lock_type = str(lock.get("type") or "")
+        items.append(
+            f'<li class="lock lock-{escape_html(lock_type)}"><code>{escape_html(lock.get("id") or "")}</code> '
+            f'<span>{escape_html(lock_type)}</span>'
+            f'<small>{escape_html(preview_constraint_title(lock))}</small></li>'
+        )
+    if not items:
+        items.append('<li class="empty">No locks.</li>')
+    return "\n".join(items)
+
+
+def render_spatial_preview_transition_list(page: dict[str, Any]) -> str:
+    contract = page.get("spatial_contract", {})
+    items = []
+    for transition in contract.get("transitions", []):
+        items.append(
+            f'<li class="transition"><code>{escape_html(transition.get("id") or "")}</code> '
+            f'<small>{escape_html(preview_constraint_title(transition))}</small></li>'
+        )
+    if not items:
+        items.append('<li class="empty">No transitions.</li>')
+    return "\n".join(items)
+
+
+def scene_3d_preview_payload(page: dict[str, Any], scene: dict[str, Any] | None) -> str:
+    payload = {
+        "page_id": page.get("id"),
+        "filename": page.get("filename"),
+        "scene": scene or {},
+        "contract": page.get("spatial_contract") or {},
+    }
+    return escape_html(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def render_scene_3d_preview(page: dict[str, Any], scene: dict[str, Any] | None) -> str:
+    contract = page.get("spatial_contract", {})
+    if spatial_contract_coordinate_type(contract) != "scene_3d":
+        return ""
+    scene_id = (contract.get("coordinate_space") or {}).get("scene_id") or ""
+    levels = ", ".join(
+        str(level.get("id") or "")
+        for level in (scene or {}).get("levels", [])
+        if str(level.get("id") or "")
+    )
+    snapshots = ", ".join(panel_key(snapshot.get("panel")) for snapshot in contract.get("panel_snapshots", []))
+    return f"""
+<section class="scene-3d-preview">
+  <div class="scene-3d-header">
+    <div>
+      <h3>Scene 3D Preview</h3>
+      <p>scene_id: <code>{escape_html(scene_id)}</code> | levels: {escape_html(levels or 'none')} | panels: {escape_html(snapshots or 'none')}</p>
+    </div>
+    <span class="pill">validation-only provisional scene</span>
+  </div>
+  <canvas class="scene-3d-canvas" width="720" height="420" data-scene3d="{scene_3d_preview_payload(page, scene)}"></canvas>
+  <p class="scene-3d-note">Hard locks are rerun criteria. Soft/inferred geometry may reconcile after approved storyboard inspection; the first panel can act as a calibration anchor when it has no prior continuity.</p>
+</section>"""
+
+
+def render_spatial_preview_page(page: dict[str, Any], issues: list[str], scenes_by_id: dict[str, dict[str, Any]] | None = None) -> str:
     contract = page.get("spatial_contract", {})
     issue_items = "\n".join(f"<li>{escape_html(issue)}</li>" for issue in issues)
     if not issue_items:
@@ -1774,6 +2301,8 @@ def render_spatial_preview_page(page: dict[str, Any], issues: list[str]) -> str:
         snapshots = '<p class="empty">No panel_snapshots supplied.</p>'
     else:
         snapshots = "\n".join(render_spatial_preview_snapshot(page, snapshot) for snapshot in contract.get("panel_snapshots", []))
+    scene_id = str((contract.get("coordinate_space") or {}).get("scene_id") or "")
+    scene_preview = render_scene_3d_preview(page, (scenes_by_id or {}).get(scene_id))
     return f"""
 <article class="page-card" id="page-{escape_html(page.get('id') or '')}">
   <header class="page-card-header">
@@ -1784,13 +2313,20 @@ def render_spatial_preview_page(page: dict[str, Any], issues: list[str]) -> str:
     <span class="issue-badge {'has-issues' if issues else ''}">{len(issues)} issue(s)</span>
   </header>
   <div class="page-grid">
-    <div class="panel-grid">{snapshots}</div>
+    <div>
+      {scene_preview}
+      <div class="panel-grid">{snapshots}</div>
+    </div>
     <aside class="legend">
       <h3>Entities</h3>
       <table>
         <thead><tr><th>id</th><th>type</th><th>role</th><th>blocking_symbol</th></tr></thead>
         <tbody>{render_spatial_preview_entity_legend(page)}</tbody>
       </table>
+      <h3>Locks</h3>
+      <ul class="constraint-list">{render_spatial_preview_lock_list(page)}</ul>
+      <h3>Transitions</h3>
+      <ul class="constraint-list">{render_spatial_preview_transition_list(page)}</ul>
       <h3>Constraints</h3>
       <ul class="constraint-list">{render_spatial_preview_constraint_list(page)}</ul>
       <h3>Issues</h3>
@@ -1803,6 +2339,7 @@ def render_spatial_preview_page(page: dict[str, Any], issues: list[str]) -> str:
 def render_spatial_preview_html(model: dict[str, Any]) -> str:
     pages = model.get("pages", [])
     issue_map = model.get("issue_map", {})
+    scenes_by_id = scene_3d_scenes_by_id(model.get("spatial_continuity_plan"))
     page_nav = []
     page_cards = []
     for page in pages:
@@ -1812,10 +2349,13 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
             f'<a href="#page-{escape_html(page_id)}"><span>{escape_html(page.get("filename") or page_id)}</span>'
             f'<strong class="{"has-issues" if page_issues else ""}">{len(page_issues)}</strong></a>'
         )
-        page_cards.append(render_spatial_preview_page(page, page_issues))
+        page_cards.append(render_spatial_preview_page(page, page_issues, scenes_by_id))
     all_issues = "\n".join(f"<li>{escape_html(issue)}</li>" for issue in model.get("issues", []))
     if not all_issues:
         all_issues = '<li class="empty">No spatial-check issues.</li>'
+    all_warnings = "\n".join(f"<li>{escape_html(warning)}</li>" for warning in model.get("warnings", []))
+    if not all_warnings:
+        all_warnings = '<li class="empty">No spatial-check warnings.</li>'
     nav = "\n".join(page_nav) or '<span class="empty">No pages.</span>'
     cards = "\n".join(page_cards) or '<p class="empty">No pages to preview.</p>'
     status_class = "status-fail" if model.get("status") == "fail" else "status-pass"
@@ -1877,6 +2417,14 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
     .constraint-list li {{ margin-bottom: 8px; }}
     .constraint-list small {{ display: block; color: #526071; word-break: break-word; }}
     .cross-panel span {{ background: #ede9fe; color: #5b21b6; border-radius: 999px; padding: 1px 6px; }}
+    .lock-hard span {{ background: #fee2e2; color: #991b1b; border-radius: 999px; padding: 1px 6px; }}
+    .lock-soft span {{ background: #fef3c7; color: #92400e; border-radius: 999px; padding: 1px 6px; }}
+    .lock-inferred span {{ background: #e0f2fe; color: #075985; border-radius: 999px; padding: 1px 6px; }}
+    .scene-3d-preview {{ border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc; margin-bottom: 12px; padding: 10px; }}
+    .scene-3d-header {{ display: flex; align-items: start; justify-content: space-between; gap: 12px; }}
+    .scene-3d-header h3 {{ margin-top: 0; }}
+    .scene-3d-canvas {{ display: block; width: 100%; max-height: 420px; border: 1px solid #d8dee8; background: #ffffff; margin-top: 10px; }}
+    .scene-3d-note {{ font-size: 13px; }}
     .empty {{ color: #6b7280; font-size: 13px; }}
     @media (max-width: 980px) {{
       .layout {{ grid-template-columns: 1fr; }}
@@ -1902,10 +2450,119 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
       <section class="global-issues">
         <h2>Spatial-check Issues</h2>
         <ul class="issue-list">{all_issues}</ul>
+        <h2>Spatial-check Warnings</h2>
+        <ul class="issue-list">{all_warnings}</ul>
       </section>
       {cards}
     </main>
   </div>
+  <script>
+    (function () {{
+      function project(point) {{
+        const x = Number(point[0] || 0);
+        const y = Number(point[1] || 0);
+        const z = Number(point[2] || 0);
+        return [x * 46 - y * 28, z * -54 + y * 18];
+      }}
+      function allPositions(payload) {{
+        const positions = [];
+        const contract = payload.contract || {{}};
+        (contract.panel_snapshots || []).forEach(snapshot => {{
+          (snapshot.entities || []).forEach(entity => {{
+            if (Array.isArray(entity.position) && entity.position.length >= 3) positions.push(entity.position);
+          }});
+        }});
+        ((payload.scene || {{}}).fixed_entities || []).forEach(entity => {{
+          if (Array.isArray(entity.position) && entity.position.length >= 3) positions.push(entity.position);
+        }});
+        return positions;
+      }}
+      function drawCanvas(canvas, payload) {{
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        const width = canvas.width;
+        const height = canvas.height;
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        const projected = allPositions(payload).map(project);
+        const xs = projected.map(point => point[0]);
+        const ys = projected.map(point => point[1]);
+        const minX = xs.length ? Math.min.apply(null, xs) : -80;
+        const maxX = xs.length ? Math.max.apply(null, xs) : 80;
+        const minY = ys.length ? Math.min.apply(null, ys) : -80;
+        const maxY = ys.length ? Math.max.apply(null, ys) : 80;
+        const scale = Math.min(width / Math.max(1, maxX - minX + 160), height / Math.max(1, maxY - minY + 120));
+        function toCanvas(point) {{
+          const projectedPoint = project(point);
+          return [
+            (projectedPoint[0] - minX + 80) * scale,
+            (projectedPoint[1] - minY + 60) * scale
+          ];
+        }}
+        ctx.strokeStyle = '#d8dee8';
+        ctx.lineWidth = 1;
+        const scene = payload.scene || {{}};
+        (scene.levels || []).forEach(level => {{
+          const range = level.z_range || [0, 0];
+          const z = Number(range[0] || 0);
+          const corners = [[-3, -3, z], [3, -3, z], [3, 3, z], [-3, 3, z]];
+          ctx.beginPath();
+          corners.forEach((point, index) => {{
+            const canvasPoint = toCanvas(point);
+            if (index === 0) ctx.moveTo(canvasPoint[0], canvasPoint[1]);
+            else ctx.lineTo(canvasPoint[0], canvasPoint[1]);
+          }});
+          ctx.closePath();
+          ctx.stroke();
+          const labelPoint = toCanvas(corners[0]);
+          ctx.fillStyle = '#64748b';
+          ctx.fillText(level.id || 'level', labelPoint[0], labelPoint[1] - 4);
+        }});
+        function drawPoint(point, label, color) {{
+          const canvasPoint = toCanvas(point);
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(canvasPoint[0], canvasPoint[1], 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#111827';
+          ctx.fillText(label, canvasPoint[0] + 7, canvasPoint[1] + 3);
+        }}
+        (scene.fixed_entities || []).forEach(entity => {{
+          if (Array.isArray(entity.position)) drawPoint(entity.position, entity.id || 'fixed', '#93c5fd');
+        }});
+        const contract = payload.contract || {{}};
+        (contract.panel_snapshots || []).forEach(snapshot => {{
+          (snapshot.entities || []).forEach(entity => {{
+            if (Array.isArray(entity.position)) drawPoint(entity.position, `${{snapshot.panel}}:${{entity.id}}`, '#fbbf24');
+            if (Array.isArray(entity.position) && Array.isArray(entity.trajectory_vector)) {{
+              const start = toCanvas(entity.position);
+              const endPoint = [
+                Number(entity.position[0] || 0) + Number(entity.trajectory_vector[0] || 0),
+                Number(entity.position[1] || 0) + Number(entity.trajectory_vector[1] || 0),
+                Number(entity.position[2] || 0) + Number(entity.trajectory_vector[2] || 0)
+              ];
+              const end = toCanvas(endPoint);
+              ctx.strokeStyle = '#0ea5e9';
+              ctx.beginPath();
+              ctx.moveTo(start[0], start[1]);
+              ctx.lineTo(end[0], end[1]);
+              ctx.stroke();
+            }}
+          }});
+        }});
+      }}
+      document.querySelectorAll('canvas[data-scene3d]').forEach(canvas => {{
+        try {{
+          const payload = JSON.parse(canvas.dataset.scene3d || '{{}}');
+          drawCanvas(canvas, payload);
+        }} catch (error) {{
+          const ctx = canvas.getContext('2d');
+          if (ctx) ctx.fillText('Scene 3D preview data could not be parsed.', 16, 24);
+        }}
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
 
@@ -3279,6 +3936,29 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
     coordinate_space = contract.get("coordinate_space") or {}
     if coordinate_space:
         lines.append(f"- coordinate_space: {json.dumps(coordinate_space, ensure_ascii=False, sort_keys=True)}")
+    if spatial_contract_coordinate_type(contract) == "scene_3d":
+        lines.extend(
+            [
+                "- scene_3d validation-only mode: use this as a provisional validation model, not as a composition driver or automatic rendered reference.",
+                "- Preserve the approved narrative/page design first; hard locks are rerun criteria, while soft/inferred geometry may reconcile after parent inspection if the page design and prior continuity remain intact.",
+                "- If this is the first page/panel with no prior spatial continuity, the first panel is a calibration anchor for soft/inferred scene geometry.",
+                "- Do not attach or imitate a headless 3D render unless a later workflow explicitly enables camera_render_reference.",
+            ]
+        )
+    for lock in contract.get("locks", []):
+        fields = []
+        for key, value in lock.items():
+            if key == "id" or value is None or value == "":
+                continue
+            fields.append(f"{key}={format_spatial_value(value)}")
+        lines.append(f"- lock {lock.get('id')}: " + (", ".join(fields) if fields else "no extra fields"))
+    for transition in contract.get("transitions", []):
+        fields = []
+        for key, value in transition.items():
+            if key == "id" or value is None or value == "":
+                continue
+            fields.append(f"{key}={format_spatial_value(value)}")
+        lines.append(f"- transition {transition.get('id')}: " + (", ".join(fields) if fields else "no extra fields"))
     if contract.get("entities"):
         lines.append("- entities: " + "; ".join(spatial_entity_summary(entity) for entity in contract.get("entities", [])))
     for snapshot in contract.get("panel_snapshots", []):
@@ -3293,6 +3973,7 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
                 "trajectory_vector",
                 "pose",
                 "cover",
+                "level_id",
                 "screen_box",
                 "location_anchor",
                 "held_props",
@@ -3305,7 +3986,15 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
             if state.get("occlusion"):
                 parts.append(f"occlusion={state.get('occlusion')}")
             entity_parts.append(" ".join(parts))
-        lines.append(f"- panel {snapshot.get('panel')}: " + "; ".join(entity_parts))
+        panel_parts = []
+        if snapshot.get("location_id"):
+            panel_parts.append(f"location_id={snapshot.get('location_id')}")
+        if snapshot.get("camera"):
+            panel_parts.append(f"camera={format_spatial_value(snapshot.get('camera'))}")
+        panel_prefix = f"- panel {snapshot.get('panel')}"
+        if panel_parts:
+            panel_prefix += " " + " ".join(panel_parts)
+        lines.append(f"{panel_prefix}: " + "; ".join(entity_parts))
     for constraint in contract.get("constraints", []):
         fields = []
         for key, value in constraint.items():
@@ -4282,20 +4971,31 @@ def spatial_continuity_plan_from_context(plan_context: dict[str, Any]) -> dict[s
 
 def command_spatial_check(args: argparse.Namespace) -> None:
     plan_context, pages = plan_and_pages_for_spatial_check(args)
-    issues = spatial_plan_issues(pages, spatial_continuity_plan_from_context(plan_context))
+    spatial_continuity_plan = spatial_continuity_plan_from_context(plan_context)
+    issues = spatial_plan_issues(pages, spatial_continuity_plan)
+    warnings = spatial_plan_warnings(pages, spatial_continuity_plan)
     if issues:
         print("SPATIAL_CHECK: fail")
         for issue in issues:
             print(f"- {issue}")
+        print(f"SPATIAL_WARNINGS: {len(warnings)}")
+        for warning in warnings:
+            print(f"- warning: {warning}")
         raise SystemExit(1)
     print("SPATIAL_CHECK: pass")
     print(f"STRUCTURED_PAGES: {spatial_contract_page_count(pages)}")
+    print(f"SPATIAL_WARNINGS: {len(warnings)}")
+    for warning in warnings:
+        print(f"- warning: {warning}")
 
 
 def command_spatial_preview(args: argparse.Namespace) -> None:
     plan_context, pages = plan_and_pages_for_spatial_check(args)
-    issues = spatial_plan_issues(pages, spatial_continuity_plan_from_context(plan_context))
-    model = build_spatial_preview_model(pages, issues)
+    spatial_continuity_plan = spatial_continuity_plan_from_context(plan_context)
+    issues = spatial_plan_issues(pages, spatial_continuity_plan)
+    warnings = spatial_plan_warnings(pages, spatial_continuity_plan)
+    model = build_spatial_preview_model(pages, issues, warnings)
+    model["spatial_continuity_plan"] = spatial_continuity_plan
     model["title"] = spatial_preview_title(args)
     model["source"] = spatial_preview_source(args)
     output_path = spatial_preview_output_path(args)
@@ -4305,6 +5005,7 @@ def command_spatial_preview(args: argparse.Namespace) -> None:
     print(f"SPATIAL_CHECK: {model['status']}")
     print(f"STRUCTURED_PAGES: {model['structured_page_count']}")
     print(f"ISSUES: {len(issues)}")
+    print(f"SPATIAL_WARNINGS: {len(warnings)}")
 
 
 def command_approve_plan(args: argparse.Namespace) -> None:
@@ -4606,6 +5307,15 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
     stage["parent_note"] = args.note
     stage["spatial_verdict"] = args.spatial_verdict
     stage["spatial_note"] = spatial_note
+    if args.spatial_verdict == "reconciled":
+        reconciliation = {
+            "page": page["filename"],
+            "stage": stage_id,
+            "note": args.reconciliation_note or spatial_note or args.note,
+            "recorded_at": now_iso(),
+        }
+        stage["reconciliation_note"] = reconciliation["note"]
+        state.setdefault("spatial_reconciliations", []).append(reconciliation)
     stage["spatial_checked_at"] = now_iso()
     stage["inspected_at"] = now_iso()
     stage["output_path"] = str(output)
@@ -5088,6 +5798,7 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_pass.add_argument("--note", required=True)
     inspect_pass.add_argument("--spatial-verdict", choices=sorted(SPATIAL_VERDICT_VALUES), default="pass")
     inspect_pass.add_argument("--spatial-note", default="")
+    inspect_pass.add_argument("--reconciliation-note", default="")
     inspect_pass.set_defaults(func=command_inspect_pass)
 
     anchor_review = subparsers.add_parser("anchor-review")

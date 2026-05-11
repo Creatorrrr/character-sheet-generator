@@ -347,6 +347,139 @@ def plan_with_spatial_contract(contract):
     return plan
 
 
+def scene_3d_plan():
+    plan = sample_plan(page_count=1, panel_count=2)
+    plan["spatial_continuity_plan"] = {
+        "scope": "two-level lobby with a stairwell and balcony",
+        "scene_3d_scenes": [
+            {
+                "id": "school-building-main",
+                "status": "provisional",
+                "usage": "validation_only",
+                "units": "meters",
+                "origin": "building_ground_floor_center",
+                "axes": {"x": "east", "y": "north", "z": "up"},
+                "levels": [
+                    {"id": "floor_1", "label": "1층", "z_range": [0, 3]},
+                    {"id": "floor_2", "label": "2층", "z_range": [3, 6]},
+                ],
+                "locations": [
+                    {"id": "floor_1_lobby", "level_id": "floor_1"},
+                    {"id": "floor_2_balcony", "level_id": "floor_2"},
+                ],
+                "fixed_entities": [
+                    {"id": "stairwell", "type": "landmark", "position": [0, 1.5, 0]},
+                    {"id": "balcony_railing", "type": "landmark", "position": [0, 0.5, 3.2]},
+                    {"id": "lobby_door", "type": "door", "position": [-2, -2, 1]},
+                ],
+                "reconciliation_policy": {
+                    "mode": "adjust_soft_geometry_preserve_hard_invariants",
+                    "first_panel_calibration_weight": "high",
+                },
+            }
+        ],
+        "continuity_rules": [
+            "scene_3d starts provisional and may reconcile soft/inferred geometry after approved storyboard inspection",
+            "hard invariants from the page plan must not be reconciled away",
+        ],
+    }
+    page = plan["pages"][0]
+    page["location_id"] = "floor_1_lobby"
+    page["location_continuity"] = {
+        "location_id": "floor_1_lobby",
+        "zone": "lobby looking toward second-floor balcony",
+        "fixed_landmarks_visible": [],
+        "offscreen_landmarks": [],
+        "must_preserve": ["hero remains on floor_1", "villain remains above on floor_2 balcony"],
+        "changes_from_previous_page": [],
+    }
+    page["spatial_contract"] = {
+        "coordinate_space": {
+            "type": "scene_3d",
+            "usage": "validation_only",
+            "scene_id": "school-building-main",
+            "location_id": "floor_1_lobby",
+        },
+        "entities": [
+            {"id": "hero", "type": "character", "role": "ground-floor protagonist"},
+            {"id": "villain", "type": "character", "role": "second-floor observer"},
+            {"id": "lobby_door", "type": "door", "role": "state-changing landmark"},
+            {"id": "balcony_railing", "type": "landmark", "role": "second-floor level evidence"},
+        ],
+        "locks": [
+            {
+                "id": "hero-floor-hard-lock",
+                "type": "hard",
+                "source": "page_plan",
+                "rule": "hero must remain on floor_1",
+                "entities": ["hero"],
+                "panels": [1, 2],
+            },
+            {
+                "id": "camera-fov-soft-lock",
+                "type": "soft",
+                "source": "model_inferred",
+                "rule": "camera fov may reconcile to match the approved comic panel",
+                "panels": [1],
+                "warning": "camera FOV is provisional and may adjust after storyboard inspection",
+            },
+            {
+                "id": "first-panel-calibration",
+                "type": "inferred",
+                "source": "model_inferred",
+                "rule": "first panel can calibrate soft scene geometry if page design remains intact",
+                "panels": [1],
+            },
+        ],
+        "panel_snapshots": [
+            {
+                "panel": 1,
+                "location_id": "floor_1_lobby",
+                "camera": {"position": [-3, -4, 1.6], "look_at": [0, 0.5, 2.2], "fov": 45},
+                "entities": [
+                    {"id": "hero", "position": [0, -1, 0], "level_id": "floor_1", "facing_vector": [0, 1, 0], "state_tags": ["looking_up"]},
+                    {"id": "villain", "position": [0, 0.7, 3.4], "level_id": "floor_2", "visibility": "visible_above_railing"},
+                    {"id": "lobby_door", "position": [-2, -2, 1], "state_tags": ["closed"]},
+                    {"id": "balcony_railing", "position": [0, 0.5, 3.2], "level_id": "floor_2"},
+                ],
+            },
+            {
+                "panel": 2,
+                "location_id": "floor_1_lobby",
+                "camera": {"position": [-2, -3, 1.8], "look_at": [0, 0.5, 1.8], "fov": 50},
+                "entities": [
+                    {"id": "hero", "position": [0.5, 0.4, 0], "level_id": "floor_1", "trajectory_vector": [-0.5, 0.1, 3.2], "state_tags": ["moving_to_stairs"]},
+                    {"id": "villain", "position": [0, 0.7, 3.4], "level_id": "floor_2", "visibility": "visible_above_railing"},
+                    {"id": "lobby_door", "position": [-2, -2, 1], "state_tags": ["open"]},
+                    {"id": "balcony_railing", "position": [0, 0.5, 3.2], "level_id": "floor_2"},
+                ],
+            },
+        ],
+        "transitions": [
+            {
+                "id": "door-opened-by-hero",
+                "from_panel": 1,
+                "to_panel": 2,
+                "entity": "lobby_door",
+                "type": "state_change",
+                "from_state": "closed",
+                "to_state": "open",
+                "cause": "hero opens the lobby door before moving",
+            }
+        ],
+        "constraints": [
+            {"id": "hero-on-floor-1", "type": "on_level", "panel": 1, "entity": "hero", "level": "floor_1"},
+            {"id": "villain-on-floor-2", "type": "on_level", "panel": 1, "entity": "villain", "level": "floor_2"},
+            {"id": "villain-above-hero", "type": "above", "panel": 1, "subject": "villain", "anchor": "hero"},
+            {"id": "hero-villain-separated", "type": "vertical_separation", "panel": 1, "subject": "villain", "anchor": "hero", "min_delta_z": 3.0},
+            {"id": "hero-moves-toward-stairs", "type": "trajectory_to", "panel": 2, "object": "hero", "target": "balcony_railing"},
+            {"id": "door-open-cause", "type": "requires_cause", "entity": "lobby_door", "state_change": "closed_to_open", "cause_panel": 2},
+            {"id": "floor-readability", "type": "visual_evidence_required", "panel": 1, "evidence": ["villain is visibly above hero", "balcony railing separates floor_2 from floor_1"]},
+        ],
+    }
+    return plan
+
+
 def temporal_cover_plan(current_cover="tall_partition", include_allowed_transition=False, cause_panel=1):
     plan = sample_plan(page_count=2, panel_count=1)
     shared_entities = [
@@ -1104,6 +1237,94 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("Pre-page spatial continuity plan", subagent_prompt)
             self.assertIn("spatial_continuity_plan is the pre-page location bible", batch_plan)
 
+    def test_scene_3d_contract_is_preserved_validated_prompted_and_previewed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = scene_3d_plan()
+            plan_path = root / "scene-3d-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            check = run_cli("spatial-check", "--plan-file", str(plan_path), cwd=root)
+            self.assertIn("SPATIAL_CHECK: pass", check.stdout)
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            approved = json.loads((run_dir / "approved_storyboard_plan.json").read_text(encoding="utf-8"))
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            approved_contract = approved["pages"][0]["spatial_contract"]
+            state_contract = state["pages"][0]["spatial_contract"]
+
+            self.assertEqual(approved["spatial_continuity_plan"]["scene_3d_scenes"][0]["id"], "school-building-main")
+            self.assertEqual(approved_contract["coordinate_space"]["type"], "scene_3d")
+            self.assertEqual(state_contract["transitions"][0]["id"], "door-opened-by-hero")
+            self.assertEqual(state_contract["locks"][0]["type"], "hard")
+
+            preview = run_cli("spatial-preview", "--run-dir", str(run_dir), cwd=root)
+            self.assertIn("SPATIAL_CHECK: pass", preview.stdout)
+            html = (run_dir / "spatial_contract_preview.html").read_text(encoding="utf-8")
+            self.assertIn("Scene 3D Preview", html)
+            self.assertIn("school-building-main", html)
+            self.assertIn("floor_2", html)
+            self.assertIn("door-opened-by-hero", html)
+            self.assertIn("hero-floor-hard-lock", html)
+            self.assertIn("camera FOV is provisional", html)
+            self.assertIn("first panel can calibrate soft scene geometry", html)
+            self.assertIn("floor-readability", html)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            prompt = Path(stage["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+
+            for text in (prompt, subagent_prompt):
+                self.assertIn("scene_3d validation-only", text)
+                self.assertIn("hard locks are rerun criteria", text)
+                self.assertIn("soft/inferred geometry may reconcile", text)
+                self.assertIn("first panel is a calibration anchor", text)
+                self.assertIn("visual_evidence_required", text)
+
+    def test_scene_3d_check_rejects_hard_spatial_contradictions_but_not_soft_warnings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            soft_warning = scene_3d_plan()
+            soft_warning_path = root / "scene-3d-soft-warning.json"
+            soft_warning_path.write_text(json.dumps(soft_warning, indent=2), encoding="utf-8")
+            valid = run_cli("spatial-check", "--plan-file", str(soft_warning_path), cwd=root)
+            self.assertIn("SPATIAL_CHECK: pass", valid.stdout)
+            self.assertIn("SPATIAL_WARNINGS: 2", valid.stdout)
+
+            cases = []
+            wrong_level = scene_3d_plan()
+            wrong_level["pages"][0]["spatial_contract"]["panel_snapshots"][0]["entities"][0]["level_id"] = "floor_2"
+            cases.append((wrong_level, "level_id floor_2 does not match z_range for z=0.0"))
+
+            wrong_above = scene_3d_plan()
+            wrong_above["pages"][0]["spatial_contract"]["panel_snapshots"][0]["entities"][1]["position"] = [0, 0.7, -0.5]
+            cases.append((wrong_above, "is not above"))
+
+            wrong_trajectory = scene_3d_plan()
+            wrong_trajectory["pages"][0]["spatial_contract"]["panel_snapshots"][1]["entities"][0]["trajectory_vector"] = [-1, -1, 0]
+            cases.append((wrong_trajectory, "vector points away"))
+
+            unknown_scene = scene_3d_plan()
+            unknown_scene["pages"][0]["spatial_contract"]["coordinate_space"]["scene_id"] = "missing-scene"
+            cases.append((unknown_scene, "unknown scene_3d scene_id missing-scene"))
+
+            missing_cause = scene_3d_plan()
+            missing_cause["pages"][0]["spatial_contract"]["transitions"] = []
+            cases.append((missing_cause, "requires_cause has no matching transition cause"))
+
+            for index, (plan, expected) in enumerate(cases, start=1):
+                with self.subTest(case=index):
+                    plan_path = root / f"bad-scene-3d-{index}.json"
+                    plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+                    result = run_cli_raw("spatial-check", "--plan-file", str(plan_path), cwd=root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("SPATIAL_CHECK: fail", result.stdout)
+                    self.assertIn(expected, result.stdout)
+
     def test_spatial_check_rejects_incomplete_spatial_continuity_plan(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1364,6 +1585,60 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertTrue(stage["rerun_pending"])
             self.assertIn("Spatial inspection needs rerun", stage["parent_note"])
             self.assertEqual(stage["rerun_history"][-1]["spatial_verdict"], "needs_rerun")
+
+    def test_spatial_verdict_reconciled_records_reconciliation_without_rerun(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            plan = scene_3d_plan()
+            plan_path = root / "scene-3d-reconcile-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            generated = generate_file(root)
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+
+            run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent accepts storyboard and reconciles soft geometry",
+                "--spatial-verdict",
+                "reconciled",
+                "--spatial-note",
+                "hard invariants pass; camera fov is reconciled",
+                "--reconciliation-note",
+                "soft camera and desk offsets calibrated from first panel",
+                cwd=root,
+            )
+
+            state = json.loads((run_dir / "state.json").read_text())
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            self.assertEqual(stage["status"], "inspected_pass")
+            self.assertEqual(stage["spatial_verdict"], "reconciled")
+            self.assertEqual(stage["reconciliation_note"], "soft camera and desk offsets calibrated from first panel")
+            self.assertEqual(state["spatial_reconciliations"][0]["stage"], FIRST_STAGE)
 
     def test_legacy_flat_panels_are_converted_to_single_panel_pages(self):
         with tempfile.TemporaryDirectory() as tmp:

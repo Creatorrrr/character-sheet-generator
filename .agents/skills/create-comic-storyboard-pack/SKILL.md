@@ -38,6 +38,10 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Use a three-pass page planning flow. First, define the pre-page location/landmark continuity plan when applicable. Second, design each page and panel from the scenario, emotional beats, action rhythm, reader eye flow, panel density, negative space, detail density, visual emphasis, line-weight/black-ink rhythm, background simplification/emphasis, and planned speed/focus/impact/emotion lines while respecting that location plan.
 - After the narrative-first page/panel design is chosen, extract only the spatial relations needed for validation into `spatial_contract`. `spatial_contract` is a validation overlay, not a page or composition driver.
 - Do not design panels just to make `spatial_contract` easy to draw. Do not turn action pages into tactical diagrams or place character/object coordinates at the center of page design unless the story itself calls for a diagram-like page.
+- For spatially important scenes such as multi-floor interiors, stairwells, balconies, rooms/corridors seen from changing cameras, or recurring connected sets, `spatial_continuity_plan` may include `scene_3d_scenes[]`. Treat each `scene_3d` as a provisional validation model, not an absolute floor plan or composition driver.
+- Use `spatial_contract.coordinate_space.type: "scene_3d"` only when 3D height, floor/level, camera direction, connected-location, or object-state continuity materially affects correctness. Default `usage` is `validation_only`; do not attach a headless 3D render as a generation reference unless a future workflow explicitly enables `camera_render_reference`.
+- `scene_3d` data should use one shared canonical space per connected location set, with panel-specific `panel_snapshots[]` and `transitions[]`. Do not create unrelated per-panel 3D spaces for the same physical set; record a new `scene_id` only when the story actually moves to an unrelated location.
+- `scene_3d` is provisional until generated storyboard inspection. During parent inspection, hard locks from the scenario/page plan are rerun criteria, while soft or inferred geometry may be reconciled to the approved storyboard when doing so preserves the page design, hard invariants, and prior continuity. The first page/panel with no prior spatial continuity is a calibration anchor for soft/inferred geometry.
 - Include page-level layout notes, panel-level composition/viewpoint notes, and optional `narrative_plan` fields such as `story_function`, `reader_experience`, `pacing_intent`, and `composition_intent`.
 - Include character blocking, action, setting, props, mood, continuity notes, source dialogue, adapted dialogue, SFX, captions, spatial logic, motion checks, and `must_match`.
 - For action or staging where direction, line of sight, moving-object path, visibility/occlusion, landmark continuity, or page-to-page state continuity matters, include a structured `spatial_contract` after the page/panel design. Use it to define stable entities, coordinate space, per-panel positions/vectors/visibility/occlusion, temporal state fields, and machine-checkable constraints before generation.
@@ -46,6 +50,8 @@ If the user does not specify source/reference paths, use `/Users/chasoik/Project
 - Use `spatial_contract.entities[].blocking_symbol` to predefine the quick blocking mark for important characters, objects, occluding elements, landmarks, and motion markers. Prefer a recognizable 3-second rough form or silhouette plus any needed fallback symbol, not a meaningless geometric mark alone. Unimportant props/background elements may be simplified or omitted when they are not needed for story readability, action readability, spatial contract verification, visibility/occlusion, landmark continuity, or page composition.
 - Use `spatial_contract.panel_snapshots[].entities[]` fields such as `pose`, `cover`, `visibility`, `occlusion`, `location_anchor`, `held_props`, `state_tags`, and optional `screen_box` when state continuity or cover geometry matters.
 - Use `spatial_contract.constraints` for general relation checks such as directional alignment (`aims_at`), movement path toward a destination (`trajectory_to`), occluding-element placement (`cover_between`, `behind_cover_from`), visibility/line-of-sight blocking (`line_of_sight_blocked`), negative firing/aim relations (`no_line_of_fire`, `not_aims_at`), left/right or landmark relation continuity (`left_of`, `right_of`, `same_landmark_relation_as`, `same_cover_as`), state continuity (`state_persists_from`, `occlusion_persists_from`), approved transitions (`allowed_transition`), and required causes (`requires_cause`). Treat failures as validation blockers before approval and rerun causes after image inspection, without letting the contract replace the approved narrative/page design.
+- For `scene_3d`, supported validation constraints include `on_level`, `above`, `below`, `vertical_separation`, `same_location_as`, `trajectory_to`, `allowed_transition`, `requires_cause`, and `visual_evidence_required`. `visual_evidence_required` is an inspection checklist item, not a machine-check failure by itself.
+- Use `spatial_contract.locks[]` to separate `hard`, `soft`, and `inferred` spatial assumptions. Hard locks represent scenario/page-plan/explicit continuity invariants and should trigger rerun when violated. Soft and inferred locks represent model-estimated geometry such as camera FOV, furniture offsets, railing length, or approximate spacing and may be reconciled after inspection.
 - `cover_between` means only that the cover lies between the actor and source/threat. `behind_cover_from` means the actor must be behind cover from `viewpoint_entity` or `threat` line of fire, not from the reader's camera. `line_of_sight_blocked` is stronger: direct visibility or hit line must be blocked by the named cover.
 - Cover constraints may include `allowed_exposure` such as `side_edge_peek_only`, `weapon_edge_only`, or `eyes_only`, and `forbidden_exposure` such as `torso_visible`, `above_roofline`, or `open_field`. Treat listed forbidden exposure as a worker and parent-inspection reject condition.
 - During image generation, translate cover and visibility constraints into visual occlusion rendering rules before using the raw `spatial_contract`. `allowed_exposure` is a validation term, not a literal thing to draw on a wall edge.
@@ -321,6 +327,75 @@ Approved plans use `pages[].panels[]`. Legacy flat `panels` are accepted only fo
 }
 ```
 
+Optional `scene_3d` validation mode uses the same narrative-first extraction flow. Use it only for pages where height, floor, connected-location, or camera continuity matters:
+
+```json
+{
+  "spatial_continuity_plan": {
+    "scene_3d_scenes": [
+      {
+        "id": "building_main",
+        "status": "provisional",
+        "usage": "validation_only",
+        "units": "meters",
+        "origin": "building_ground_floor_center",
+        "axes": {"x": "east", "y": "north", "z": "up"},
+        "levels": [
+          {"id": "floor_1", "label": "1층", "z_range": [0, 3]},
+          {"id": "floor_2", "label": "2층", "z_range": [3, 6]}
+        ],
+        "locations": [
+          {"id": "floor_1_lobby", "level_id": "floor_1"},
+          {"id": "floor_2_balcony", "level_id": "floor_2"}
+        ],
+        "fixed_entities": [
+          {"id": "stairs", "type": "landmark", "position": [0, 1.5, 0]},
+          {"id": "balcony_railing", "type": "landmark", "position": [0, 0.5, 3.2]}
+        ],
+        "reconciliation_policy": {
+          "mode": "adjust_soft_geometry_preserve_hard_invariants",
+          "first_panel_calibration_weight": "high"
+        }
+      }
+    ]
+  },
+  "pages": [
+    {
+      "id": "001-two-level-lobby",
+      "spatial_contract": {
+        "coordinate_space": {
+          "type": "scene_3d",
+          "usage": "validation_only",
+          "scene_id": "building_main",
+          "location_id": "floor_1_lobby"
+        },
+        "locks": [
+          {"id": "hero-floor-lock", "type": "hard", "source": "page_plan", "rule": "hero remains on floor_1"},
+          {"id": "camera-fov", "type": "soft", "source": "model_inferred", "rule": "camera FOV may reconcile to match the approved comic panel"}
+        ],
+        "panel_snapshots": [
+          {
+            "panel": 1,
+            "location_id": "floor_1_lobby",
+            "camera": {"position": [-3, -4, 1.6], "look_at": [0, 0.5, 2.2], "fov": 45},
+            "entities": [
+              {"id": "hero", "position": [0, -1, 0], "level_id": "floor_1"},
+              {"id": "villain", "position": [0, 0.7, 3.4], "level_id": "floor_2"}
+            ]
+          }
+        ],
+        "transitions": [],
+        "constraints": [
+          {"id": "hero-on-floor-1", "type": "on_level", "panel": 1, "entity": "hero", "level": "floor_1"},
+          {"id": "villain-above-hero", "type": "above", "panel": 1, "subject": "villain", "anchor": "hero"},
+          {"id": "floor-readability", "type": "visual_evidence_required", "panel": 1, "evidence": ["balcony railing separates floor_2 from floor_1"]}
+        ]
+      }
+    }
+  ]
+}
+```
+
 `references` and top-level `reference_paths` must point to user-provided files or relevant files under `sources/`. The runner rejects references under `output/`.
 
 ## Runner
@@ -344,11 +419,11 @@ python3 "$RUNNER" spatial-preview --plan-file <run-dir>/proposed_storyboard_plan
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <run-dir>/proposed_storyboard_plan.json
 ```
 
-`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite direction vectors, forbidden firing/aim vectors, impossible moving-object paths, missing occluding elements between related subjects/sources, cover `screen_box` misses, non-firing pressure without `no_line_of_fire`, fixed-landmark relation drift, visibility/occlusion or state persistence drift, and missing allowed-transition causes fail before any generation is reserved. This validation checks the approved comic page design; it must not become the driver for page or panel composition. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
+`approve-plan` automatically runs `spatial-check` against every page with `spatial_contract`. Unknown entities, unsupported constraints, target-opposite direction vectors, forbidden firing/aim vectors, impossible moving-object paths, missing occluding elements between related subjects/sources, cover `screen_box` misses, non-firing pressure without `no_line_of_fire`, fixed-landmark relation drift, visibility/occlusion or state persistence drift, missing allowed-transition causes, and hard `scene_3d` invariant failures fail before any generation is reserved. `scene_3d` soft/inferred lock differences are warnings for later inspection/reconciliation, not plan-approval blockers. This validation checks the approved comic page design; it must not become the driver for page or panel composition. Legacy plans without `spatial_contract` remain valid and continue to use free-form `spatial_logic_notes`, `motion_checks`, and `must_match`.
 
 When a top-level `spatial_continuity_plan` is present, `spatial-check` also verifies that every page declares a known `location_id`, references known fixed landmarks through `location_continuity`, and records an explicit `location_transition` or `transition_from_previous` when the location changes. This is a pre-page setting-continuity gate, separate from `spatial_contract`: it prevents accidental room/corridor/street drift before generation while still leaving panel composition narrative-first.
 
-`spatial-preview` writes a read-only static HTML diagram for human inspection of `spatial_contract` positions, vectors, cover/line-of-sight relations, landmark/state continuity constraints, and the current `spatial-check` pass/fail issues. Use `--plan-file`, `--plan-json --output <html>`, or `--run-dir`; the default output is `<plan-stem>_spatial_preview.html` for plan files or `<run-dir>/spatial_contract_preview.html` for approved runs.
+`spatial-preview` writes a read-only static HTML diagram for human inspection of `spatial_contract` positions, vectors, cover/line-of-sight relations, landmark/state continuity constraints, `scene_3d` level/camera/snapshot/transition/lock data, and the current `spatial-check` pass/fail issues plus warnings. Use `--plan-file`, `--plan-json --output <html>`, or `--run-dir`; the default output is `<plan-stem>_spatial_preview.html` for plan files or `<run-dir>/spatial_contract_preview.html` for approved runs.
 
 Optional single-stage targets:
 
@@ -519,10 +594,12 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 - In `sequential_prior_pages` mode, page 2 or later also waits for the same stage's first page to pass `anchor-review`. The runner records this in `stage_anchor_reviews` and injects `Stage level anchor reference` into prompts/subagent prompts.
 - Use `anchor-review --status pass` only after the first page has passed parent `inspect-pass`. Use `anchor-review --status needs_rerun` when the first page is too rough, too polished, or otherwise mismatched for the stage level; this routes the first page back to rerun and resets same-stage review/following gates.
 - `next-batch` injects the top-level `spatial_continuity_plan` and the page's `location_continuity` before narrative-first page design, so subagents keep the same physical set, fixed landmarks, entrances/exits, camera axis, lighting, and allowed page-to-page changes before applying page-specific composition.
-- `next-batch` injects narrative-first page design, spatial validation overlay, and `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved comic page design first, then preserve entity positions, vectors, visibility/occlusion, threat/viewpoint-based cover, line-of-sight, trajectory, negative firing/aim constraints, landmark-relation constraints, and temporal state constraints as validation constraints.
+- `next-batch` injects narrative-first page design, spatial validation overlay, and `spatial_contract` summaries into the stage prompt and subagent prompt. Generated images must preserve the approved comic page design first, then preserve entity positions, vectors, visibility/occlusion, threat/viewpoint-based cover, line-of-sight, trajectory, negative firing/aim constraints, landmark-relation constraints, temporal state constraints, and `scene_3d` hard locks as validation constraints.
+- In `scene_3d validation_only` mode, prompts must explicitly say that hard locks are rerun criteria, soft/inferred geometry may reconcile after parent inspection, and the first panel can act as a calibration anchor. Do not attach 3D render images as `VISUAL_REFERENCE_IMAGE` for this mode.
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
 - Parent `inspect-pass --spatial-verdict needs_rerun` never marks the page passed; it routes the page back to `pending` rerun and resets stage review / following gates.
+- Parent `inspect-pass --spatial-verdict reconciled --reconciliation-note "<note>"` marks the page passed while recording `spatial_reconciliations[]`. Use this only when hard invariants pass and the generated storyboard should calibrate soft/inferred `scene_3d` geometry without harming the approved page plan or prior continuity.
 - `request-revisions --review-manifest <revision_requests.json>` imports `$review-image-overlays` feedback, marks affected page stages `pending`/`rerun_pending`, resets stage-review and following gates, and adds overlay PNG/TXT paths plus request text to the next rerun prompt.
 - `$review-image-overlays create-markup` is valid for subagent self-verification and parent comprehensive verification when the issue can be localized with rect/polygon coordinates; it must still flow through `request-revisions`.
 - If a subagent returns `completed:null`, no final message, or no generated path, do not invent an import path. Route the page to `rerun`.
@@ -539,6 +616,8 @@ For a stage first page in `sequential_prior_pages`, perform `anchor-review` afte
 When `spatial_continuity_plan` is active, inspect every generated page against the approved physical set before judging page-specific `spatial_contract`: same `location_id` must keep the same room/corridor/street, wall relationships, entrances/exits, windows, furniture layout, fixed landmarks, lighting sources, and allowed state changes. Reject pages that silently redraw the same `location_id` as a different space, move a fixed landmark to another wall/side/depth, duplicate or remove a required landmark without `offscreen_landmarks` or an approved crop, or change location without `location_transition`.
 
 When a page has `spatial_contract`, inspect against every entity, panel snapshot, vector, visibility/occlusion, temporal state field, and constraint. Reject target-opposite direction vectors, forbidden firing/aim vectors, moving-object paths that do not move toward the approved destination, occluding elements that are not between the required subjects/sources, `behind_cover_from` that only works from reader POV, forbidden exposure around cover, subjects that were specified as hidden but appear exposed, broken line-of-sight blocking, left/right relation flips, fixed landmark relation drift, a partial occluding element turning into a different barrier without cause, and pose/cover/location/held-prop/state-tag drift without an `allowed_transition`. Record the result with `--spatial-verdict` and `--spatial-note`.
+
+When `spatial_contract.coordinate_space.type` is `scene_3d`, inspect hard invariants before judging soft geometry: level/floor membership, above/below relation, vertical separation, location continuity, transition causes, object state changes, and visual evidence such as balcony/railing/stair cues. Rerun hard failures. If the generated storyboard preserves the approved page design and hard invariants but differs from soft/inferred model-estimated details, record a `reconciled` verdict and describe the calibrated geometry in `--reconciliation-note`.
 
 Character appearance/anatomy is an independent reject criterion, not just a technical-quality note. Unless explicitly approved by the plan or source, rerun pages with missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.
 

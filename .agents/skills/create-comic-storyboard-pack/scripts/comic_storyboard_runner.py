@@ -177,6 +177,13 @@ SPATIAL_CONTINUITY_PLAN_NOTE = (
     "same location_id means the same physical set, fixed landmarks, entrances/exits, camera axes, "
     "and allowed state changes unless a page records an explicit transition."
 )
+TINY_COVER_EXPOSURE_TERMS = {
+    "eyes_only",
+    "weapon_edge_only",
+    "eyes_and_weapon_edge_only",
+    "eyes_and_hand_only",
+    "side_edge_peek_only",
+}
 
 
 def now_iso() -> str:
@@ -3160,6 +3167,107 @@ def constraint_prompt_guard_lines(constraint: dict[str, Any]) -> list[str]:
     return lines
 
 
+def exposure_terms(value: Any) -> set[str]:
+    terms: set[str] = set()
+    for item in as_list(value):
+        normalized = re.sub(r"[^a-z0-9]+", "_", item.lower()).strip("_")
+        if normalized:
+            terms.add(normalized)
+    return terms
+
+
+def is_visual_occlusion_constraint(constraint: dict[str, Any]) -> bool:
+    constraint_type = str(constraint.get("type") or "")
+    return bool(
+        constraint_type in {"cover_between", "behind_cover_from", "line_of_sight_blocked"}
+        or constraint.get("allowed_exposure")
+        or constraint.get("forbidden_exposure")
+    )
+
+
+def constraint_mentions_intentional_exposure(constraint: dict[str, Any]) -> bool:
+    haystack = json.dumps(constraint, ensure_ascii=False).lower()
+    return any(
+        marker in haystack
+        for marker in [
+            "intentional_exposure",
+            "deliberate_exposure",
+            "body_exposed",
+            "firing",
+            "fires",
+            "shoot",
+            "shot",
+            "aims_at",
+            "사격",
+            "발사",
+            "쏘",
+        ]
+    )
+
+
+def visual_occlusion_prompt_text(page: dict[str, Any]) -> str:
+    contract = page.get("spatial_contract", {})
+    if not spatial_contract_has_content(contract):
+        return "- no structured visual occlusion translation needed; preserve ordinary readable foreground/background separation."
+    constraints = [
+        constraint
+        for constraint in contract.get("constraints", [])
+        if is_visual_occlusion_constraint(constraint)
+    ]
+    if not constraints:
+        return "- no cover/line-of-sight exposure constraint supplied; still keep characters visually separated from walls, pillars, and occluding props."
+
+    lines = [
+        "- Translate spatial_contract cover and visibility terms into visual occlusion staging before rendering; do not render allowed_exposure as a literal label or pasted feature.",
+        "- For any occluded character, separate the actor from the wall, pillar, vehicle, furniture, or cover with a clean border, shadow gap, or negative-space sliver so the actor never fuses with the occluder.",
+        "- Use no shared contour/hatching or continuous texture between the character silhouette and the cover surface; cover texture must stop at the cover edge.",
+    ]
+    for constraint in constraints:
+        constraint_id = str(constraint.get("id") or "")
+        constraint_type = str(constraint.get("type") or "")
+        actor = str(spatial_constraint_value(constraint, "actor", "subject", "protected", "target") or "actor")
+        viewpoint = str(
+            spatial_constraint_value(constraint, "viewpoint_entity", "viewpoint", "from_viewpoint", "threat", "source", "from")
+            or "threat/viewpoint"
+        )
+        cover = str(spatial_constraint_value(constraint, "cover", "blocker", "object") or "cover")
+        lines.append(
+            f"- visual occlusion guard {constraint_id}: draw {cover} as a distinct foreground occluder and "
+            f"{actor} as a separate recessed silhouette/pocket behind it from {viewpoint}; "
+            "the cover edge and actor edge must not merge."
+        )
+        if constraint_type == "line_of_sight_blocked":
+            lines.append(
+                f"- blocked-sight guard {constraint_id}: the direct sight/hit line from {viewpoint} to {actor} "
+                f"must be visibly interrupted by {cover}, not merely hidden by the reader camera angle."
+            )
+        allowed_terms = exposure_terms(constraint.get("allowed_exposure"))
+        if constraint.get("allowed_exposure"):
+            lines.append(
+                f"- allowed exposure visual guard {constraint_id}: "
+                f"allowed_exposure={format_spatial_value(constraint.get('allowed_exposure'))} means a tiny, readable peek from behind {cover}, "
+                "not a face, eye, hand, or weapon pasted onto the cover edge."
+            )
+        if allowed_terms & TINY_COVER_EXPOSURE_TERMS:
+            lines.append(
+                f"- tiny exposure guard {constraint_id}: full concealment is acceptable and preferred when "
+                "eyes/hand/weapon-edge exposure would become ambiguous, unreadable, or fused with the cover; "
+                "if shown, keep the peek detached inside a recessed pocket or shadow gap, and do not paste eye/weapon on cover edge."
+            )
+        if constraint_mentions_intentional_exposure(constraint):
+            lines.append(
+                f"- intentional exposure exception {constraint_id}: if the approved beat requires firing, aiming, or a deliberate body peek, "
+                "show only that required exposure while preserving a separated silhouette and clean occlusion edge."
+            )
+        if constraint.get("forbidden_exposure"):
+            lines.append(
+                f"- forbidden exposure visual guard {constraint_id}: "
+                f"forbidden_exposure={format_spatial_value(constraint.get('forbidden_exposure'))}; "
+                "reject torso-visible, above-cover, open-field, or merged cover/actor readings."
+            )
+    return "\n".join(lines)
+
+
 def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
     contract = page.get("spatial_contract", {})
     if not spatial_contract_has_content(contract):
@@ -3443,6 +3551,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     spatial_continuity = spatial_continuity_prompt_text(state, page)
     narrative_plan = narrative_plan_prompt_text(page)
     spatial_validation_overlay = spatial_contract_extraction_prompt_text(page)
+    visual_occlusion = visual_occlusion_prompt_text(page)
     spatial_contract = spatial_contract_prompt_text(page)
     blocking_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
     assigned_description = (
@@ -3567,6 +3676,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Spatial validation overlay:",
             spatial_validation_overlay,
             "",
+            "Visual occlusion rendering rules:",
+            visual_occlusion,
+            "",
             "Structured spatial contract:",
             spatial_contract,
             "",
@@ -3653,6 +3765,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Enforces every Structured spatial contract entity, panel snapshot, vector, visibility, occlusion, and constraint listed above as validation constraints unless they contradict the approved narrative/page design",
             "- For behind_cover_from and line_of_sight_blocked, cover must read from the named threat/viewpoint line of fire or line of sight; reader-side behind is not sufficient",
             "- Reject forbidden_exposure violations such as torso_visible, above_roofline, or open_field when listed; only allowed_exposure may peek past cover",
+            "- Reject wall/cover fusion: character edges must not share a contour, hatching, texture, or unreadable silhouette with walls, pillars, vehicles, furniture, or any cover object",
+            "- Reject eyes, faces, hands, or weapon tips pasted onto a wall/cover edge; for tiny allowed exposure, clear full concealment is acceptable when it prevents fused or unreadable staging",
             "- For no_line_of_fire and not_aims_at, reject firing vectors, dashed pressure/aim lines, projectiles, sight lines, gaze, or weapon direction that points from source/actor to target",
             "- Rejects target-opposite direction vectors, impossible moving-object paths, broken visibility/occlusion or line-of-sight blocking, fixed landmark relation drift, and temporal state drift without an allowed_transition cause",
             "- No impossible staging such as a moving object traveling away from its approved destination or implied path",
@@ -3682,6 +3796,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     spatial_continuity = spatial_continuity_prompt_text(state, page)
     narrative_plan = narrative_plan_prompt_text(page)
     spatial_validation_overlay = spatial_contract_extraction_prompt_text(page)
+    visual_occlusion = visual_occlusion_prompt_text(page)
     spatial_contract = spatial_contract_prompt_text(page)
     revision_overlays = user_revision_overlay_prompt_text(stage)
     blocking_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
@@ -3731,6 +3846,8 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             narrative_plan,
             "Spatial validation overlay:",
             spatial_validation_overlay,
+            "Visual occlusion rendering rules:",
+            visual_occlusion,
             "Structured spatial contract:",
             spatial_contract,
             "Current rerun correction:",
@@ -3742,7 +3859,7 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, the pre-page spatial_continuity_plan, every Structured spatial contract constraint as a validation overlay, threat/viewpoint-based cover, forbidden_exposure, no_line_of_fire/not_aims_at negative constraints, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, the pre-page spatial_continuity_plan, every Structured spatial contract constraint as a validation overlay, the Visual occlusion rendering rules, threat/viewpoint-based cover, forbidden_exposure, wall/cover fusion, pasted eye/face/hand/weapon-edge artifacts, no_line_of_fire/not_aims_at negative constraints, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
             "- description path when stage is storyboard_blocking",

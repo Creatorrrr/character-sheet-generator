@@ -889,6 +889,40 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 self.assertIn("forbidden_exposure", text)
                 self.assertIn("do not draw dashed/aim/pressure line", text)
 
+    def test_cover_contract_prompts_visual_occlusion_translation_before_raw_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            contract = tactical_cover_contract(screen_box=[0.44, 0.2, 0.12, 0.6])
+            contract["constraints"][0]["allowed_exposure"] = ["eyes_and_weapon_edge_only"]
+            plan = plan_with_spatial_contract(contract)
+            plan_path = root / "visual-occlusion-plan.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            run_cli("approve-plan", "--run-dir", str(run_dir), "--plan-file", str(plan_path), cwd=root)
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            stage = state["pages"][0]["stages"][FIRST_STAGE]
+            prompt = Path(stage["prompt_file"]).read_text(encoding="utf-8")
+            subagent_prompt = Path(stage["subagent_prompt_file"]).read_text(encoding="utf-8")
+
+            self.assertLess(prompt.index("Narrative-first page design:"), prompt.index("Visual occlusion rendering rules:"))
+            self.assertLess(prompt.index("Panels on this page:"), prompt.index("Visual occlusion rendering rules:"))
+            self.assertLess(prompt.index("Visual occlusion rendering rules:"), prompt.index("Structured spatial contract:"))
+
+            for text in (prompt, subagent_prompt):
+                self.assertIn("Visual occlusion rendering rules", text)
+                self.assertIn("clean border", text)
+                self.assertIn("shadow gap", text)
+                self.assertIn("negative-space sliver", text)
+                self.assertIn("no shared contour/hatching", text)
+                self.assertIn("do not paste eye/weapon on cover edge", text)
+                self.assertIn("full concealment is acceptable and preferred", text)
+                self.assertIn("eyes_and_weapon_edge_only", text)
+                self.assertIn("Structured spatial contract", text)
+                self.assertIn("reader POV is insufficient", text)
+                self.assertIn("forbidden_exposure", text)
+
     def test_spatial_contract_screen_box_must_intersect_cover_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -405,10 +405,14 @@ def scene_3d_plan():
                         "type": "landmark",
                         "position": [0, 1.5, 0],
                         "preview_geometry": {
-                            "shape": "box",
-                            "size": [1.2, 2.6, 3.4],
+                            "shape": "building_shell",
+                            "size": [1.8, 2.6, 3.4],
                             "anchor": "base_center",
                             "style": "building",
+                            "parts": [
+                                {"shape": "floor_slab", "size": [1.8, 2.6, 0.1], "offset": [0, 0, 0], "style": "floor"},
+                                {"shape": "pillar", "size": [0.18, 0.18, 3.4], "offset": [-0.8, -1.2, 0], "style": "pillar"},
+                            ],
                         },
                     },
                     {
@@ -431,6 +435,17 @@ def scene_3d_plan():
                             "size": [1.1, 0.22, 2.1],
                             "anchor": "center",
                             "style": "door",
+                        },
+                    },
+                    {
+                        "id": "round_column",
+                        "type": "pillar",
+                        "position": [1.2, -0.4, 0],
+                        "preview_geometry": {
+                            "shape": "cylinder",
+                            "size": [0.42, 0.42, 3.0],
+                            "anchor": "base_center",
+                            "style": "pillar",
                         },
                     },
                 ],
@@ -463,7 +478,12 @@ def scene_3d_plan():
             "location_id": "floor_1_lobby",
         },
         "entities": [
-            {"id": "hero", "type": "character", "role": "ground-floor protagonist"},
+            {
+                "id": "hero",
+                "type": "character",
+                "role": "ground-floor protagonist",
+                "preview_geometry": {"shape": "humanoid_mannequin", "size": [0.55, 0.35, 1.65], "anchor": "base_center", "style": "humanoid"},
+            },
             {"id": "villain", "type": "character", "role": "second-floor observer"},
             {"id": "lobby_door", "type": "door", "role": "state-changing landmark"},
             {"id": "balcony_railing", "type": "landmark", "role": "second-floor level evidence"},
@@ -527,6 +547,17 @@ def scene_3d_plan():
                 "from_state": "closed",
                 "to_state": "open",
                 "cause": "hero opens the lobby door before moving",
+            }
+        ],
+        "annotations": [
+            {
+                "id": "height-relation-note",
+                "panel": 1,
+                "text": "villain is above hero and separated by balcony railing",
+                "entities": ["hero", "villain", "balcony_railing"],
+                "line_from": "hero",
+                "line_to": "villain",
+                "position": [0.35, 0.2, 2.2],
             }
         ],
         "constraints": [
@@ -1332,6 +1363,16 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(approved_contract["coordinate_space"]["type"], "scene_3d")
             self.assertEqual(state_contract["transitions"][0]["id"], "door-opened-by-hero")
             self.assertEqual(state_contract["locks"][0]["type"], "hard")
+            self.assertEqual(state_contract["annotations"][0]["id"], "height-relation-note")
+            self.assertEqual(state_contract["entities"][0]["preview_geometry"]["shape"], "humanoid_mannequin")
+            self.assertEqual(
+                approved["spatial_continuity_plan"]["scene_3d_scenes"][0]["fixed_entities"][0]["preview_geometry"]["shape"],
+                "building_shell",
+            )
+            self.assertEqual(
+                approved["spatial_continuity_plan"]["scene_3d_scenes"][0]["fixed_entities"][3]["preview_geometry"]["shape"],
+                "cylinder",
+            )
 
             preview = run_cli("spatial-preview", "--run-dir", str(run_dir), cwd=root)
             self.assertIn("SPATIAL_CHECK: pass", preview.stdout)
@@ -1361,23 +1402,45 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn('data-scene3d-layer="obstacles"', html)
             self.assertIn('data-scene3d-layer="relations"', html)
             self.assertIn('data-scene3d-layer="vectors"', html)
+            self.assertIn('data-scene3d-layer="annotations"', html)
             self.assertIn('data-scene3d-layer="ghosts"', html)
             self.assertIn('data-scene3d-status-strip', html)
             self.assertIn('data-scene3d-level-rail', html)
             self.assertNotIn('class="raw-2d-projection"', html)
             self.assertNotIn("Raw 2D Projection", html)
             self.assertIn("preview_geometry", html)
+            self.assertIn("humanoid_mannequin", html)
+            self.assertIn("building_shell", html)
+            self.assertIn("cylinder", html)
+            self.assertIn("height-relation-note", html)
             self.assertIn("visibleLayers", html)
             self.assertIn("levelPlaneBounds", html)
             self.assertIn("levelColors", html)
             self.assertIn("drawWireBox", html)
+            self.assertIn("drawHumanoidMannequin", html)
+            self.assertIn("drawBuildingShell", html)
+            self.assertIn("drawCylinder", html)
+            self.assertIn("drawAnnotation", html)
             self.assertIn("drawOrientedEntity", html)
             self.assertIn("drawRelationOverlay", html)
+            self.assertIn("__spatialPreviewRender", html)
             self.assertIn("placeSceneLabel", html)
             self.assertIn("labelBoxes", html)
             self.assertIn("compactEntityLabel", html)
             self.assertIn("data-preview-targets", html)
             self.assertIn("HERO floor_1", html)
+
+            manifest_result = run_cli("spatial-render-manifest", "--run-dir", str(run_dir), "--stage", FIRST_STAGE, cwd=root)
+            self.assertIn("SPATIAL_RENDER_MANIFEST:", manifest_result.stdout)
+            manifest = json.loads(
+                (run_dir / "spatial_renders" / FIRST_STAGE / "render_manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["type"], "spatial_render_manifest")
+            views = {item["view"] for item in manifest["items"]}
+            self.assertTrue({"camera", "iso", "side", "top"}.issubset(views))
+            self.assertTrue(all(item["required_for_review"] for item in manifest["items"]))
+            self.assertTrue(all(item["output_png"].endswith(".png") for item in manifest["items"]))
+            self.assertIn("spatial_contract_preview.html", manifest["html_path"])
 
             run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
             state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))

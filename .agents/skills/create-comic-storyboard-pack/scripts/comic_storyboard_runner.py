@@ -672,6 +672,7 @@ def normalize_spatial_contract(raw_contract: Any) -> dict[str, Any]:
             "panel_snapshots": [],
             "transitions": [],
             "locks": [],
+            "annotations": [],
             "constraints": [],
         }
     if not isinstance(raw_contract, dict):
@@ -690,6 +691,7 @@ def normalize_spatial_contract(raw_contract: Any) -> dict[str, Any]:
         ],
         "transitions": normalize_spatial_records(raw_contract.get("transitions"), "transition"),
         "locks": normalize_spatial_records(raw_contract.get("locks"), "lock"),
+        "annotations": normalize_spatial_records(raw_contract.get("annotations"), "annotation"),
         "constraints": [
             normalize_spatial_constraint(constraint, index)
             for index, constraint in enumerate(constraints, start=1)
@@ -706,6 +708,7 @@ def spatial_contract_has_content(contract: Any) -> bool:
         or contract.get("panel_snapshots")
         or contract.get("transitions")
         or contract.get("locks")
+        or contract.get("annotations")
         or contract.get("constraints")
     )
 
@@ -2265,6 +2268,23 @@ def render_spatial_preview_transition_list(page: dict[str, Any]) -> str:
     return "\n".join(items)
 
 
+def render_spatial_preview_annotation_list(page: dict[str, Any]) -> str:
+    contract = page.get("spatial_contract", {})
+    items = []
+    for annotation in contract.get("annotations", []):
+        targets_attr = preview_targets_attribute(preview_target_entities(annotation))
+        text = annotation.get("text") or annotation.get("note") or annotation.get("value") or ""
+        panel = panel_key(annotation.get("panel"))
+        panel_label = f"panel {panel} | " if panel else ""
+        items.append(
+            f'<li class="annotation"{targets_attr}><code>{escape_html(annotation.get("id") or "")}</code> '
+            f'<small>{escape_html(panel_label + str(text))}</small></li>'
+        )
+    if not items:
+        items.append('<li class="empty">No annotations.</li>')
+    return "\n".join(items)
+
+
 PREVIEW_TARGET_FIELDS = (
     "actor",
     "anchor",
@@ -2280,6 +2300,8 @@ PREVIEW_TARGET_FIELDS = (
     "threat",
     "vector_entity",
     "viewpoint_entity",
+    "line_from",
+    "line_to",
 )
 
 
@@ -2290,6 +2312,8 @@ def preview_target_entities(item: dict[str, Any]) -> list[str]:
         if isinstance(value, str) and value:
             targets.add(value)
         elif isinstance(value, list):
+            if field in {"line_from", "line_to"} and all(isinstance(entry, (int, float)) for entry in value):
+                continue
             targets.update(str(entry) for entry in value if str(entry or ""))
     entities = item.get("entities")
     if isinstance(entities, list):
@@ -2430,6 +2454,7 @@ def render_scene_3d_preview(page: dict[str, Any], scene: dict[str, Any] | None) 
       <button type="button" data-scene3d-layer="relations">Relations</button>
       <button type="button" data-scene3d-layer="vectors">Vectors</button>
       <button type="button" data-scene3d-layer="levels">Levels</button>
+      <button type="button" data-scene3d-layer="annotations">Annotations</button>
       <button type="button" data-scene3d-layer="camera">Camera</button>
       <button type="button" data-scene3d-layer="ghosts">Ghosts</button>
     </span>
@@ -2482,6 +2507,8 @@ def render_spatial_preview_page(page: dict[str, Any], issues: list[str], scenes_
       <ul class="constraint-list">{render_spatial_preview_lock_list(page)}</ul>
       <h3>Transitions</h3>
       <ul class="constraint-list">{render_spatial_preview_transition_list(page)}</ul>
+      <h3>Annotations</h3>
+      <ul class="constraint-list">{render_spatial_preview_annotation_list(page)}</ul>
       <h3>Constraints</h3>
       <ul class="constraint-list">{render_spatial_preview_constraint_list(page)}</ul>
       <h3>Issues</h3>
@@ -2709,7 +2736,8 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
             vectors: false,
             camera: false,
             ghosts: false,
-            levels: true
+            levels: true,
+            annotations: true
           }},
           highlightTargets: []
         }};
@@ -2752,24 +2780,45 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
         if (/building|wall|pillar|breach/.test(id + ' ' + role + ' ' + type)) return 'building';
         if (/apc|vehicle|car/.test(id + ' ' + role + ' ' + type)) return 'vehicle';
         if (/slab|ramp|slope/.test(id + ' ' + role + ' ' + type)) return 'slab';
+        if (/floor/.test(id + ' ' + role + ' ' + type)) return 'floor';
+        if (/ceiling/.test(id + ' ' + role + ' ' + type)) return 'ceiling';
         if (/debris|server|cover|railing/.test(id + ' ' + role + ' ' + type)) return 'cover';
-        if (type === 'character') return 'actor';
+        if (/pillar|column/.test(id + ' ' + role + ' ' + type)) return 'pillar';
+        if (type === 'character') return 'humanoid';
         return type || 'object';
       }}
 
       function defaultGeometryFor(meta) {{
         const style = entityStyle(meta);
         const descriptor = String(((meta || {{}}).id || '') + ' ' + ((meta || {{}}).role || '') + ' ' + ((meta || {{}}).type || '')).toLowerCase();
+        if (style === 'humanoid') return {{ shape: 'humanoid_mannequin', size: [0.55, 0.35, 1.72], anchor: 'base_center', style }};
+        if (style === 'building' && /shell|room|lobby|building/.test(descriptor)) return {{ shape: 'building_shell', size: [4.2, 3.2, 3.0], anchor: 'base_center', style }};
         if (style === 'building' && /floor2|floor_2|breach/.test(descriptor)) return {{ shape: 'box', size: [4.8, 2.4, 2.3], anchor: 'center', style }};
-        if (style === 'building' && /wall/.test(descriptor)) return {{ shape: 'box', size: [0.45, 2.4, 2.2], anchor: 'center', style }};
-        if (style === 'building' && /pillar/.test(descriptor)) return {{ shape: 'box', size: [0.75, 0.75, 2.6], anchor: 'center', style }};
+        if (style === 'building' && /wall/.test(descriptor)) return {{ shape: 'wall', size: [0.45, 2.4, 2.2], anchor: 'center', style }};
+        if (style === 'building' && /pillar|column/.test(descriptor)) return {{ shape: 'pillar', size: [0.75, 0.75, 2.6], anchor: 'center', style }};
         if (style === 'building') return {{ shape: 'box', size: [1.2, 0.55, 3.8], anchor: 'base_center', style }};
         if (style === 'vehicle') return {{ shape: 'box', size: [3.4, 1.7, 1.35], anchor: 'base_center', style }};
-        if (style === 'slab') return {{ shape: 'box', size: [3.6, 1.45, 0.35], anchor: 'base_center', style }};
+        if (style === 'slab') return {{ shape: 'floor_slab', size: [3.6, 1.45, 0.35], anchor: 'base_center', style }};
+        if (style === 'floor') return {{ shape: 'floor_slab', size: [3.2, 2.4, 0.08], anchor: 'base_center', style }};
+        if (style === 'ceiling') return {{ shape: 'ceiling_slab', size: [3.2, 2.4, 0.08], anchor: 'base_center', style }};
         if (style === 'cover') return {{ shape: 'box', size: [2.0, 0.8, 1.0], anchor: 'base_center', style }};
         if (style === 'door') return {{ shape: 'box', size: [1.1, 0.22, 2.0], anchor: 'base_center', style }};
         if (style === 'landmark') return {{ shape: 'box', size: [1.0, 1.0, 0.45], anchor: 'base_center', style }};
+        if (/cylinder|barrel|column/.test(descriptor)) return {{ shape: 'cylinder', size: [0.8, 0.8, 1.0], anchor: 'base_center', style }};
         return null;
+      }}
+
+      function normalizePreviewShape(shape) {{
+        const requested = String(shape || 'box').toLowerCase();
+        const aliases = {{
+          floor: 'floor_slab',
+          ceiling: 'ceiling_slab',
+          object_box: 'box',
+          room: 'building_shell'
+        }};
+        const normalized = aliases[requested] || requested;
+        const supported = new Set(['humanoid_mannequin', 'building_shell', 'wall', 'pillar', 'floor_slab', 'ceiling_slab', 'box', 'cylinder', 'flat_plane']);
+        return supported.has(normalized) ? normalized : 'box';
       }}
 
       function geometryForEntity(meta) {{
@@ -2777,7 +2826,7 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
         const fallback = defaultGeometryFor(meta);
         if (!explicit && !fallback) return null;
         const source = Object.assign({{}}, fallback || {{}}, explicit || {{}});
-        if (source.shape && source.shape !== 'box') return null;
+        const shape = normalizePreviewShape(source.shape || (fallback || {{}}).shape || 'box');
         const rawSize = Array.isArray(source.size) ? source.size : (fallback ? fallback.size : null);
         if (!rawSize) return null;
         const size = [
@@ -2786,11 +2835,12 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
           Math.max(0.05, numberAt(rawSize, 2, 0.5))
         ];
         return {{
-          shape: 'box',
+          shape,
           size,
           yaw: Number(source.yaw_degrees || source.yaw || 0) * Math.PI / 180,
           anchor: String(source.anchor || 'base_center'),
-          style: String(source.style || entityStyle(meta))
+          style: String(source.style || entityStyle(meta)),
+          parts: Array.isArray(source.parts) ? source.parts : []
         }};
       }}
 
@@ -3083,7 +3133,11 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
         if (key === 'slab') return {{ stroke: '#7c2d12', fill: 'rgba(251, 146, 60, .14)' }};
         if (key === 'cover') return {{ stroke: '#166534', fill: 'rgba(34, 197, 94, .13)' }};
         if (key === 'door') return {{ stroke: '#92400e', fill: 'rgba(245, 158, 11, .14)' }};
-        if (key === 'actor') return {{ stroke: '#92400e', fill: 'rgba(251, 191, 36, .18)' }};
+        if (key === 'humanoid' || key === 'actor') return {{ stroke: '#92400e', fill: 'rgba(251, 191, 36, .18)' }};
+        if (key === 'floor') return {{ stroke: '#0284c7', fill: 'rgba(186, 230, 253, .18)' }};
+        if (key === 'ceiling') return {{ stroke: '#7c3aed', fill: 'rgba(221, 214, 254, .12)' }};
+        if (key === 'pillar') return {{ stroke: '#475569', fill: 'rgba(100, 116, 139, .16)' }};
+        if (key === 'annotation') return {{ stroke: '#db2777', fill: 'rgba(251, 207, 232, .28)' }};
         return {{ stroke: '#64748b', fill: 'rgba(203, 213, 225, .16)' }};
       }}
 
@@ -3127,6 +3181,183 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
           ctx.stroke();
         }});
         ctx.restore();
+      }}
+
+      function rotateLocalYaw(point, yaw) {{
+        const cosYaw = Math.cos(yaw || 0);
+        const sinYaw = Math.sin(yaw || 0);
+        return [
+          point[0] * cosYaw - point[1] * sinYaw,
+          point[0] * sinYaw + point[1] * cosYaw,
+          point[2]
+        ];
+      }}
+
+      function drawCylinder(ctx, projector, position, geometry, meta, viewer, entityId, alpha) {{
+        const base = vec3(position);
+        if (!base || !geometry) return;
+        const radiusX = geometry.size[0] / 2;
+        const radiusY = geometry.size[1] / 2;
+        const height = geometry.size[2];
+        const baseZ = geometry.anchor === 'center' ? base[2] - height / 2 : base[2];
+        const center = [base[0], base[1], baseZ];
+        const colors = geometryColors((geometry || {{}}).style || entityStyle(meta));
+        const drawAlpha = viewer ? alphaForHighlight(viewer, entityId, alpha) : alpha;
+        const bottom = [];
+        const top = [];
+        for (let index = 0; index < 16; index += 1) {{
+          const angle = (Math.PI * 2 * index) / 16;
+          const local = [Math.cos(angle) * radiusX, Math.sin(angle) * radiusY, 0];
+          const rotated = rotateLocalYaw(local, geometry.yaw || 0);
+          bottom.push([center[0] + rotated[0], center[1] + rotated[1], center[2]]);
+          top.push([center[0] + rotated[0], center[1] + rotated[1], center[2] + height]);
+        }}
+        const drawLoop = points => {{
+          const projected = points.map(point => projector.point(point));
+          ctx.beginPath();
+          projected.forEach((point, index) => {{
+            if (index === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+          }});
+          ctx.closePath();
+        }};
+        ctx.save();
+        ctx.globalAlpha = drawAlpha;
+        ctx.fillStyle = colors.fill;
+        ctx.strokeStyle = colors.stroke;
+        ctx.lineWidth = 1.25;
+        drawLoop(top);
+        ctx.fill();
+        ctx.stroke();
+        drawLoop(bottom);
+        ctx.stroke();
+        [0, 4, 8, 12].forEach(index => drawLine(ctx, projector, bottom[index], top[index], colors.stroke, drawAlpha, 1, true));
+        ctx.restore();
+      }}
+
+      function partGeometryFrom(parent, part, fallbackShape) {{
+        const rawSize = Array.isArray(part.size) ? part.size : parent.size;
+        return {{
+          shape: normalizePreviewShape(part.shape || fallbackShape || 'box'),
+          size: [
+            Math.max(0.05, numberAt(rawSize, 0, parent.size[0])),
+            Math.max(0.05, numberAt(rawSize, 1, parent.size[1])),
+            Math.max(0.05, numberAt(rawSize, 2, parent.size[2]))
+          ],
+          yaw: (parent.yaw || 0) + Number(part.yaw_degrees || part.yaw || 0) * Math.PI / 180,
+          anchor: String(part.anchor || 'base_center'),
+          style: String(part.style || part.shape || parent.style || 'building'),
+          parts: []
+        }};
+      }}
+
+      function partPositionFrom(base, parent, part) {{
+        const rawOffset = Array.isArray(part.offset) ? part.offset : [0, 0, 0];
+        const offset = rotateLocalYaw([
+          numberAt(rawOffset, 0, 0),
+          numberAt(rawOffset, 1, 0),
+          numberAt(rawOffset, 2, 0)
+        ], parent.yaw || 0);
+        return [base[0] + offset[0], base[1] + offset[1], base[2] + offset[2]];
+      }}
+
+      function defaultBuildingShellParts(geometry) {{
+        const sx = geometry.size[0];
+        const sy = geometry.size[1];
+        const sz = geometry.size[2];
+        const thin = Math.max(0.06, Math.min(sx, sy, sz) * 0.035);
+        return [
+          {{ shape: 'floor_slab', style: 'floor', size: [sx, sy, thin], offset: [0, 0, 0], anchor: 'base_center' }},
+          {{ shape: 'ceiling_slab', style: 'ceiling', size: [sx, sy, thin], offset: [0, 0, sz - thin], anchor: 'base_center' }},
+          {{ shape: 'wall', style: 'building', size: [sx, thin, sz], offset: [0, -sy / 2, 0], anchor: 'base_center' }},
+          {{ shape: 'wall', style: 'building', size: [sx, thin, sz], offset: [0, sy / 2, 0], anchor: 'base_center' }},
+          {{ shape: 'wall', style: 'building', size: [thin, sy, sz], offset: [-sx / 2, 0, 0], anchor: 'base_center' }},
+          {{ shape: 'wall', style: 'building', size: [thin, sy, sz], offset: [sx / 2, 0, 0], anchor: 'base_center' }},
+          {{ shape: 'pillar', style: 'pillar', size: [thin * 1.6, thin * 1.6, sz], offset: [-sx / 2, -sy / 2, 0], anchor: 'base_center' }},
+          {{ shape: 'pillar', style: 'pillar', size: [thin * 1.6, thin * 1.6, sz], offset: [sx / 2, sy / 2, 0], anchor: 'base_center' }}
+        ];
+      }}
+
+      function drawBuildingShell(ctx, projector, position, geometry, meta, viewer, entityId, alpha) {{
+        const base = vec3(position);
+        if (!base || !geometry) return;
+        drawWireBox(ctx, projector, base, Object.assign({{}}, geometry, {{ shape: 'box', style: geometry.style || 'building' }}), meta, viewer, entityId, alpha * 0.18);
+        const parts = geometry.parts.length ? geometry.parts : defaultBuildingShellParts(geometry);
+        parts.forEach((part, index) => {{
+          const partGeometry = partGeometryFrom(geometry, part, part.shape || 'box');
+          const partPosition = partPositionFrom(base, geometry, part);
+          const partMeta = Object.assign({{}}, meta || {{}}, {{ preview_geometry: partGeometry, id: entityId + '-part-' + index }});
+          if (partGeometry.shape === 'cylinder') drawCylinder(ctx, projector, partPosition, partGeometry, partMeta, viewer, entityId, alpha * 0.48);
+          else drawWireBox(ctx, projector, partPosition, partGeometry, partMeta, viewer, entityId, alpha * 0.48);
+        }});
+      }}
+
+      function drawHumanoidMannequin(ctx, projector, position, geometry, entity, label, alpha, viewer, entityId, priority) {{
+        const base = vec3(position);
+        if (!base) return;
+        const vector = directionVector(entity) || [0, 1, 0];
+        const forward = normalizeVec([vector[0], vector[1], 0]);
+        const right = normalizeVec([forward[1], -forward[0], 0]);
+        const height = Math.max(0.8, geometry ? geometry.size[2] : 1.7);
+        const shoulder = Math.max(0.22, geometry ? geometry.size[0] : 0.55);
+        const hip = shoulder * 0.58;
+        const crouch = /crouch|kneel|앉|무릎|웅크/.test(String((entity || {{}}).pose || '').toLowerCase()) ? 0.76 : 1;
+        const footZ = base[2];
+        const pelvis = [base[0], base[1], footZ + height * 0.48 * crouch];
+        const chest = [base[0], base[1], footZ + height * 0.72 * crouch];
+        const neck = [base[0], base[1], footZ + height * 0.84 * crouch];
+        const head = [base[0], base[1], footZ + height * 0.93 * crouch];
+        const leftShoulder = addVec(chest, scaleVec(right, shoulder / 2));
+        const rightShoulder = addVec(chest, scaleVec(right, -shoulder / 2));
+        const leftHip = addVec(pelvis, scaleVec(right, hip / 2));
+        const rightHip = addVec(pelvis, scaleVec(right, -hip / 2));
+        const leftHand = addVec(addVec(leftShoulder, scaleVec(right, shoulder * 0.25)), scaleVec(forward, shoulder * 0.35));
+        leftHand[2] -= height * 0.24 * crouch;
+        const rightHand = addVec(addVec(rightShoulder, scaleVec(right, -shoulder * 0.25)), scaleVec(forward, shoulder * 0.35));
+        rightHand[2] -= height * 0.24 * crouch;
+        const leftFoot = addVec(addVec(base, scaleVec(right, shoulder * 0.32)), scaleVec(forward, -shoulder * 0.12));
+        const rightFoot = addVec(addVec(base, scaleVec(right, -shoulder * 0.32)), scaleVec(forward, shoulder * 0.12));
+        const drawAlpha = viewer ? alphaForHighlight(viewer, entityId, alpha) : alpha;
+        const color = '#92400e';
+        ctx.save();
+        ctx.globalAlpha = drawAlpha;
+        ctx.strokeStyle = color;
+        ctx.fillStyle = 'rgba(251, 191, 36, .22)';
+        ctx.lineWidth = 1.8;
+        [[head, neck], [neck, chest], [chest, pelvis], [leftShoulder, rightShoulder], [leftHip, rightHip], [leftShoulder, leftHand], [rightShoulder, rightHand], [leftHip, leftFoot], [rightHip, rightFoot]].forEach(pair => {{
+          const start = projector.point(pair[0]);
+          const end = projector.point(pair[1]);
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+        }});
+        const headPoint = projector.point(head);
+        ctx.beginPath();
+        ctx.arc(headPoint.x, headPoint.y, Math.max(4, projector.scale * height * 0.035), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        drawArrowLine(ctx, projector, head, addVec(head, scaleVec(forward, shoulder * 0.65)), '#0f766e', drawAlpha * 0.75, 1.2, false);
+        if (label) drawSceneLabel(ctx, viewer, headPoint, label, priority || 4, drawAlpha, entityId || label);
+      }}
+
+      function drawPreviewGeometry(ctx, projector, position, geometry, meta, viewer, entityId, alpha, label, priority, entity) {{
+        if (!geometry) return false;
+        if (geometry.shape === 'humanoid_mannequin') {{
+          drawHumanoidMannequin(ctx, projector, position, geometry, entity || meta || {{}}, label, alpha, viewer, entityId, priority);
+          return true;
+        }}
+        if (geometry.shape === 'building_shell') {{
+          drawBuildingShell(ctx, projector, position, geometry, meta, viewer, entityId, alpha);
+          return true;
+        }}
+        if (geometry.shape === 'cylinder') {{
+          drawCylinder(ctx, projector, position, geometry, meta, viewer, entityId, alpha);
+          return true;
+        }}
+        drawWireBox(ctx, projector, position, geometry, meta, viewer, entityId, alpha);
+        return true;
       }}
 
       function directionVector(entity) {{
@@ -3447,10 +3678,10 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
 
       function relationTargetIds(item) {{
         const ids = [];
-        ['actor', 'anchor', 'cover', 'destination_entity', 'entity', 'object', 'occluder', 'origin_entity', 'source', 'subject', 'target', 'threat', 'vector_entity', 'viewpoint_entity'].forEach(field => {{
+        ['actor', 'anchor', 'cover', 'destination_entity', 'entity', 'object', 'occluder', 'origin_entity', 'source', 'subject', 'target', 'threat', 'vector_entity', 'viewpoint_entity', 'line_from', 'line_to'].forEach(field => {{
           const value = (item || {{}})[field];
           if (typeof value === 'string' && value) ids.push(value);
-          else if (Array.isArray(value)) value.forEach(entry => {{ if (entry) ids.push(String(entry)); }});
+          else if (Array.isArray(value) && !value.every(entry => typeof entry === 'number')) value.forEach(entry => {{ if (entry) ids.push(String(entry)); }});
         }});
         if (Array.isArray((item || {{}}).entities)) item.entities.forEach(entry => {{ if (entry) ids.push(String(entry)); }});
         return Array.from(new Set(ids));
@@ -3511,6 +3742,55 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
         }});
       }}
 
+      function annotationEndpoint(value, positions) {{
+        const direct = vec3(value);
+        if (direct) return direct;
+        const key = String(value || '');
+        return key && positions[key] ? positions[key] : null;
+      }}
+
+      function drawAnnotation(ctx, projector, annotation, positions, viewer) {{
+        const targets = relationTargetIds(annotation);
+        const alpha = alphaForTargets(viewer, targets, 0.82);
+        const from = annotationEndpoint(annotation.line_from, positions) || firstPosition(positions, targets);
+        const to = annotationEndpoint(annotation.line_to, positions);
+        const notePoint = vec3(annotation.position) || to || from;
+        if (!notePoint) return;
+        const color = '#db2777';
+        if (from && to) drawArrowLine(ctx, projector, from, to, color, alpha, 1.25, true);
+        else if (from && notePoint) drawLine(ctx, projector, from, notePoint, color, alpha, 1.15, true);
+        const canvasPoint = projector.point(notePoint);
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(251, 207, 232, .82)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(canvasPoint.x, canvasPoint.y - 5);
+        ctx.lineTo(canvasPoint.x + 5, canvasPoint.y);
+        ctx.lineTo(canvasPoint.x, canvasPoint.y + 5);
+        ctx.lineTo(canvasPoint.x - 5, canvasPoint.y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        const text = String(annotation.text || annotation.note || annotation.id || 'note').slice(0, 14);
+        drawSceneLabel(ctx, viewer, canvasPoint, text, 4, alpha, String(annotation.id || text));
+      }}
+
+      function drawAnnotations(ctx, projector, payload, viewer) {{
+        if (!layerVisible(viewer, 'annotations')) return;
+        const snapshot = activeSnapshot(viewer);
+        if (!snapshot) return;
+        const positions = entityPositionMap(payload, snapshot);
+        const activePanel = viewer.state.activePanel;
+        const annotations = ((((payload || {{}}).contract || {{}}).annotations) || []);
+        annotations.forEach(annotation => {{
+          if (!itemMatchesActivePanel(annotation, activePanel)) return;
+          drawAnnotation(ctx, projector, annotation, positions, viewer);
+        }});
+      }}
+
       function drawSnapshotEntities(ctx, projector, snapshot, active, viewer) {{
         if (!active && !layerVisible(viewer, 'ghosts')) return;
         const alpha = active ? 1 : 0.28;
@@ -3526,7 +3806,16 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
           const label = pointLabelFor(viewer, entityId, meta, snapshot.panel, active, false);
           const priority = pointPriority(entityId, meta, entity, active, false);
           const geometry = geometryForEntity(meta);
-          if (geometry && layer !== 'actors') drawWireBox(ctx, projector, position, geometry, meta, viewer, entityId, active ? 0.58 : 0.18);
+          if (geometry && geometry.shape === 'humanoid_mannequin') {{
+            drawPreviewGeometry(ctx, projector, position, geometry, meta, viewer, entityId, active ? 0.88 : 0.26, label, priority, entity);
+            if (directionVector(entity) && layerVisible(viewer, 'vectors')) {{
+              const vector = directionVector(entity);
+              const vectorAlpha = viewer ? alphaForHighlight(viewer, entityId, active ? 0.86 : 0.24) : alpha;
+              drawArrowLine(ctx, projector, position, addVec(position, scaleVec(normalizeVec(vector), active ? 1.0 : 0.72)), '#0f766e', vectorAlpha, active ? 1.8 : 1.1, !active);
+            }}
+            return;
+          }}
+          if (geometry && layer !== 'actors') drawPreviewGeometry(ctx, projector, position, geometry, meta, viewer, entityId, active ? 0.58 : 0.18, '', priority, entity);
           if (layer === 'actors' || directionVector(entity)) {{
             const fill = layer === 'actors' ? pointFill : (active ? '#67e8f9' : '#bae6fd');
             drawOrientedEntity(ctx, projector, entity, meta, label, fill, alpha, viewer, entityId, priority, active);
@@ -3562,7 +3851,7 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
           if (!layerVisible(viewer, layer)) return;
           const geometry = geometryForEntity(meta);
           const alpha = fixedIds.has(entityId) ? 0.48 : 0.24;
-          if (geometry) drawWireBox(ctx, projector, position, geometry, meta, viewer, entityId, alpha);
+          if (geometry) drawPreviewGeometry(ctx, projector, position, geometry, meta, viewer, entityId, alpha, '', pointPriority(entityId, meta, entity, false, true), entity);
           const label = pointLabelFor(viewer, entityId, meta, '', false, true);
           const priority = pointPriority(entityId, meta, entity, false, true);
           drawPoint(ctx, projector, position, label, '#93c5fd', geometry ? alpha * 0.88 : alpha, geometry ? 3.2 : 4.6, viewer, entityId, priority);
@@ -3571,6 +3860,7 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
           drawTransitionPaths(ctx, projector, viewer.payload, viewer);
           drawRelationOverlay(ctx, projector, viewer.payload, viewer);
         }}
+        drawAnnotations(ctx, projector, viewer.payload, viewer);
         const snapshots = panelSnapshots(viewer.payload);
         snapshots.forEach(snapshot => {{
           if (panelKey(snapshot.panel) !== viewer.state.activePanel) drawSnapshotEntities(ctx, projector, snapshot, false, viewer);
@@ -3905,6 +4195,40 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
       document.querySelectorAll('canvas[data-scene3d]').forEach(canvas => {{
         createSceneViewer(canvas);
       }});
+
+      function findSceneViewerForPage(pageId) {{
+        const pageSelector = pageId ? '[data-preview-page-id="' + String(pageId).replace(/"/g, '\\"') + '"]' : '.page-card';
+        const pageCard = document.querySelector(pageSelector);
+        const canvas = pageCard ? pageCard.querySelector('canvas[data-scene3d]') : document.querySelector('canvas[data-scene3d]');
+        return canvas ? canvas._scene3dViewer : null;
+      }}
+
+      window.__spatialPreviewRender = {{
+        apply(options) {{
+          const request = options || {{}};
+          const viewer = findSceneViewerForPage(request.pageId || request.page_id || '');
+          if (!viewer) return {{ ok: false, error: 'scene viewer not found' }};
+          if (request.panel != null) viewer.state.activePanel = panelKey(request.panel);
+          if (request.labelMode) viewer.state.labelMode = String(request.labelMode);
+          if (Array.isArray(request.highlightTargets)) viewer.state.highlightTargets = request.highlightTargets.map(String);
+          if (request.layers && typeof request.layers === 'object') {{
+            Object.keys(request.layers).forEach(layer => {{
+              viewer.state.visibleLayers[layer] = Boolean(request.layers[layer]);
+            }});
+          }}
+          const view = String(request.view || request.preset || '').toLowerCase();
+          if (view) applyPreset(viewer, view);
+          else drawSceneViewer(viewer, true);
+          const pageCard = viewer.canvas.closest('.page-card');
+          return {{
+            ok: true,
+            pageId: pageCard ? pageCard.dataset.previewPageId : '',
+            panel: viewer.state.activePanel,
+            view: view || 'current',
+            canvasSelector: '[data-preview-page-id="' + (pageCard ? pageCard.dataset.previewPageId : '') + '"] canvas[data-scene3d]'
+          }};
+        }}
+      }};
 
       function setPageHighlight(element, targets) {{
         const pageCard = element.closest('.page-card');
@@ -5393,7 +5717,7 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
                 "- scene_3d validation-only mode: use this as a provisional validation model, not as a composition driver or automatic rendered reference.",
                 "- Preserve the approved narrative/page design first; hard locks are rerun criteria, while soft/inferred geometry may reconcile after parent inspection if the page design and prior continuity remain intact.",
                 "- If this is the first page/panel with no prior spatial continuity, the first panel is a calibration anchor for soft/inferred scene geometry.",
-                "- Do not attach or imitate a headless 3D render unless a later workflow explicitly enables camera_render_reference.",
+                "- Camera-direction and auxiliary scene_3d render PNGs are inspection aids only: use them to sanity-check the contract before approval and parent inspection, but do not attach them as generation references or imitate them as final comic composition.",
             ]
         )
     for lock in contract.get("locks", []):
@@ -5410,6 +5734,13 @@ def spatial_contract_prompt_text(page: dict[str, Any]) -> str:
                 continue
             fields.append(f"{key}={format_spatial_value(value)}")
         lines.append(f"- transition {transition.get('id')}: " + (", ".join(fields) if fields else "no extra fields"))
+    for annotation in contract.get("annotations", []):
+        fields = []
+        for key, value in annotation.items():
+            if key == "id" or value is None or value == "":
+                continue
+            fields.append(f"{key}={format_spatial_value(value)}")
+        lines.append(f"- annotation {annotation.get('id')}: " + (", ".join(fields) if fields else "no extra fields"))
     if contract.get("entities"):
         lines.append("- entities: " + "; ".join(spatial_entity_summary(entity) for entity in contract.get("entities", [])))
     for snapshot in contract.get("panel_snapshots", []):
@@ -5904,6 +6235,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Keeps prior-stage structure unchanged when a prior-stage reference exists, especially during finish",
             "- Character/object positions, action direction, moving-object path, and cause-effect motion are physically plausible",
             "- Enforces every Structured spatial contract entity, panel snapshot, vector, visibility, occlusion, and constraint listed above as validation constraints unless they contradict the approved narrative/page design",
+            "- For scene_3d pages, parent inspection should use spatial-render-manifest camera PNGs and any selected top/side/iso auxiliary PNGs as visual sanity-check aids; these render PNGs are not generation references and must not replace the approved comic page design",
             "- For behind_cover_from and line_of_sight_blocked, cover must read from the named threat/viewpoint line of fire or line of sight; reader-side behind is not sufficient",
             "- Reject forbidden_exposure violations such as torso_visible, above_roofline, or open_field when listed; only allowed_exposure may peek past cover",
             "- Reject wall/cover fusion: character edges must not share a contour, hatching, texture, or unreadable silhouette with walls, pillars, vehicles, furniture, or any cover object",
@@ -6458,6 +6790,216 @@ def command_spatial_preview(args: argparse.Namespace) -> None:
     print(f"STRUCTURED_PAGES: {model['structured_page_count']}")
     print(f"ISSUES: {len(issues)}")
     print(f"SPATIAL_WARNINGS: {len(warnings)}")
+
+
+def phase_for_spatial_render_manifest(args: argparse.Namespace) -> str:
+    if getattr(args, "stage", ""):
+        return str(args.stage)
+    if getattr(args, "plan_file", ""):
+        return "proposed"
+    return "approved"
+
+
+def spatial_render_output_dir(args: argparse.Namespace) -> Path:
+    if getattr(args, "output_dir", ""):
+        return Path(args.output_dir)
+    phase = phase_for_spatial_render_manifest(args)
+    if getattr(args, "run_dir", ""):
+        return Path(args.run_dir) / "spatial_renders" / phase
+    if getattr(args, "plan_file", ""):
+        return Path(args.plan_file).parent / "spatial_renders" / phase
+    raise SystemExit("spatial-render-manifest requires --run-dir or --plan-file.")
+
+
+def snapshot_has_camera(snapshot: dict[str, Any]) -> bool:
+    camera = snapshot.get("camera") or {}
+    return vector3(camera.get("position")) is not None and vector3(camera.get("look_at")) is not None
+
+
+def scene_3d_text_haystack(page: dict[str, Any], scene: dict[str, Any] | None, contract: dict[str, Any]) -> str:
+    return json.dumps({"page": page, "scene": scene or {}, "contract": contract}, ensure_ascii=False).lower()
+
+
+def scene_3d_has_level_cues(page: dict[str, Any], scene: dict[str, Any] | None, contract: dict[str, Any]) -> bool:
+    haystack = scene_3d_text_haystack(page, scene, contract)
+    if len((scene or {}).get("levels", [])) > 1:
+        return True
+    if any(str(constraint.get("type") or "") in {"on_level", "above", "below", "vertical_separation"} for constraint in contract.get("constraints", [])):
+        return True
+    return bool(re.search(r"floor_2|floor2|2층|upper|above|below|stair|railing|balcony|level|층|계단|난간|발코니|고도", haystack))
+
+
+def scene_3d_has_cover_or_sight_cues(contract: dict[str, Any]) -> bool:
+    cover_types = {"cover_between", "behind_cover_from", "line_of_sight_blocked", "no_line_of_fire", "not_aims_at"}
+    return any(str(constraint.get("type") or "") in cover_types for constraint in contract.get("constraints", []))
+
+
+def scene_3d_has_trajectory_cues(snapshot: dict[str, Any], contract: dict[str, Any]) -> bool:
+    if any(str(constraint.get("type") or "") == "trajectory_to" for constraint in contract.get("constraints", [])):
+        return True
+    return any(
+        vector3(entity.get("trajectory_vector") or entity.get("motion_vector") or entity.get("velocity_vector")) is not None
+        for entity in snapshot.get("entities", [])
+    )
+
+
+def normalize3(vector: tuple[float, float, float]) -> tuple[float, float, float]:
+    length = vector3_length(vector) or 1.0
+    return (vector[0] / length, vector[1] / length, vector[2] / length)
+
+
+def dot3(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def cross3(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def camera_overlap_risk(snapshot: dict[str, Any]) -> bool:
+    camera = snapshot.get("camera") or {}
+    camera_position = vector3(camera.get("position"))
+    look_at = vector3(camera.get("look_at"))
+    if camera_position is None or look_at is None:
+        return True
+    forward = normalize3((
+        look_at[0] - camera_position[0],
+        look_at[1] - camera_position[1],
+        look_at[2] - camera_position[2],
+    ))
+    world_up = (0.0, 0.0, 1.0)
+    right = cross3(forward, world_up)
+    if vector3_length(right) < 0.001:
+        right = (1.0, 0.0, 0.0)
+    else:
+        right = normalize3(right)
+    up = normalize3(cross3(right, forward))
+    projected: list[tuple[float, float]] = []
+    for entity in snapshot.get("entities", []):
+        position = vector3(entity.get("position"))
+        if position is None:
+            continue
+        relative = (
+            position[0] - camera_position[0],
+            position[1] - camera_position[1],
+            position[2] - camera_position[2],
+        )
+        depth = abs(dot3(relative, forward)) or 1.0
+        projected.append((dot3(relative, right) / depth, dot3(relative, up) / depth))
+    for index, first in enumerate(projected):
+        for second in projected[index + 1 :]:
+            if math.hypot(first[0] - second[0], first[1] - second[1]) < 0.08:
+                return True
+    return False
+
+
+def render_views_for_snapshot(
+    page: dict[str, Any],
+    scene: dict[str, Any] | None,
+    contract: dict[str, Any],
+    snapshot: dict[str, Any],
+) -> list[tuple[str, str, bool]]:
+    views: dict[str, tuple[str, bool]] = {}
+
+    def add(view: str, reason: str, required: bool = True) -> None:
+        current = views.get(view)
+        if current:
+            views[view] = (f"{current[0]}; {reason}", current[1] or required)
+        else:
+            views[view] = (reason, required)
+
+    if snapshot_has_camera(snapshot):
+        add("camera", "camera direction baseline")
+    else:
+        add("iso", "camera missing; iso view required for spatial sanity check")
+    if scene_3d_has_level_cues(page, scene, contract):
+        add("iso", "level/height/stair/railing/balcony relationship")
+        add("side", "vertical separation readability")
+    if scene_3d_has_cover_or_sight_cues(contract):
+        add("top", "cover/line-of-sight relationship")
+        if snapshot_has_camera(snapshot):
+            add("camera", "cover/line-of-sight from panel camera")
+    if scene_3d_has_trajectory_cues(snapshot, contract):
+        add("top", "trajectory/movement path readability")
+    if camera_overlap_risk(snapshot):
+        add("iso", "camera view overlap risk")
+    return [(view, reason, required) for view, (reason, required) in views.items()]
+
+
+def scene_3d_canvas_selector(page_id: str) -> str:
+    safe_page_id = page_id.replace("\\", "\\\\").replace('"', '\\"')
+    return f'[data-preview-page-id="{safe_page_id}"] canvas[data-scene3d]'
+
+
+def command_spatial_render_manifest(args: argparse.Namespace) -> None:
+    plan_context, pages = plan_and_pages_for_spatial_check(args)
+    spatial_continuity_plan = spatial_continuity_plan_from_context(plan_context)
+    issues = spatial_plan_issues(pages, spatial_continuity_plan)
+    warnings = spatial_plan_warnings(pages, spatial_continuity_plan)
+    model = build_spatial_preview_model(pages, issues, warnings)
+    model["spatial_continuity_plan"] = spatial_continuity_plan
+    model["title"] = spatial_preview_title(args)
+    model["source"] = spatial_preview_source(args)
+    html_path = spatial_preview_output_path(args)
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(render_spatial_preview_html(model), encoding="utf-8")
+
+    output_dir = spatial_render_output_dir(args)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    scenes_by_id = scene_3d_scenes_by_id(spatial_continuity_plan)
+    items: list[dict[str, Any]] = []
+    for page in pages:
+        contract = page.get("spatial_contract", {})
+        if spatial_contract_coordinate_type(contract) != "scene_3d":
+            continue
+        scene_id = str((contract.get("coordinate_space") or {}).get("scene_id") or "")
+        scene = scenes_by_id.get(scene_id)
+        page_id = str(page.get("id") or Path(str(page.get("filename") or "page")).stem)
+        for snapshot in contract.get("panel_snapshots", []):
+            panel = panel_key(snapshot.get("panel")) or "1"
+            for view, reason, required in render_views_for_snapshot(page, scene, contract, snapshot):
+                stem = slugify(f"{page_id}-panel-{panel}-{view}", "scene-3d-render")
+                items.append(
+                    {
+                        "id": stem,
+                        "page_id": page_id,
+                        "page_filename": page.get("filename", ""),
+                        "panel": panel,
+                        "view": view,
+                        "reason": reason,
+                        "html_path": str(html_path),
+                        "canvas_selector": scene_3d_canvas_selector(page_id),
+                        "output_png": str(output_dir / f"{stem}.png"),
+                        "required_for_review": bool(required),
+                    }
+                )
+    manifest_path = output_dir / "render_manifest.json"
+    write_json(
+        manifest_path,
+        {
+            "workflow": WORKFLOW,
+            "type": "spatial_render_manifest",
+            "created_at": now_iso(),
+            "source": spatial_preview_source(args),
+            "stage": getattr(args, "stage", ""),
+            "phase": phase_for_spatial_render_manifest(args),
+            "html_path": str(html_path),
+            "output_dir": str(output_dir),
+            "spatial_check": "fail" if issues else "pass",
+            "issues": issues,
+            "warnings": warnings,
+            "items": items,
+        },
+    )
+    print(f"SPATIAL_RENDER_MANIFEST: {manifest_path}")
+    print(f"SPATIAL_PREVIEW: {html_path}")
+    print(f"SPATIAL_CHECK: {'fail' if issues else 'pass'}")
+    print(f"RENDER_ITEMS: {len(items)}")
+    print(f"REQUIRED_RENDER_ITEMS: {sum(1 for item in items if item.get('required_for_review'))}")
 
 
 def command_approve_plan(args: argparse.Namespace) -> None:
@@ -7297,6 +7839,13 @@ def build_parser() -> argparse.ArgumentParser:
     spatial_preview.add_argument("--plan-json", default="")
     spatial_preview.add_argument("--output", default="")
     spatial_preview.set_defaults(func=command_spatial_preview)
+
+    spatial_render_manifest = subparsers.add_parser("spatial-render-manifest")
+    spatial_render_manifest.add_argument("--run-dir", default="")
+    spatial_render_manifest.add_argument("--plan-file", default="")
+    spatial_render_manifest.add_argument("--stage", choices=STAGE_IDS, default="")
+    spatial_render_manifest.add_argument("--output-dir", default="")
+    spatial_render_manifest.set_defaults(func=command_spatial_render_manifest)
 
     approve = subparsers.add_parser("approve-plan")
     approve.add_argument("--run-dir", required=True)

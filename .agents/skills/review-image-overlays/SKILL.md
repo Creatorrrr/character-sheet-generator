@@ -16,17 +16,17 @@ Use the bundled script:
 ```bash
 SKILL_DIR=".agents/skills/review-image-overlays"
 RUNNER="$SKILL_DIR/scripts/review_overlay_server.py"
-python3 "$RUNNER" serve --run-dir <run-dir> --stage storyboard_sketch_ink
+python3 "$RUNNER" serve --run-dir <run-dir> --stage storyboard_conti_sketch_ink
 ```
 
 The script binds to `127.0.0.1` on an empty port by default, opens the browser, and prints `REVIEW_OVERLAY_URL`.
 
-For comic storyboard runs, valid review stages include `storyboard_blocking`, `storyboard_sketch_ink`, and `finish`. User feedback can be collected at both transition gates: after `storyboard_blocking` before sketch/ink, and after `storyboard_sketch_ink` before finish.
+For comic storyboard runs, valid review stages include `storyboard_conti_sketch_ink` and `finish`. User feedback is collected after `storyboard_conti_sketch_ink` before finish.
 
 Use `--items <filename>` repeatedly to limit the gallery:
 
 ```bash
-python3 "$RUNNER" serve --run-dir <run-dir> --stage storyboard_sketch_ink --items 001-page-1.png --items 003-page-3.png
+python3 "$RUNNER" serve --run-dir <run-dir> --stage storyboard_conti_sketch_ink --items 001-page-1.png --items 003-page-3.png
 ```
 
 ## Agent Markup
@@ -35,7 +35,7 @@ For subagent self-verification or parent inspection, prefer coordinate-driven ma
 
 ```json
 {
-  "stage": "storyboard_sketch_ink",
+  "stage": "storyboard_conti_sketch_ink",
   "review_id": "parent-review-001",
   "coordinate_space": "normalized",
   "items": [
@@ -63,7 +63,7 @@ For subagent self-verification or parent inspection, prefer coordinate-driven ma
 Generate overlays and the manifest:
 
 ```bash
-python3 "$RUNNER" create-markup --run-dir <run-dir> --stage storyboard_sketch_ink --spec <markup.json>
+python3 "$RUNNER" create-markup --run-dir <run-dir> --stage storyboard_conti_sketch_ink --spec <markup.json>
 ```
 
 Use `coordinate_space: "pixel"` when exact image pixel coordinates are easier. Supported shapes are `rect` with `box: [x, y, width, height]` and `polygon` with at least three `[x, y]` points. Every mark must include non-empty `request` text. Multiple marks with the same `color_id` are merged into one color-specific overlay and one request TXT.
@@ -101,7 +101,7 @@ After saving overlays for a `$create-comic-storyboard-pack` run, feed the manife
 
 ```bash
 COMIC_RUNNER=".agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_runner.py"
-python3 "$COMIC_RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_sketch_ink/<review-id>/revision_requests.json
+python3 "$COMIC_RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_conti_sketch_ink/<review-id>/revision_requests.json
 python3 "$COMIC_RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 

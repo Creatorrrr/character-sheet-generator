@@ -21,7 +21,7 @@ SCRIPT = (
     / "scripts"
     / "review_overlay_server.py"
 )
-FIRST_STAGE = "storyboard_sketch_ink"
+FIRST_STAGE = "storyboard_conti_sketch_ink"
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
@@ -36,7 +36,7 @@ spec.loader.exec_module(review_overlay_server)
 
 def make_run(root, size=(1, 1)):
     run_dir = root / "run"
-    stage_dir = run_dir / "01_storyboard_sketch_ink"
+    stage_dir = run_dir / "01_storyboard_conti_sketch_ink"
     stage_dir.mkdir(parents=True)
     image = stage_dir / "001-page-1.png"
     if Image:

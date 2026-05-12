@@ -1,4 +1,4 @@
 interface:
   display_name: "Comic Storyboard Sketch Ink"
-  short_description: "Generate the sketch and ink stage from an approved blocking reference"
-  default_prompt: "Use $create-comic-storyboard-sketch-ink only when a create-comic-storyboard-pack subagent prompt assigns one approved page at the storyboard_sketch_ink stage. Read the assigned prompt file, use the parent-inspected rough comic-page storyboard_blocking image and *_desc.md when provided, preserve page composition plus spatial validation overlay and character appearance/anatomy locks, use image_gen, do not edit runner state, inspect the result, and return the generated file path with worker_status and worker_note."
+  short_description: "Generate the integrated conti, rough sketch, and light clean-line stage"
+  default_prompt: "Use $create-comic-storyboard-sketch-ink only when a create-comic-storyboard-pack subagent prompt assigns one approved page at the storyboard_conti_sketch_ink stage. Read the assigned prompt file, create the integrated conti/rough-sketch/light-clean-line page and required *_desc.md from the approved page design, preserve spatial validation overlay and character appearance/anatomy locks, use image_gen, do not edit runner state, inspect the result, and return the generated file path, description path, worker_status, and worker_note."

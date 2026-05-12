@@ -21,9 +21,8 @@ from typing import Any
 WORKFLOW = "review-image-overlays"
 EXPECTED_PACK_WORKFLOW = "create-comic-storyboard-pack"
 STAGE_DIRS = {
-        "storyboard_blocking": "01_storyboard_blocking",
-    "storyboard_sketch_ink": "02_storyboard_sketch_ink",
-    "finish": "03_finish",
+    "storyboard_conti_sketch_ink": "01_storyboard_conti_sketch_ink",
+    "finish": "02_finish",
 }
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 VALID_COORDINATE_SPACES = {"normalized", "pixel"}
@@ -900,7 +899,7 @@ def command_create_markup(args: argparse.Namespace) -> None:
     spec = read_json(Path(args.spec))
     if not isinstance(spec, dict):
         raise ReviewError("Markup spec must be a JSON object.")
-    stage = args.stage or str(spec.get("stage") or "storyboard_sketch_ink")
+    stage = args.stage or str(spec.get("stage") or "storyboard_conti_sketch_ink")
     manifest = create_markup_manifest(
         Path(args.run_dir),
         stage,
@@ -919,7 +918,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = subparsers.add_parser("serve")
     serve.add_argument("--run-dir", required=True)
-    serve.add_argument("--stage", choices=sorted(STAGE_DIRS), default="storyboard_sketch_ink")
+    serve.add_argument("--stage", choices=sorted(STAGE_DIRS), default="storyboard_conti_sketch_ink")
     serve.add_argument("--items", action="append", default=[])
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=0)
@@ -928,7 +927,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     save_payload = subparsers.add_parser("save-payload")
     save_payload.add_argument("--run-dir", required=True)
-    save_payload.add_argument("--stage", choices=sorted(STAGE_DIRS), default="storyboard_sketch_ink")
+    save_payload.add_argument("--stage", choices=sorted(STAGE_DIRS), default="storyboard_conti_sketch_ink")
     save_payload.add_argument("--payload", required=True)
     save_payload.add_argument("--review-id", default="")
     save_payload.add_argument("--items", action="append", default=[])

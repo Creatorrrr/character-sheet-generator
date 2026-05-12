@@ -23,8 +23,7 @@ PAGE_GENERATION_MODE_VALUES = {
     PAGE_GENERATION_MODE_SEQUENTIAL_PRIOR_PAGES,
     PAGE_GENERATION_MODE_PARALLEL_BATCH,
 }
-STORYBOARD_BLOCKING_STAGE = "storyboard_blocking"
-STORYBOARD_SKETCH_INK_STAGE = "storyboard_sketch_ink"
+STORYBOARD_CONTI_SKETCH_INK_STAGE = "storyboard_conti_sketch_ink"
 FINISH_STAGE = "finish"
 TEXT_POLICY_DIALOGUE_SFX_CAPTIONS = "dialogue_sfx_captions"
 TEXT_POLICY_SFX_ONLY = "sfx_only"
@@ -36,57 +35,40 @@ TEXT_POLICY_VALUES = {
 }
 STAGES = [
     {
-        "id": STORYBOARD_BLOCKING_STAGE,
-        "label": "storyboard blocking",
-        "dir": "01_storyboard_blocking",
-        "purpose": "rough comic-page blocking that preserves story rhythm first and adds spatial validation marks only where needed",
-    },
-    {
-        "id": STORYBOARD_SKETCH_INK_STAGE,
-        "label": "sketch/ink",
-        "dir": "02_storyboard_sketch_ink",
-        "purpose": "comic page sketch and ink pass preserving the parent-inspected blocking image and blocking description",
+        "id": STORYBOARD_CONTI_SKETCH_INK_STAGE,
+        "label": "conti/sketch/light ink",
+        "dir": "01_storyboard_conti_sketch_ink",
+        "purpose": "comic-page conti, rough sketch, and light clean line pass with spatial validation description",
     },
     {
         "id": FINISH_STAGE,
         "label": "tone/color/finish",
-        "dir": "03_finish",
+        "dir": "02_finish",
         "purpose": "tone, color, policy-approved lettering/text absence, and final polish pass",
     },
 ]
 STAGE_IDS = [stage["id"] for stage in STAGES]
 STAGE_SKILL_NAMES = {
-    STORYBOARD_BLOCKING_STAGE: "create-comic-storyboard-blocking",
-    STORYBOARD_SKETCH_INK_STAGE: "create-comic-storyboard-sketch-ink",
+    STORYBOARD_CONTI_SKETCH_INK_STAGE: "create-comic-storyboard-sketch-ink",
     FINISH_STAGE: "create-comic-storyboard-finish",
 }
 STAGE_GATE_STATUSES = {"pending", "pending_user_feedback", "approved", "stopped"}
-FEEDBACK_CHOICE_APPROVE_SKETCH_INK = "approve_sketch_ink"
 FEEDBACK_CHOICE_APPROVE_FINISH = "approve_finish"
 FEEDBACK_CHOICE_OPEN_OVERLAY_UI = "open_overlay_ui"
 FEEDBACK_CHOICE_STOP_AFTER_STAGE = "stop_after_stage"
 FEEDBACK_CHOICES = {
-    FEEDBACK_CHOICE_APPROVE_SKETCH_INK,
     FEEDBACK_CHOICE_APPROVE_FINISH,
     FEEDBACK_CHOICE_OPEN_OVERLAY_UI,
     FEEDBACK_CHOICE_STOP_AFTER_STAGE,
 }
 TRANSITIONS = [
     {
-        "from_stage": STORYBOARD_BLOCKING_STAGE,
-        "to_stage": STORYBOARD_SKETCH_INK_STAGE,
-        "approve_choice": FEEDBACK_CHOICE_APPROVE_SKETCH_INK,
-        "approve_label": "Approve sketch/ink stage",
-        "approve_note_placeholder": "<user approved sketch/ink>",
-        "pending_note": "storyboard_blocking stage-review passed; user feedback is required before sketch/ink.",
-    },
-    {
-        "from_stage": STORYBOARD_SKETCH_INK_STAGE,
+        "from_stage": STORYBOARD_CONTI_SKETCH_INK_STAGE,
         "to_stage": FINISH_STAGE,
         "approve_choice": FEEDBACK_CHOICE_APPROVE_FINISH,
         "approve_label": "Approve finish stage",
         "approve_note_placeholder": "<user approved finish>",
-        "pending_note": "storyboard_sketch_ink stage-review passed; user feedback is required before finish.",
+        "pending_note": "storyboard_conti_sketch_ink stage-review passed; user feedback is required before finish.",
     },
 ]
 PASS_STATUSES = {"inspected_pass", "complete"}
@@ -5140,23 +5122,10 @@ def normalize_stage_record(stage: dict[str, Any], page_id: str, stage_id: str) -
 
 
 def migrate_legacy_stage_records(stages: dict[str, Any]) -> None:
-    if STORYBOARD_BLOCKING_STAGE not in stages:
-        legacy_storyboard = stages.get("storyboard")
-        if isinstance(legacy_storyboard, dict) and legacy_storyboard.get("status") in PASS_STATUSES:
-            stages[STORYBOARD_BLOCKING_STAGE] = dict(legacy_storyboard)
-        else:
-            stages[STORYBOARD_BLOCKING_STAGE] = blank_stage_state()
-
-    if STORYBOARD_SKETCH_INK_STAGE not in stages:
-        legacy_sketch = stages.get("sketch_ink")
-        if isinstance(legacy_sketch, dict) and legacy_sketch.get("status") in PASS_STATUSES:
-            stages[STORYBOARD_SKETCH_INK_STAGE] = dict(legacy_sketch)
-        else:
-            stages[STORYBOARD_SKETCH_INK_STAGE] = blank_stage_state()
-
+    if STORYBOARD_CONTI_SKETCH_INK_STAGE not in stages:
+        stages[STORYBOARD_CONTI_SKETCH_INK_STAGE] = blank_stage_state()
     if FINISH_STAGE not in stages:
         stages[FINISH_STAGE] = blank_stage_state()
-
     for stage_id in list(stages.keys()):
         if stage_id not in STAGE_IDS:
             del stages[stage_id]
@@ -5359,18 +5328,12 @@ def prior_stage_reference(
     if state is not None and prior not in target_stages(state) and not page_complete_for_stage(page, prior):
         return f"none ({prior} skipped by target_stages)"
     path = stage_output_path(run_dir, page, prior, prefer_recorded=True)
-    if stage_id == STORYBOARD_SKETCH_INK_STAGE:
-        desc_path = recorded_stage_description_path(run_dir, page, prior)
-        marker = "required visual blocking input plus *_desc.md spatial/temporal source"
-        image_part = f"{path} ({marker})" if path.exists() else f"{path} ({marker}; not found yet)"
-        desc_part = f"{desc_path} (blocking description)" if desc_path.exists() else f"{desc_path} (blocking description; not found yet)"
-        return f"{image_part}; {desc_part}"
     if stage_id == FINISH_STAGE:
-        blocking_desc = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
-        marker = "required visual input / structure reference from storyboard_sketch_ink"
+        conti_desc = recorded_stage_description_path(run_dir, page, STORYBOARD_CONTI_SKETCH_INK_STAGE)
+        marker = "required visual input / structure reference from storyboard_conti_sketch_ink"
         image_part = f"{path} ({marker})" if path.exists() else f"{path} ({marker}; not found yet)"
-        if blocking_desc.exists():
-            return f"{image_part}; blocking spatial/temporal source: {blocking_desc}"
+        if conti_desc.exists():
+            return f"{image_part}; conti/sketch/ink spatial/temporal source: {conti_desc}"
         return image_part
     return str(path) if path.exists() else f"{path} (not found yet)"
 
@@ -5482,10 +5445,10 @@ def prior_page_continuity_reference_text(
         else:
             role = "supporting earlier page for style, character, prop, landmark, and setting continuity"
         line = f"- priority {priority}: {prior_page['filename']} -> {path} ({role})"
-        if stage_id == STORYBOARD_BLOCKING_STAGE:
+        if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
             desc_path = recorded_stage_description_path(run_dir, prior_page, stage_id)
             if desc_path.exists():
-                line += f"; blocking description={desc_path}"
+                line += f"; conti/sketch/ink description={desc_path}"
         lines.append(line)
     return "\n".join(lines) if lines else "- none"
 
@@ -5496,23 +5459,16 @@ def stage_anchor_review_checklist(stage_id: str) -> str:
         "visual_text_guard, structured spatial_contract, panel/page continuity, page-to-page continuity, "
         "and technical quality must all fit the approved plan."
     )
-    if stage_id == STORYBOARD_BLOCKING_STAGE:
+    if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
         return (
-            "storyboard_blocking anchor: rough comic-page blocking level; preserve panel composition, scene rhythm, "
-            "and reader eye flow first; important entities must be recognizable as quick 3-second rough forms; use "
-            "arrows, relation lines, visibility/occlusion marks, and motion-path marks only where needed; reject detailed "
-            "faces, anatomy, costume rendering, tone/color, typography, polished ink, or final art. "
-            + common
-        )
-    if stage_id == STORYBOARD_SKETCH_INK_STAGE:
-        return (
-            "storyboard_sketch_ink anchor: preserve the inspected blocking PNG and *_desc.md structure while adding real "
-            "sketch/ink line art, line-weight rhythm, black-ink emphasis, and planned effect lines; reject tone/color, "
-            "lighting, glossy finish, or final polish that belongs to finish. "
+            "storyboard_conti_sketch_ink anchor: preserve page composition, scene rhythm, reader eye flow, and "
+            "spatial relations first; important entities must be recognizable as rough sketch forms with light clean "
+            "line/ink structure; use arrows, relation lines, visibility/occlusion marks, and motion-path marks only "
+            "where needed; reject meaningless pure-symbol conti, tone/color, lighting, glossy finish, or final polish. "
             + common
         )
     return (
-        "finish anchor: preserve the inspected sketch/ink layout, panel shapes, negative space, line rhythm, effect lines, "
+        "finish anchor: preserve the inspected conti/sketch/ink layout, panel shapes, negative space, line rhythm, effect lines, "
         "text policy, and character structure while adding tone/color/final polish; reject redraws, layout changes, "
         "weakened effect-line direction, or changed eye/face/hand/limb/silhouette/body-proportion/posture structure. "
         + common
@@ -5564,8 +5520,6 @@ def assert_required_prior_stage_outputs_exist(state: dict[str, Any], run_dir: Pa
     prior = previous_stage_id(stage_id)
     if not prior:
         return
-    if stage_id == STORYBOARD_SKETCH_INK_STAGE and prior not in target_stages(state):
-        return
     missing = []
     for page in pages:
         if not page_complete_for_stage(page, prior):
@@ -5574,32 +5528,32 @@ def assert_required_prior_stage_outputs_exist(state: dict[str, Any], run_dir: Pa
         path = stage_output_path(run_dir, page, prior, prefer_recorded=True)
         if not path.exists():
             missing.append(f"{page['filename']} requires {path}")
-        if prior == STORYBOARD_BLOCKING_STAGE:
+        if prior == STORYBOARD_CONTI_SKETCH_INK_STAGE:
             desc_path = recorded_stage_description_path(run_dir, page, prior)
             if not desc_path.exists():
-                missing.append(f"{page['filename']} requires blocking description {desc_path}")
+                missing.append(f"{page['filename']} requires conti/sketch/ink description {desc_path}")
     if missing:
         details = "; ".join(missing)
         if stage_id == FINISH_STAGE:
             raise SystemExit(
-                "Finish stage requires the parent-inspected storyboard_sketch_ink image as input before reservation: "
+                "Finish stage requires the parent-inspected storyboard_conti_sketch_ink image as input before reservation: "
                 f"{details}"
             )
         raise SystemExit(
             f"{stage_id} stage requires the parent-inspected {prior} image"
-            + (" and description" if prior == STORYBOARD_BLOCKING_STAGE else "")
+            + (" and description" if prior == STORYBOARD_CONTI_SKETCH_INK_STAGE else "")
             + " as input before reservation: "
             f"{details}"
         )
     if not stage_review_passed(state, prior):
         if stage_id == FINISH_STAGE:
-            raise SystemExit("Finish stage requires storyboard_sketch_ink stage-review pass before reservation.")
+            raise SystemExit("Finish stage requires storyboard_conti_sketch_ink stage-review pass before reservation.")
         raise SystemExit(f"{stage_id} stage requires {prior} stage-review pass before reservation.")
 
 
-def validate_blocking_description(path: Path, page: dict[str, Any]) -> None:
+def validate_stage_description(path: Path, page: dict[str, Any]) -> None:
     if not path.exists():
-        raise SystemExit(f"Blocking description file not found: {path}")
+        raise SystemExit(f"Conti/sketch/ink description file not found: {path}")
     text = path.read_text(encoding="utf-8")
     stem_heading = f"# {Path(page['filename']).stem}_desc"
     issues = []
@@ -5620,7 +5574,7 @@ def validate_blocking_description(path: Path, page: dict[str, Any]) -> None:
                 issues.append(f"missing spatial_contract constraint id {constraint_id}")
     if issues:
         details = "; ".join(issues)
-        raise SystemExit(f"Invalid blocking description {path}: {details}")
+        raise SystemExit(f"Invalid conti/sketch/ink description {path}: {details}")
 
 
 def current_blockers(state: dict[str, Any]) -> list[tuple[dict[str, Any], str, dict[str, Any]]]:
@@ -6040,45 +5994,33 @@ def record_revision_scope_history(
 
 
 def stage_instruction(stage_id: str) -> str:
-    if stage_id == STORYBOARD_BLOCKING_STAGE:
+    if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
         return (
-            "Create the rough comic-page blocking from the approved narrative page design. Preserve panel "
-            "composition, story rhythm, reader eye flow, character action, and emotional beat first. Draw each "
-            "important character, object, and environment element as a loose pen sketch at roughly 3 seconds "
-            "of effort per entity: recognizable enough to identify the entity category and action, but not polished. "
-            "Use simple gesture poses, rough object contours, environmental silhouettes, shadow masses, and "
-            "minimal landmark outlines. Add arrows, vectors, sight/direction lines, movement-path marks, "
-            "visibility/occlusion marks, and relation lines only where needed to inspect the spatial validation overlay. "
+            "Create the comic-page conti/sketch/light-ink pass from the approved narrative page design. Preserve panel "
+            "composition, story rhythm, reader eye flow, character action, emotional beat, and spatial/cause-effect logic first. "
+            "Draw every important character, object, and environment element with readable rough sketch forms and light clean "
+            "line structure: clear enough to identify the entity category, pose, action, occluder, path, and panel role, but "
+            "not final ink. Add arrows, vectors, sight/direction lines, movement-path marks, visibility/occlusion marks, and "
+            "relation lines only where needed to inspect the spatial validation overlay. "
             "Simplify or omit unimportant props/background elements when they are not needed for story readability, "
-            "action readability, visibility/occlusion, landmark continuity, or page composition. Do not render detailed "
-            "faces, anatomy, costume detail, texture, dialogue, SFX, typography, polished ink, tone/color, or final art. "
-            "The image should remain readable as a rough comic page rather than a spatial validation diagram, while still making "
+            "action readability, visibility/occlusion, landmark continuity, or page composition. Do not render tone/color, "
+            "lighting, texture, dialogue, SFX, typography, glossy finish, or final polish. "
+            "The image should remain readable as a comic conti/sketch page rather than a spatial validation diagram, while still making "
             "entity positions, facing, gaze/direction/movement vectors, visibility, occlusion, and panel-to-panel "
             "state continuity easy to inspect. "
             "Also write the required *_desc.md beside the image with symbol legend, panel spatial map, "
             "constraint check, and temporal continuity check sections. Keep the required section headings "
             "exactly as specified, but write the description body text in Korean."
         )
-    if stage_id == STORYBOARD_SKETCH_INK_STAGE:
-        return (
-            "Create the Korean comic-book page sketch and ink pass from the parent-inspected "
-            "storyboard_blocking image and *_desc.md. Show a full page with 3-5 panels by default, "
-            "measured cinematic pacing, experimental freeform panel "
-            "design, gutters or open borders where appropriate, clear reading order, active-text-policy "
-            "placement or required text absence, clear action blocking, planned detail "
-            "density, visual emphasis, comic effect lines, line-weight contrast, and clean ink lines. "
-            "Use 1-2 panels for special staging such as a full-page emotion beat, silence, stillness, "
-            "or a decisive action moment, while preserving the spatial validation overlay from blocking."
-        )
     if stage_id == FINISH_STAGE:
         return (
             "Create the final Korean comic-book page using the required parent-inspected "
-            "storyboard_sketch_ink image as the visual input and structure reference. Add tones, color "
+            "storyboard_conti_sketch_ink image as the visual input and structure reference. Add tones, color "
             "if requested, lighting, shadows, policy-approved lettering/SFX or required text absence, "
             "and cleanup without changing page layout, panel count, freeform panel shapes, negative "
             "space, text placement or text absence, comic effect lines, visual emphasis, line-weight rhythm, "
             "character/object blocking, motion direction, or action logic. Finish must preserve the inspected "
-            "storyboard_sketch_ink eye, face, hand, limb, silhouette, body proportion, and posture structure."
+            "storyboard_conti_sketch_ink eye, face, hand, limb, silhouette, body proportion, and posture structure."
         )
     raise SystemExit(f"Unknown stage: {stage_id}")
 
@@ -6631,12 +6573,12 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     excluded_roots = ", ".join(state.get("excluded_source_roots") or [str(DEFAULT_OUTPUT_ROOT)])
     panels = page.get("panels", [])
     text_policy = normalize_text_policy(page.get("text_policy") or state.get("text_policy"))
-    render_text_policy = TEXT_POLICY_TEXT_FREE if stage_id == STORYBOARD_BLOCKING_STAGE else text_policy
+    render_text_policy = TEXT_POLICY_TEXT_FREE if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE else text_policy
     text_policy_lines = text_policy_instruction_lines(render_text_policy, page)
-    if stage_id == STORYBOARD_BLOCKING_STAGE:
+    if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
         text_policy_lines = [
-            "Text policy: storyboard_blocking_text_free",
-            f"Approved final-page text_policy is {text_policy}, but storyboard_blocking must render no text.",
+            "Text policy: storyboard_conti_sketch_ink_text_free",
+            f"Approved final-page text_policy is {text_policy}, but storyboard_conti_sketch_ink must render no text.",
             "Do not render dialogue, SFX, speech balloons, captions, signage, labels, page or panel numbers, symbols with text, or arbitrary typography; put semantic meanings only in the *_desc.md.",
         ]
     text_policy_worker_checks = text_policy_worker_check_lines(render_text_policy)
@@ -6669,56 +6611,41 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
     spatial_validation_overlay = spatial_contract_extraction_prompt_text(page)
     visual_occlusion = visual_occlusion_prompt_text(page)
     spatial_contract = spatial_contract_prompt_text(page)
-    blocking_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
+    conti_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_CONTI_SKETCH_INK_STAGE)
     assigned_description = (
-        f"Assigned blocking description: {stage_description_path(run_dir, page, stage_id)}"
-        if stage_id == STORYBOARD_BLOCKING_STAGE
-        else f"Blocking description reference: {blocking_desc_path if blocking_desc_path.exists() else 'not available'}"
+        f"Assigned conti/sketch/ink description: {stage_description_path(run_dir, page, stage_id)}"
+        if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE
+        else f"Conti/sketch/ink description reference: {conti_desc_path if conti_desc_path.exists() else 'not available'}"
     )
-    if stage_id == STORYBOARD_BLOCKING_STAGE:
+    if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
         prior_stage_use_requirement = (
-            "No prior-stage image is used for storyboard_blocking. Generate a rough text-free comic-page "
-            "blocking image from the approved narrative-first page design and write the required *_desc.md beside it. "
+            "No prior-stage image is used for storyboard_conti_sketch_ink. Generate a text-free comic-page "
+            "conti/sketch/light-ink image from the approved narrative-first page design and write the required *_desc.md beside it. "
             "Keep required headings exactly as specified, but write the description body text in Korean."
         )
         page_format_instruction = (
-            "Generate one complete rough comic-page blocking image with the approved panel count and reading order. "
+            "Generate one complete comic-page conti/sketch/light-ink image with the approved panel count and reading order. "
             "Preserve the page's scenario beat, panel composition, pacing, reader eye flow, and comic readability first. "
-            "For each important character, object, and environment element, draw a quick pen-sketch form at about "
-            "3 seconds of effort per entity, recognizable enough to identify the entity and action: e.g. crouching person, "
+            "For each important character, object, and environment element, draw readable rough sketch forms plus light clean lines, "
+            "recognizable enough to identify the entity and action: e.g. crouching person, "
             "standing person, held object, moving object, destination landmark, occluding element, wall, doorway, vehicle, table, tree, or landmark. "
-            "Use loose gesture poses, blocky object contours, rough environmental silhouettes, shadow masses, and "
-            "minimal landmark outlines. Add validation marks only where needed: arrows, sight/direction lines, movement-path "
+            "Use gesture poses, clear object contours, environmental silhouettes, shadow masses, and landmark outlines. "
+            "Add validation marks only where needed: arrows, sight/direction lines, movement-path "
             "arrows, visibility/occlusion markers, and relation lines. Simplify or omit unimportant props/background elements "
             "when they are not needed for story readability, action readability, visibility/occlusion, landmark continuity, "
             "or page composition. "
-            "Do not render detailed faces, anatomy, costume detail, texture, dialogue, "
-            "SFX, captions, labels, typography, polished ink, tone/color, or final art. Semantic labels belong only in the *_desc.md."
-        )
-    elif stage_id == STORYBOARD_SKETCH_INK_STAGE:
-        prior_stage_use_requirement = (
-            "Use the parent-inspected storyboard_blocking image and its *_desc.md as the approved rough comic-page "
-            "structure plus spatial validation overlay. Preserve page readability, panel composition, story rhythm, "
-            "entity positions, vectors, cover, visibility/occlusion, location anchors, and temporal state unless an "
-            "approved allowed_transition explicitly permits it."
-        )
-        page_format_instruction = (
-            "Generate one complete Korean comic-book page image with 3-5 panels by default and measured cinematic "
-            "pacing. Use 1-2 panels for special staging such as full-page emotional beats, silence, stillness, "
-            "or decisive action moments. Use experimental freeform panel design by default: diagonal panels, "
-            "asymmetry, tall vertical panels, open or borderless panels, inset panels, partial overlaps, and wide "
-            "negative space are allowed when reading order and continuity stay clear. Avoid a uniform rectangular "
-            "grid unless the user requested it or the scene clearly benefits from it."
+            "Light line cleanup is allowed, but do not render tone/color, lighting, texture, dialogue, "
+            "SFX, captions, labels, typography, glossy finish, or final polish. Semantic labels belong only in the *_desc.md."
         )
     else:
         prior_stage_use_requirement = (
             "Use the prior-stage image above as the required visual input / structure reference and keep the "
-            "blocking *_desc.md as the spatial validation overlay for the approved comic page design. Do not redraw "
+            "conti/sketch/ink *_desc.md as the spatial validation overlay for the approved comic page design. Do not redraw "
             "the page from scratch or change the approved panel layout."
         )
         page_format_instruction = (
             "Generate one complete Korean comic-book page image with 3-5 panels by default and measured cinematic "
-            "pacing. Preserve the inspected storyboard_sketch_ink panel layout, freeform shapes, negative space, "
+            "pacing. Preserve the inspected storyboard_conti_sketch_ink panel layout, freeform shapes, negative space, "
             "visual emphasis, effect-line direction, and ink rhythm."
         )
     negative = page.get("negative_prompt") or (
@@ -6786,8 +6713,8 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             detail_density_notes,
             visual_emphasis_notes,
             comic_effects_notes,
-            "For storyboard_sketch_ink, draw planned speed lines, focus lines, impact bursts, emotion lines, motion streaks, line-weight contrast, and ink emphasis directly in the sketch/ink pass when they serve the beat.",
-            "For finish, preserve the inspected storyboard_sketch_ink visual emphasis, effect-line direction, and ink rhythm; tone/color must not weaken or cover them.",
+            "For storyboard_conti_sketch_ink, draw planned speed lines, focus lines, impact bursts, emotion lines, motion streaks, line-weight contrast, and light ink emphasis directly when they serve the beat.",
+            "For finish, preserve the inspected storyboard_conti_sketch_ink visual emphasis, effect-line direction, and ink rhythm; tone/color must not weaken or cover them.",
             "",
             "Spatial validation overlay:",
             spatial_validation_overlay,
@@ -6854,10 +6781,9 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Worker inspection checklist:",
             "- Matches this exact page and stage",
-            "- For storyboard_blocking, preserves rough comic-page readability, panel composition, story rhythm, and reader eye flow first; uses quick recognizable 3-second rough forms for important characters, objects, and environment elements; adds arrows/vector/relation marks only where needed for validation; simplifies or omits unimportant props/background elements; rejects meaningless pure-symbol blocking, spatial validation diagrams, detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
-            "- For storyboard_blocking, writes the required *_desc.md with Symbol Legend, Panel Spatial Map, Constraint Check, and Temporal Continuity Check sections; heading text stays exact, and body explanation is Korean",
-            "- For storyboard_sketch_ink, uses the parent-inspected storyboard_blocking image and *_desc.md as rough comic-page structure plus spatial validation overlay",
-            "- For finish, preserves the inspected sketch/ink image while still respecting the blocking *_desc.md spatial validation overlay",
+            "- For storyboard_conti_sketch_ink, preserves comic-page readability, panel composition, story rhythm, reader eye flow, spatial relation, occlusion, movement path, and cause-effect logic first; draws recognizable rough sketch forms plus light clean ink lines for important characters, objects, environment elements, and occluders; adds arrows/vector/relation marks only where needed for validation; simplifies or omits unimportant props/background elements; rejects meaningless pure-symbol conti, spatial validation diagrams, dialogue, SFX, typography, tone/color, texture, glossy finish, final polish, or finished inking",
+            "- For storyboard_conti_sketch_ink, writes the required *_desc.md with Symbol Legend, Panel Spatial Map, Constraint Check, and Temporal Continuity Check sections; heading text stays exact, and body explanation is Korean",
+            "- For finish, uses the parent-inspected storyboard_conti_sketch_ink image and *_desc.md as the locked comic-page structure and spatial/temporal source",
             "- Uses 3-5 panels by default with measured cinematic pacing",
             "- Accepts and encourages 1-2 panels for special staging such as full-page emotion, silence, stillness, or decisive action moments",
             "- Requires explicit story justification for six or more panels",
@@ -6870,7 +6796,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "- Preserves every Character locks item listed above; reject forbidden marker/accessory/silhouette drift",
             "- Verifies the Character appearance/anatomy lock: species/body structure, face structure, eye count and placement, hand/finger/arm/leg count, silhouette, body proportions, and posture",
             "- Rejects missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions",
-            "- During finish, preserve the inspected storyboard_sketch_ink eye, face, hand, limb, silhouette, body proportion, and posture structure",
+            "- During finish, preserve the inspected storyboard_conti_sketch_ink panel layout, light clean-line structure, eye, face, hand, limb, silhouette, body proportion, and posture structure",
             "- Enforces every Visual text guard item listed above; reject arbitrary environmental text, labels, signs, or corner text when forbidden",
             "- Preserves story beat, reading order, composition, and continuity",
             "- Preserves source-data consistency for characters, props, profiles, locations, and page-layout references",
@@ -6892,7 +6818,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "Negative prompt:",
             negative_prompt_text,
             "",
-            "Return only: generated file path, description path for storyboard_blocking, worker_status, worker_note.",
+            "Return only: generated file path, description path for storyboard_conti_sketch_ink, worker_status, worker_note.",
         ]
     )
 
@@ -6916,11 +6842,11 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
     visual_occlusion = visual_occlusion_prompt_text(page)
     spatial_contract = spatial_contract_prompt_text(page)
     revision_overlays = user_revision_overlay_prompt_text(stage)
-    blocking_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_BLOCKING_STAGE)
-    if stage_id == STORYBOARD_BLOCKING_STAGE:
+    conti_desc_path = recorded_stage_description_path(run_dir, page, STORYBOARD_CONTI_SKETCH_INK_STAGE)
+    if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
         description_line = f"Assigned description path: {stage_description_path(run_dir, page, stage_id)}"
     else:
-        description_line = f"Blocking description reference: {blocking_desc_path if blocking_desc_path.exists() else 'not available'}"
+        description_line = f"Conti/sketch/ink description reference: {conti_desc_path if conti_desc_path.exists() else 'not available'}"
     return "\n".join(
         [
             f"Use ${skill_name}.",
@@ -6948,8 +6874,8 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "Relevant references:",
             reference_text,
             f"Page text policy: {text_policy}",
-            "Stage render text policy: storyboard_blocking_text_free; render no text in the blocking image"
-            if stage_id == STORYBOARD_BLOCKING_STAGE
+            "Stage render text policy: storyboard_conti_sketch_ink_text_free; render no text in the conti/sketch/ink image"
+            if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE
             else f"Stage render text policy: {text_policy}",
             "Character locks:",
             bullet_text(character_locks),
@@ -6976,10 +6902,10 @@ def subagent_prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, sta
             "- If self-inspection finds a localized defect that should be rerun, you may create a rect/polygon coordinate markup spec and run `create-markup` to save a revision_requests.json manifest under this run folder.",
             "- Do not call `request-revisions` or edit runner state yourself; return `worker_status: needs_rerun` and include the manifest path in `worker_note` so the parent can import it.",
             "",
-            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_blocking, use image_gen exactly once, preserve rough comic-page readability, panel composition, story rhythm, and reader eye flow first; draw quick recognizable 3-second rough forms for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, the pre-page spatial_continuity_plan, every Structured spatial contract constraint as a validation overlay, the Visual occlusion rendering rules, threat/viewpoint-based cover, forbidden_exposure, wall/cover fusion, pasted eye/face/hand/weapon-edge artifacts, no_line_of_fire/not_aims_at negative constraints, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
+            "Use image_gen with the assigned prompt file and attach every Required image attachments path as a local image visual reference. Include any User revision overlays. For storyboard_conti_sketch_ink, use image_gen exactly once, preserve comic-page readability, panel composition, story rhythm, reader eye flow, spatial relations, occlusion, movement paths, and cause-effect logic first; draw recognizable rough sketch forms plus light clean ink lines for important entities; add arrows/vector/relation marks only where needed for validation; simplify or omit unimportant props/background elements; and write the *_desc.md beside the image. For finish, do not redraw or reinterpret the page: preserve the inspected storyboard_conti_sketch_ink layout, light clean-line structure, spatial relationships, and description source while adding tone/color/final polish. Keep the required *_desc.md headings exactly as specified, and write the description body text in Korean while preserving entity ids and constraint ids verbatim. Inspect the output for stage fit, page/story fit, multi-panel layout, active text_policy compliance, character_locks, character appearance/anatomy lock, visual_text_guard, the pre-page spatial_continuity_plan, every Structured spatial contract constraint as a validation overlay, the Visual occlusion rendering rules, threat/viewpoint-based cover, forbidden_exposure, wall/cover fusion, pasted eye/face/hand/weapon-edge artifacts, no_line_of_fire/not_aims_at negative constraints, temporal continuity, user revision requests, spatial continuity, motion plausibility, technical quality, and obvious defects.",
             "Return only:",
             "- generated file path",
-            "- description path when stage is storyboard_blocking",
+            "- description path when stage is storyboard_conti_sketch_ink",
             "- worker_status: pass or needs_rerun",
             "- worker_note: concise inspection note",
         ]
@@ -7003,15 +6929,13 @@ def write_batch_plan(run_dir: Path, state: dict[str, Any]) -> None:
         f"- Use {state.get('source_root') or DEFAULT_SOURCE_ROOT} as the default source data folder when the user did not specify source/reference paths.",
         f"- Do not use {', '.join(state.get('excluded_source_roots') or [str(DEFAULT_OUTPUT_ROOT)])} or any output/ subtree as source/reference data.",
         f"- {SPATIAL_CONTINUITY_PLAN_NOTE}",
-        "- Generate stages in order: storyboard_blocking, storyboard_sketch_ink, finish.",
+        "- Generate stages in order: storyboard_conti_sketch_ink, finish.",
         "- Plan page/panel composition from scenario, emotion, action rhythm, reader eye flow, pacing, negative space, detail density, visual emphasis, and comic effects before extracting spatial_contract.",
         f"- {SPATIAL_VALIDATION_OVERLAY_NOTE}",
-        "- storyboard_blocking is a rough comic-page blocking pass, not final art; it must preserve page readability, panel composition, story rhythm, and reader eye flow first, use quick recognizable 3-second forms for important entities, add arrows/vector/relation marks only where needed for validation, and write a sibling *_desc.md.",
-        "- Do not reserve storyboard_sketch_ink until every targeted page has passed storyboard_blocking parent inspection and storyboard_blocking stage-review.",
-        "- Do not reserve finish until every page has passed storyboard_sketch_ink parent inspection.",
-        "- Do not reserve finish until storyboard_sketch_ink stage-review has passed and the user has approved the next stage with approve-next-stage plus the active feedback request.",
-        "- storyboard_sketch_ink must use the parent-inspected storyboard_blocking image and *_desc.md as required spatial/temporal references when storyboard_blocking is in target_stages.",
-        "- Finish must use the parent-inspected storyboard_sketch_ink image as the required visual input / structure reference.",
+        "- storyboard_conti_sketch_ink is the combined conti, rough sketch, and light clean-line pass; it must preserve page readability, panel composition, story rhythm, reader eye flow, spatial relations, occlusion, movement paths, and cause-effect logic first, draw recognizable rough sketch forms plus light clean ink lines for important entities, add arrows/vector/relation marks only where needed for validation, and write a sibling *_desc.md.",
+        "- Do not reserve finish until every targeted page has passed storyboard_conti_sketch_ink parent inspection and storyboard_conti_sketch_ink stage-review.",
+        "- Do not reserve finish until storyboard_conti_sketch_ink stage-review has passed and the user has approved the next stage with approve-next-stage plus the active feedback request.",
+        "- Finish must use the parent-inspected storyboard_conti_sketch_ink image and *_desc.md as the required visual input / structure reference; it must add tone/color/final polish without redrawing or reinterpreting the stage-1 composition, line structure, spatial relationships, or cause-effect logic.",
         "- Use 3-5 panels by default with measured cinematic pacing; use 1-2 panels for special staging; six or more panels need clear story justification.",
         "- Use experimental freeform panel design by default and avoid unintentional uniform rectangular grids.",
         "- Plan and verify comic visual direction: detail density, visual emphasis, line-weight rhythm, and speed/focus/impact/emotion lines when the beat calls for them.",
@@ -7819,7 +7743,7 @@ def command_next_batch(args: argparse.Namespace) -> None:
         prompt_path.write_text(prompt_text(run_dir, page, stage_id, state), encoding="utf-8")
         stage["prompt_file"] = str(prompt_path)
         stage["output_path"] = str(stage_output_path(run_dir, page, stage_id))
-        if stage_id == STORYBOARD_BLOCKING_STAGE:
+        if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
             stage["description_path"] = str(stage_description_path(run_dir, page, stage_id))
         subagent_path = subagent_prompt_path(run_dir, page, stage_id)
         subagent_path.parent.mkdir(parents=True, exist_ok=True)
@@ -7872,17 +7796,17 @@ def command_import(args: argparse.Namespace) -> None:
     if generated.resolve(strict=False) != destination.resolve(strict=False):
         shutil.copy2(generated, destination)
     description_destination = None
-    if stage_id == STORYBOARD_BLOCKING_STAGE:
+    if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
         if not args.description:
-            raise SystemExit("storyboard_blocking import requires --description <desc.md>.")
+            raise SystemExit("storyboard_conti_sketch_ink import requires --description <desc.md>.")
         description_source = Path(args.description)
         if not description_source.exists():
-            raise SystemExit(f"Blocking description file not found: {description_source}")
+            raise SystemExit(f"Conti/sketch/ink description file not found: {description_source}")
         description_destination = stage_description_path(run_dir, page, stage_id)
         description_destination.parent.mkdir(parents=True, exist_ok=True)
         if description_source.resolve(strict=False) != description_destination.resolve(strict=False):
             shutil.copy2(description_source, description_destination)
-        validate_blocking_description(description_destination, page)
+        validate_stage_description(description_destination, page)
     stage["status"] = "imported"
     stage["generated_source"] = str(generated)
     stage["output_path"] = str(destination)
@@ -7911,8 +7835,8 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
     output = stage_output_path(run_dir, page, stage_id, prefer_recorded=True)
     if not output.exists():
         raise SystemExit(f"Output file does not exist: {output}")
-    if stage_id == STORYBOARD_BLOCKING_STAGE:
-        validate_blocking_description(recorded_stage_description_path(run_dir, page, stage_id), page)
+    if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
+        validate_stage_description(recorded_stage_description_path(run_dir, page, stage_id), page)
     spatial_note = args.spatial_note or (
         "parent spatial contract inspection passed"
         if spatial_contract_has_content(page.get("spatial_contract"))
@@ -7982,8 +7906,8 @@ def command_anchor_review(args: argparse.Namespace) -> None:
     output = stage_output_path(run_dir, page, stage_id, prefer_recorded=True)
     if not output.exists():
         raise SystemExit(f"Output file does not exist: {output}")
-    if stage_id == STORYBOARD_BLOCKING_STAGE:
-        validate_blocking_description(recorded_stage_description_path(run_dir, page, stage_id), page)
+    if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
+        validate_stage_description(recorded_stage_description_path(run_dir, page, stage_id), page)
 
     review = state.setdefault("stage_anchor_reviews", {}).setdefault(stage_id, blank_stage_anchor_review())
     issues = as_list(args.issue)
@@ -8381,17 +8305,17 @@ def command_import_prior_stage(args: argparse.Namespace) -> None:
     if generated.resolve(strict=False) != destination.resolve(strict=False):
         shutil.copy2(generated, destination)
     stage = stage_state(page, args.stage)
-    if args.stage == STORYBOARD_BLOCKING_STAGE:
+    if args.stage == STORYBOARD_CONTI_SKETCH_INK_STAGE:
         if not args.description:
-            raise SystemExit("import-prior-stage for storyboard_blocking requires --description <desc.md>.")
+            raise SystemExit("import-prior-stage for storyboard_conti_sketch_ink requires --description <desc.md>.")
         description_source = Path(args.description)
         if not description_source.exists():
-            raise SystemExit(f"Blocking description file not found: {description_source}")
+            raise SystemExit(f"Conti/sketch/ink description file not found: {description_source}")
         description_destination = stage_description_path(run_dir, page, args.stage)
         description_destination.parent.mkdir(parents=True, exist_ok=True)
         if description_source.resolve(strict=False) != description_destination.resolve(strict=False):
             shutil.copy2(description_source, description_destination)
-        validate_blocking_description(description_destination, page)
+        validate_stage_description(description_destination, page)
         stage["description_path"] = str(description_destination)
         stage["description_source"] = str(description_source)
         stage["description_imported_at"] = now_iso()

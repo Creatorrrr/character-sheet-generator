@@ -121,11 +121,9 @@
 
 진행 단계:
 
-1. `$create-comic-storyboard-blocking`: 러프 블로킹 + 공간 검수 보조 `storyboard_blocking`
-2. 사용자 피드백 및 sketch/ink 진행 승인
-3. `$create-comic-storyboard-sketch-ink`: 콘티/스케치/펜선 `storyboard_sketch_ink`
-4. 사용자 피드백 및 finish 진행 승인
-5. `$create-comic-storyboard-finish`: 톤/채색/마무리 `finish`
+1. `$create-comic-storyboard-sketch-ink`: 콘티/러프 스케치/약식 펜선 + 공간 검수 보조 `storyboard_conti_sketch_ink`
+2. 사용자 피드백 및 finish 진행 승인
+3. `$create-comic-storyboard-finish`: 톤/채색/마무리 `finish`
 
 기본 정책:
 
@@ -146,9 +144,9 @@
 - 이미지 생성 단계에서는 `spatial_contract`의 엄폐/가림 조건을 시각적 엄폐 연출 규칙으로 먼저 번역합니다. `allowed_exposure`는 벽 가장자리에 눈/손/무기 끝을 붙이라는 뜻이 아니며, 인물과 벽/기둥/차량/가구/엄폐물 사이에는 분리된 윤곽, 그림자 틈, 또는 여백이 있어야 합니다.
 - 작은 노출이 인물-엄폐물 융합처럼 보일 경우에는 부분 노출보다 명확한 완전 엄폐를 우선합니다. 공유 윤곽선, 공유 해칭, 이어지는 텍스처, 벽 가장자리에 붙은 얼굴/눈/손/무기 끝은 rerun 대상입니다.
 - 과도하게 압축된 페이지, 의도 없는 균일 직각 그리드, 여백 없이 대사/SFX가 꽉 찬 구성은 검수에서 보완 대상으로 봅니다.
-- 모든 페이지의 `storyboard_sketch_ink` 부모 검수와 단계 마무리 검수 통과 전에는 `finish`를 진행하지 않습니다.
-- `storyboard_sketch_ink` 단계 마무리 검수 후에는 사용자 피드백을 받고, `approve-next-stage`로 승인되기 전까지 `finish` batch를 예약하지 않습니다.
-- 사용자가 1단계 결과만 원하면 `stop-after-stage`로 `storyboard_sketch_ink`까지만 완료 처리할 수 있습니다.
+- 모든 페이지의 `storyboard_conti_sketch_ink` 부모 검수와 단계 마무리 검수 통과 전에는 `finish`를 진행하지 않습니다.
+- `storyboard_conti_sketch_ink` 단계 마무리 검수 후에는 사용자 피드백을 받고, `approve-next-stage`로 승인되기 전까지 `finish` batch를 예약하지 않습니다.
+- 사용자가 1단계 결과만 원하면 `stop-after-stage`로 `storyboard_conti_sketch_ink`까지만 완료 처리할 수 있습니다.
 - `finish`는 앞선 단계에서 생성한 이미지를 필수 입력/구조 참조로 사용합니다.
 - 사용자가 소스/레퍼런스 경로를 지정하지 않으면 `/Users/chasoik/Projects/character-sheet-generator/sources/`에서 필요한 자료를 참고하고, `/Users/chasoik/Projects/character-sheet-generator/output/` 하위 파일은 소스 데이터로 쓰지 않습니다.
 - 승인된 각색 대사, 효과음, 짧은 캡션은 말풍선/효과음 글자/캡션 영역으로 페이지 이미지 내부에 포함합니다.
@@ -165,16 +163,15 @@
 ```bash
 python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_runner.py spatial-preview --plan-file <approved-plan.json>
 python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_runner.py spatial-preview --run-dir <run-dir>
-python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_runner.py spatial-render-manifest --run-dir <run-dir> --stage storyboard_blocking
+python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_runner.py spatial-render-manifest --run-dir <run-dir> --stage storyboard_conti_sketch_ink
 ```
 
 ### 만화 콘티 Stage Skills
 
 | Skill | 용도 |
 | --- | --- |
-| `$create-comic-storyboard-blocking` | 승인된 만화 페이지 plan과 runner prompt를 바탕으로 러프 블로킹 이미지를 만들고, 공간/시간 검수용 `*_desc.md`를 함께 작성합니다. runner가 이전 페이지 visual reference나 stage-level anchor reference를 제공하면 함께 첨부해 페이지 연속성과 단계 수준을 맞춥니다. |
-| `$create-comic-storyboard-sketch-ink` | 승인된 만화 페이지 plan과 runner prompt를 바탕으로 한 페이지의 콘티/스케치/펜선 이미지를 생성하고 1차 검수합니다. `state.json`은 수정하지 않고 결과 경로, `worker_status`, `worker_note`만 반환합니다. 캐릭터 외형/해부 고정 조건 위반이나 stage-level anchor 수준 불일치는 `needs_rerun`입니다. |
-| `$create-comic-storyboard-finish` | 부모 검수 통과한 `storyboard_sketch_ink` 이미지를 필수 구조 참조로 사용해 톤/채색/마무리를 생성하고 1차 검수합니다. 레이아웃, 컷 수, 동선, 텍스트 정책, 효과선 방향, 눈/얼굴/손/체형 구조와 stage-level anchor 수준을 변경하지 않습니다. |
+| `$create-comic-storyboard-sketch-ink` | 승인된 만화 페이지 plan과 runner prompt를 바탕으로 `storyboard_conti_sketch_ink` 이미지를 생성하고, 공간/시간 검수용 `*_desc.md`를 함께 작성합니다. 의미 없는 기호 콘티가 아니라 인물/오브젝트/주요 배경/가림 요소/동선이 읽히는 콘티/러프 스케치/약식 펜선 단계이며, 최종 톤/컬러/polish는 하지 않습니다. |
+| `$create-comic-storyboard-finish` | 부모 검수 통과한 `storyboard_conti_sketch_ink` 이미지와 `*_desc.md`를 필수 구조 참조로 사용해 톤/채색/마무리를 생성하고 1차 검수합니다. 레이아웃, 컷 수, 동선, 텍스트 정책, 효과선 방향, 눈/얼굴/손/체형 구조와 stage-level anchor 수준을 변경하지 않습니다. |
 
 ## 2D to Photoreal Stage Skills
 

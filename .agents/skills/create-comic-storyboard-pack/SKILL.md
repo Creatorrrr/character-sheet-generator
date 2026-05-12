@@ -7,12 +7,11 @@ description: Use when a story outline, scenario, script, scene notes, or storybo
 
 ## Overview
 
-Convert a story outline, plot, or scenario into a resumable Korean comic-book page pack. This skill is the orchestrator: it extracts the page plan, asks for approval, owns runner state, reserves batches, imports worker outputs, performs parent inspection, routes reruns, performs stage finish review, and asks for user feedback before moving from sketch/ink to finish.
+Convert a story outline, plot, or scenario into a resumable Korean comic-book page pack. This skill is the orchestrator: it extracts the page plan, asks for approval, owns runner state, reserves batches, imports worker outputs, performs parent inspection, routes reruns, performs stage finish review, and asks for user feedback before moving from the integrated conti/sketch/light-ink stage to finish.
 
 Actual image generation is delegated to stage skills:
 
-- `$create-comic-storyboard-blocking` for `storyboard_blocking`
-- `$create-comic-storyboard-sketch-ink` for `storyboard_sketch_ink`
+- `$create-comic-storyboard-sketch-ink` for `storyboard_conti_sketch_ink`
 - `$create-comic-storyboard-finish` for `finish`
 
 Use Codex built-in `image_gen` only through one subagent per reserved page. Do not generate any image before the user approves the exact page plan.
@@ -21,7 +20,7 @@ Use Codex built-in `image_gen` only through one subagent per reserved page. Do n
 
 If the user does not specify a save folder, create `output/<slug>-comic-storyboard-pack-YYYYMMDD-HHMMSS/` under `/Users/chasoik/Projects/character-sheet-generator/output/`.
 
-Save `scenario.md`, `state.json`, `proposed_storyboard_plan.json`, `approved_storyboard_plan.json`, proposed/approved spatial-preview HTML files, `batch_plan.md`, prompt files, subagent prompt files, generated stage images, blocking `*_desc.md` files, worker notes, parent inspection notes, and stage-review state under that run folder.
+Save `scenario.md`, `state.json`, `proposed_storyboard_plan.json`, `approved_storyboard_plan.json`, proposed/approved spatial-preview HTML files, `batch_plan.md`, prompt files, subagent prompt files, generated stage images, `storyboard_conti_sketch_ink` `*_desc.md` files, worker notes, parent inspection notes, and stage-review state under that run folder.
 
 If the user does not specify source/reference paths, use `/Users/chasoik/Projects/character-sheet-generator/sources/`. Do not use `/Users/chasoik/Projects/character-sheet-generator/output/` or any `output/` subtree as source/reference data. Current-run generated images may be used only as prior-stage workflow references after parent inspection.
 
@@ -106,27 +105,22 @@ Use this format:
 | ... |
 
 승인 후 진행 방식:
-- 1단계: 만화 페이지 러프 블로킹 + 공간 검수 보조 storyboard_blocking
-- 각 페이지는 $create-comic-storyboard-blocking subagent가 생성/1차 검수하되, 새 run은 기본적으로 한 번에 한 페이지만 순차 예약한다.
+- 1단계: 콘티/러프 스케치/약식 펜선 + 공간 검수 보조 `storyboard_conti_sketch_ink`
+- 각 페이지는 $create-comic-storyboard-sketch-ink subagent가 생성/1차 검수하되, 새 run은 기본적으로 한 번에 한 페이지만 순차 예약한다.
 - 두 번째 페이지부터는 같은 stage에서 parent-inspection을 통과한 이전 페이지 이미지들을 모두 `Required image attachments` / `Prior page continuity references`로 함께 첨부해 연속성과 일관성을 유지한다.
 - 각 stage의 첫 페이지는 이후 페이지의 수준을 정하는 stage-level anchor다. 첫 페이지가 parent-inspection을 통과한 뒤 `anchor-review`를 통과해야 같은 stage의 두 번째 페이지 이후를 예약한다.
-- 1단계 이미지는 먼저 승인된 만화 페이지의 패널 구도, 장면 리듬, 독자 시선 흐름을 보존한다. 중요한 캐릭터/오브젝트/환경 1개당 펜으로 3초 정도 빠르게 그린 수준의 러프 형체를 사용하고, 사람/손에 든 물체/움직이는 물체/기준 랜드마크/가림 요소/벽/문/차량/가구/소품처럼 무엇인지 알아볼 수 있어야 한다. 위치/방향/벡터/관계 선, 화살표, 시선/방향선, 이동 궤적선, 가림/차단 표시는 검수에 필요한 만큼만 추가한다. 중요하지 않은 소품/배경 요소는 스토리 판독, 액션 판독, 가림/차단, 랜드마크 연속성, 페이지 구성에 필요하지 않으면 단순화하거나 생략한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성
+- 1단계 이미지는 먼저 승인된 만화 페이지의 패널 구도, 장면 리듬, 독자 시선 흐름, 공간 관계, 동선, 가림, 인과관계를 보존한다. 의미 없는 기호 콘티는 금지하고, 중요한 캐릭터/오브젝트/배경/가림 요소는 러프 스케치 형체와 약식 정리선으로 식별 가능해야 한다. 위치/방향/벡터/관계 선, 화살표, 시선/방향선, 이동 궤적선, 가림/차단 표시는 검수에 필요한 만큼만 추가한다. 완성 인킹, 톤, 컬러, 질감, 조명, 최종 polish는 금지한다. 중요하지 않은 소품/배경 요소는 스토리 판독, 액션 판독, 가림/차단, 랜드마크 연속성, 페이지 구성에 필요하지 않으면 단순화하거나 생략한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성한다.
 - 부모 세션 최종 검수
 - 모든 페이지 1단계 부모 검수 후 stage-review
-- 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json`과 1단계 산출물을 사용자에게 보고하고, sketch/ink 진행 여부를 반드시 별도로 확인
-- blocking 사용자 피드백 게이트 선택지: 그대로 sketch/ink 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_sketch_ink`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
-- approve-next-stage 전에는 storyboard_sketch_ink 예약 금지. `stage-review`, `approve-next-stage`, sketch/ink `next-batch`를 같은 병렬 실행이나 같은 사용자 응답 없이 연속 실행하지 않는다.
-- 사용자가 승인하면 2단계: 스케치/펜선 storyboard_sketch_ink
-- 2단계는 $create-comic-storyboard-sketch-ink subagent가 현재 페이지의 parent-inspected blocking 이미지와 `*_desc.md`, 그리고 이전 페이지들의 inspected sketch/ink 이미지를 필수 입력으로 사용
-- 2단계 모든 페이지 부모 검수와 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_sketch_ink_to_finish.json`과 2단계 산출물을 사용자에게 보고하고, finish 진행 여부를 반드시 별도로 확인
-- 처음 페이지 계획 승인, blocking 이후 sketch/ink 승인, 2단계 이후 finish 승인은 모두 별개의 승인이다. 초기 "승인"이나 blocking 승인을 다음 단계 승인으로 재사용하지 않는다.
-- sketch/ink 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_finish`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
+- 1단계 stage-review 통과 후 runner가 생성한 `feedback_requests/storyboard_conti_sketch_ink_to_finish.json`과 1단계 산출물을 사용자에게 보고하고, finish 진행 여부를 반드시 별도로 확인
+- 1단계 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_finish`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
 - approve-next-stage 전에는 finish 예약 금지. `stage-review`, `approve-next-stage`, finish `next-batch`를 같은 병렬 실행이나 같은 사용자 응답 없이 연속 실행하지 않는다.
-- 사용자가 중단하면 stop-after-stage로 스케치/펜선 산출물까지만 완료 처리
+- 처음 페이지 계획 승인과 1단계 이후 finish 승인은 별개의 승인이다. 초기 "승인"이나 1단계 stage-review 통과를 finish 승인으로 재사용하지 않는다.
+- 사용자가 중단하면 stop-after-stage로 콘티/스케치/약식 펜선 산출물까지만 완료 처리
 - 사용자 또는 에이전트가 수정을 요청하면 `$review-image-overlays`로 색상별 오버레이 PNG/TXT와 `revision_requests.json`을 저장하고, `request-revisions`로 해당 페이지만 rerun 처리. 같은 stage의 뒤 페이지까지 함께 다시 생성해야 한다고 사용자가 명시하면 `request-revisions --cascade-downstream`을 사용
-- 사용자가 승인하면 3단계: 톤/채색/마무리 finish
-- 3단계는 $create-comic-storyboard-finish subagent가 생성/1차 검수
-- 3단계는 현재 페이지의 parent-inspected storyboard_sketch_ink 이미지, blocking `*_desc.md` 공간/시간 잠금, 그리고 이전 페이지들의 inspected finish 이미지를 필수 입력으로 사용
+- 사용자가 승인하면 2단계: 톤/채색/마무리 `finish`
+- 2단계는 $create-comic-storyboard-finish subagent가 생성/1차 검수
+- 2단계는 현재 페이지의 parent-inspected `storyboard_conti_sketch_ink` 이미지와 `*_desc.md` 공간/시간 잠금, 그리고 이전 페이지들의 inspected finish 이미지를 필수 입력으로 사용한다. 1단계 구도/약식 펜선/공간 관계를 다시 해석하지 않고 보존한 채 톤/컬러/명암/질감/허용 문자/SFX/최종 정리만 올린다.
 ```
 
 Do not call `approve-plan` or `next-batch` until the user approves this list. If the user edits generated-page details or rendered text, update the plan and ask approval again.
@@ -432,8 +426,7 @@ When a top-level `spatial_continuity_plan` is present, `spatial-check` also veri
 Optional single-stage targets:
 
 ```bash
-python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json> --target-stage storyboard_blocking
-python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json> --target-stage storyboard_sketch_ink
+python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json> --target-stage storyboard_conti_sketch_ink
 python3 "$RUNNER" approve-plan --run-dir <run-dir> --plan-file <approved-plan.json> --target-stage finish
 ```
 
@@ -444,104 +437,68 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 # Spawn one fork_context=true subagent for the printed item.
 # Use the printed SUBAGENT_PROMPT_FILE content as the subagent task.
 # Attach every printed VISUAL_REFERENCE_IMAGE as a local image item when spawning the subagent.
-python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_blocking --generated <generated-path> --description <page_stem>_desc.md --worker-status pass --worker-note "<subagent note>"
-python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
-python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_blocking --item <first-page> --status pass --note "<stage-level blocking anchor pass>"
-python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<parent inspection note>" --spatial-verdict needs_rerun --spatial-note "<spatial/temporal contradiction found>"
-python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_blocking --item <first-page> --status needs_rerun --note "<stage level mismatch>" --issue "<issue>"
-python3 "$RUNNER" rerun --run-dir <run-dir> --item <page> --stage storyboard_blocking --note "<reason>"
+python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --generated <generated-path> --description <page_stem>_desc.md --worker-status pass --worker-note "<subagent note>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
+python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_conti_sketch_ink --item <first-page> --status pass --note "<stage-level conti/sketch/ink anchor pass>"
+python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --note "<parent inspection note>" --spatial-verdict needs_rerun --spatial-note "<spatial/temporal contradiction found>"
+python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_conti_sketch_ink --item <first-page> --status needs_rerun --note "<stage level mismatch>" --issue "<issue>"
+python3 "$RUNNER" rerun --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --note "<reason>"
 python3 "$RUNNER" batch-status --run-dir <run-dir> --batch-id <batch-id>
 ```
 
 For each stage in a new `sequential_prior_pages` run, page 1 follows `next-batch -> subagent -> import -> inspect-pass -> anchor-review -> next-batch page 2`. If `next-batch` prints `STAGE_ANCHOR_REVIEW_REQUIRED`, do not spawn page 2 yet; inspect the first page as the stage-level anchor and run `anchor-review`.
 
-After every page in `storyboard_blocking` passes parent inspection:
+After every page in `storyboard_conti_sketch_ink` passes parent inspection:
 
 ```bash
-python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_blocking --status pass --note "<blocking spatial/temporal continuity pass>"
+python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_conti_sketch_ink --status pass --note "<conti/sketch/ink spatial/temporal continuity pass>"
 ```
 
-This sets `stage_gates.storyboard_blocking_to_storyboard_sketch_ink.status` to `pending_user_feedback` and writes:
+This sets `stage_gates.storyboard_conti_sketch_ink_to_finish.status` to `pending_user_feedback` and writes:
 
 ```text
-<run-dir>/feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json
-<run-dir>/feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.md
+<run-dir>/feedback_requests/storyboard_conti_sketch_ink_to_finish.json
+<run-dir>/feedback_requests/storyboard_conti_sketch_ink_to_finish.md
 ```
 
-At that point report the blocking-stage image/desc outputs and the feedback request path to the user, then wait for the user's explicit next-stage choice. Do not reserve sketch/ink with `next-batch` until `approve-next-stage` has consumed the runner-generated feedback request.
-
-Offer exactly these feedback choices:
-
-- Approve next stage: continue to `storyboard_sketch_ink` with `approve-next-stage --feedback-request <json> --feedback-choice approve_sketch_ink`.
-- Open revision UI or create agent markup: use `$review-image-overlays` against `--stage storyboard_blocking` to collect color-coded overlay requests.
-- Stop after stage: keep only `storyboard_blocking` with `stop-after-stage`.
-
-If the user approves sketch/ink:
-
-```bash
-python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_blocking --to-stage storyboard_sketch_ink --feedback-request <run-dir>/feedback_requests/storyboard_blocking_to_storyboard_sketch_ink.json --feedback-choice approve_sketch_ink --note "<user approved sketch/ink>"
-python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
-```
-
-If the user wants the blocking revision UI:
-
-```bash
-REVIEW_SKILL_DIR=".agents/skills/review-image-overlays"
-REVIEW_RUNNER="$REVIEW_SKILL_DIR/scripts/review_overlay_server.py"
-python3 "$REVIEW_RUNNER" serve --run-dir <run-dir> --stage storyboard_blocking
-```
-
-Import blocking revision overlays the same way as later stages:
-
-```bash
-python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_blocking/<review-id>/revision_requests.json
-# Use --cascade-downstream only when the user explicitly wants later same-stage pages rerun too.
-python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
-```
-
-The approved next batch is `storyboard_sketch_ink`. Import/inspect it the same way, except no `--description` is used:
-
-```bash
-python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
-python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
-python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_sketch_ink --item <first-page> --status pass --note "<stage-level sketch/ink anchor pass>"
-```
-
-After every page in `storyboard_sketch_ink` passes parent inspection:
-
-```bash
-python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_sketch_ink --status pass --note "<source consistency and continuity pass>"
-```
-
-This sets `stage_gates.storyboard_sketch_ink_to_finish.status` to `pending_user_feedback` and writes:
-
-```text
-<run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json
-<run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.md
-```
-
-At that point report the sketch/ink-stage outputs and the feedback request path to the user, then wait for the user's explicit next-stage choice. The original page-plan approval is not a finish approval.
+At that point report the conti/sketch/ink image/desc outputs and the feedback request path to the user, then wait for the user's explicit next-stage choice. Do not reserve finish with `next-batch` until `approve-next-stage` has consumed the runner-generated feedback request.
 
 Offer exactly these feedback choices:
 
 - Approve next stage: continue to `finish` with `approve-next-stage --feedback-request <json> --feedback-choice approve_finish`.
-- Open revision UI or create agent markup: use `$review-image-overlays` to collect color-coded overlay requests.
-- Stop after stage: keep only `storyboard_sketch_ink` with `stop-after-stage`.
+- Open revision UI or create agent markup: use `$review-image-overlays` against `--stage storyboard_conti_sketch_ink` to collect color-coded overlay requests.
+- Stop after stage: keep only `storyboard_conti_sketch_ink` with `stop-after-stage`.
 
-Do not run `approve-next-stage` in the same tool call, parallel group, or assistant turn as the `stage-review` unless the user has explicitly answered this feedback request after seeing the sketch/ink-stage outputs. Do not reserve finish with `next-batch` until `approve-next-stage` has consumed the runner-generated feedback request.
+If the user wants the conti/sketch/ink revision UI:
+
+```bash
+REVIEW_SKILL_DIR=".agents/skills/review-image-overlays"
+REVIEW_RUNNER="$REVIEW_SKILL_DIR/scripts/review_overlay_server.py"
+python3 "$REVIEW_RUNNER" serve --run-dir <run-dir> --stage storyboard_conti_sketch_ink
+```
+
+Import conti/sketch/ink revision overlays the same way as later stages:
+
+```bash
+python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_conti_sketch_ink/<review-id>/revision_requests.json
+# Use --cascade-downstream only when the user explicitly wants later same-stage pages rerun too.
+python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
+```
+
+Do not run `approve-next-stage` in the same tool call, parallel group, or assistant turn as the `stage-review` unless the user has explicitly answered this feedback request after seeing the conti/sketch/ink-stage outputs. Do not reserve finish with `next-batch` until `approve-next-stage` has consumed the runner-generated feedback request.
 
 If the user wants the revision UI:
 
 ```bash
 REVIEW_SKILL_DIR=".agents/skills/review-image-overlays"
 REVIEW_RUNNER="$REVIEW_SKILL_DIR/scripts/review_overlay_server.py"
-python3 "$REVIEW_RUNNER" serve --run-dir <run-dir> --stage storyboard_sketch_ink
+python3 "$REVIEW_RUNNER" serve --run-dir <run-dir> --stage storyboard_conti_sketch_ink
 ```
 
 If a subagent self-check or parent inspection identifies a concrete fix without needing user painting, create a coordinate markup spec and save the same artifact format directly:
 
 ```bash
-python3 "$REVIEW_RUNNER" create-markup --run-dir <run-dir> --stage storyboard_sketch_ink --spec <markup.json>
+python3 "$REVIEW_RUNNER" create-markup --run-dir <run-dir> --stage storyboard_conti_sketch_ink --spec <markup.json>
 ```
 
 Use normalized coordinates by default. The markup spec supports `rect` boxes and `polygon` points, non-empty request text per mark, and optional `coordinate_space: "pixel"` for exact image pixel coordinates. The generated color-specific overlay PNG/TXT files are canonical, just like the browser UI output.
@@ -549,7 +506,7 @@ Use normalized coordinates by default. The markup spec supports `rect` boxes and
 After the user saves in the browser or an agent creates markup, import the manifest back into this runner:
 
 ```bash
-python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_sketch_ink/<review-id>/revision_requests.json
+python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_conti_sketch_ink/<review-id>/revision_requests.json
 # Use --cascade-downstream only when the user explicitly wants later same-stage pages rerun too.
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
@@ -559,41 +516,39 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 If the user approves finish:
 
 ```bash
-python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
+python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_conti_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_conti_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage finish --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
 python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage finish --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
 python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage finish --item <first-page> --status pass --note "<stage-level finish anchor pass>"
 ```
 
-If the user stops after sketch/ink:
+If the user stops after conti/sketch/ink:
 
 ```bash
-python3 "$RUNNER" stop-after-stage --run-dir <run-dir> --stage storyboard_sketch_ink --note "<user stops before finish>"
+python3 "$RUNNER" stop-after-stage --run-dir <run-dir> --stage storyboard_conti_sketch_ink --note "<user stops before finish>"
 ```
 
-For finish-only runs with an external sketch/ink image:
+For finish-only runs with an external conti/sketch/ink image and description:
 
 ```bash
-python3 "$RUNNER" import-prior-stage --run-dir <run-dir> --item <page> --stage storyboard_sketch_ink --generated <sketch-ink-image> --note "<external prior reference>"
-python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_sketch_ink --status pass --note "<external prior stage accepted>"
-python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
+python3 "$RUNNER" import-prior-stage --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --generated <conti-sketch-ink-image> --description <page_stem>_desc.md --note "<external prior reference>"
+python3 "$RUNNER" stage-review --run-dir <run-dir> --stage storyboard_conti_sketch_ink --status pass --note "<external prior stage accepted>"
+python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_conti_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_conti_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 
 ## State Rules
 
 - `approve-plan` is the only transition from approval-gated planning into generation-ready state.
-- `target_stages` defaults to `["storyboard_blocking", "storyboard_sketch_ink", "finish"]`.
-- Existing already-approved legacy states keep their recorded `target_stages`; they are not force-migrated into blocking.
+- `target_stages` defaults to `["storyboard_conti_sketch_ink", "finish"]`.
+- Existing three-stage runs are not migrated. Start a new run for the two-stage workflow.
 - New approved runs default to `page_generation_mode: sequential_prior_pages`; already-approved legacy states without this field are treated as `parallel_batch`.
-- `storyboard_blocking` must finish parent inspection and stage-review before default `storyboard_sketch_ink` reservation.
-- `storyboard_sketch_ink` also requires `approve-next-stage` with the active runner-generated `storyboard_blocking_to_storyboard_sketch_ink` feedback request and `--feedback-choice approve_sketch_ink`; blocking stage-review pass alone is not enough.
-- `storyboard_blocking` imports require `--description <desc.md>`, and the runner validates required headings plus all active entity/constraint ids. Required heading text stays fixed, but the description body must be written in Korean.
-- `storyboard_sketch_ink` must finish parent inspection and stage-review before `finish`.
+- `storyboard_conti_sketch_ink` imports require `--description <desc.md>`, and the runner validates required headings plus all active entity/constraint ids. Required heading text stays fixed, but the description body must be written in Korean.
+- `storyboard_conti_sketch_ink` must finish parent inspection and stage-review before `finish`.
 - `finish` also requires `approve-next-stage` with the active runner-generated feedback request and `--feedback-choice approve_finish`; stage-review pass or parent-only note is not enough.
 - `stop-after-stage` changes the completion target to the requested completed stage.
-- `finish` requires a parent-inspected or imported prior `storyboard_sketch_ink` image.
+- `finish` requires a parent-inspected or imported prior `storyboard_conti_sketch_ink` image and its `*_desc.md`.
 - `next-batch --limit 1` reserves one eligible page in `sequential_prior_pages` mode and writes both `prompts/<stage>/...prompt.txt` and `subagent_prompts/<stage>/...subagent.txt`. Legacy `parallel_batch` states may still reserve up to four pages.
 - `next-batch` records `visual_reference_paths` on the page stage and prints one `VISUAL_REFERENCE_IMAGE: <absolute path>` line per image that must be attached as a local image item when spawning the subagent.
 - In `sequential_prior_pages` mode, page N waits for pages 1..N-1 in the same stage to pass parent inspection before reservation. Manual `rerun`, `request-revisions`, and `stage-review --status needs_rerun` reset only the requested page(s) by default; pass `--cascade-downstream` only when the user explicitly wants later generated/imported/passed pages in that same stage reset to `rerun_pending` too.
@@ -615,9 +570,9 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 
 Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, pre-page `spatial_continuity_plan` / `location_continuity` compliance, structured `spatial_contract` compliance, temporal continuity, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
 
-For `storyboard_blocking`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, meaningless pure-symbol blocking that makes entities impossible to identify, over-detailed/final-art rendering, or semantic labels drawn into the image instead of the Markdown description.
+For `storyboard_conti_sketch_ink`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, meaningless pure-symbol conti that makes entities impossible to identify, missing rough sketch forms for important people/objects/background/occluders, missing readable movement/occlusion/cause-effect cues, finished inking, tone/color/texture/final polish, or semantic labels drawn into the image instead of the Markdown description.
 
-For a stage first page in `sequential_prior_pages`, perform `anchor-review` after parent inspection and before reserving page 2. The anchor check verifies stage level, not just local correctness: `storyboard_blocking` must stay rough comic-page blocking with recognizable 3-second forms and no final-art polish; `storyboard_sketch_ink` must preserve blocking while adding real sketch/ink line art without tone/color/final finish; `finish` must preserve sketch/ink structure while adding tone/color/final polish without redraw. All anchor checks also include text policy, character locks, character appearance/anatomy, visual text guard, `spatial_contract`, and page-to-page continuity.
+For a stage first page in `sequential_prior_pages`, perform `anchor-review` after parent inspection and before reserving page 2. The anchor check verifies stage level, not just local correctness: `storyboard_conti_sketch_ink` must stay a readable comic-page conti/rough-sketch/light-ink pass with identifiable entities, spatial relationships, movement, occlusion, and cause-effect logic but no tone/color/final polish; `finish` must preserve the conti/sketch/ink structure while adding tone/color/final polish without redraw. All anchor checks also include text policy, character locks, character appearance/anatomy, visual text guard, `spatial_contract`, and page-to-page continuity.
 
 When `spatial_continuity_plan` is active, inspect every generated page against the approved physical set before judging page-specific `spatial_contract`: same `location_id` must keep the same room/corridor/street, wall relationships, entrances/exits, windows, furniture layout, fixed landmarks, lighting sources, and allowed state changes. Reject pages that silently redraw the same `location_id` as a different space, move a fixed landmark to another wall/side/depth, duplicate or remove a required landmark without `offscreen_landmarks` or an approved crop, or change location without `location_transition`.
 
@@ -627,9 +582,7 @@ When `spatial_contract.coordinate_space.type` is `scene_3d`, inspect hard invari
 
 Character appearance/anatomy is an independent reject criterion, not just a technical-quality note. Unless explicitly approved by the plan or source, rerun pages with missing/extra/merged eyes, one-eyed appearance for a two-eyed character, one-eyed face unless explicitly approved, missing/extra limbs or fingers, changed species/body type, broken joints, or broken body proportions.
 
-For `storyboard_sketch_ink`, verify that sketch/ink preserved the inspected rough comic-page blocking PNG, approved panel design, and `*_desc.md` spatial validation overlay while adding real drawing detail.
-
-For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, line-weight rhythm, visual emphasis, effect lines, character/object blocking, blocking `*_desc.md` spatial validation overlay, structured spatial contract, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
+For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_conti_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, light clean-line structure, line-weight rhythm, visual emphasis, effect lines, character/object placement, `*_desc.md` spatial validation overlay, structured spatial contract, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
 
 Do not claim page coverage, text quality, continuity, spatial logic, or stage quality unless the image was inspected.
 
@@ -643,7 +596,7 @@ After each batch or gate, report in Korean:
 - 저장 폴더: ...
 - 상태 파일: ...
 - 대상 단계(target_stages): ...
-- 현재 단계: storyboard_blocking | storyboard_sketch_ink | finish | complete
+- 현재 단계: storyboard_conti_sketch_ink | finish | complete
 - 승인된 페이지 수: ...
 - 이번 병렬 그룹: ...
 - worker 검수 결과: ...
@@ -655,8 +608,8 @@ After each batch or gate, report in Korean:
 - 사전 공간 설계/고정 랜드마크 검수: ...
 - 공간/동선/상태유지 검수: ...
 - 단계 마무리 검수 결과: ...
-- 다음 단계 사용자 피드백 게이트: storyboard_blocking_to_storyboard_sketch_ink 또는 storyboard_sketch_ink_to_finish = pending_user_feedback | approved | stopped
+- 다음 단계 사용자 피드백 게이트: storyboard_conti_sketch_ink_to_finish = pending_user_feedback | approved | stopped
 - 피드백 요청 파일: <run-dir>/feedback_requests/<from_stage>_to_<to_stage>.json
 - 보완 대상 페이지: ...
-- 다음 결정: approve-next-stage --feedback-request ... --feedback-choice approve_sketch_ink 또는 approve_finish로 다음 단계 진행 | $review-image-overlays로 수정 UI 열기/에이전트 마킹 생성 | stop-after-stage로 종료
+- 다음 결정: approve-next-stage --feedback-request ... --feedback-choice approve_finish로 finish 진행 | $review-image-overlays로 수정 UI 열기/에이전트 마킹 생성 | stop-after-stage로 종료
 ```

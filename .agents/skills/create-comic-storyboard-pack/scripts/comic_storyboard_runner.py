@@ -120,6 +120,13 @@ SPATIAL_CONSTRAINT_TYPES = {
     "vertical_separation",
     "same_location_as",
     "visual_evidence_required",
+    "distance_less_than",
+    "distance_at_least",
+    "occluder_between_3d",
+    "same_side_as",
+    "opposite_side_from",
+    "max_transfer_distance",
+    "path_via",
 }
 SCENE_3D_ONLY_CONSTRAINT_TYPES = {
     "on_level",
@@ -127,6 +134,13 @@ SCENE_3D_ONLY_CONSTRAINT_TYPES = {
     "below",
     "vertical_separation",
     "same_location_as",
+    "distance_less_than",
+    "distance_at_least",
+    "occluder_between_3d",
+    "same_side_as",
+    "opposite_side_from",
+    "max_transfer_distance",
+    "path_via",
 }
 NON_FIRING_CUES = (
     "not_firing",
@@ -907,6 +921,42 @@ def vector3_length(vector: tuple[float, float, float]) -> float:
     return math.sqrt(vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2)
 
 
+def vector3_distance(left: tuple[float, float, float], right: tuple[float, float, float]) -> float:
+    return vector3_length((left[0] - right[0], left[1] - right[1], left[2] - right[2]))
+
+
+def vector3_sub(left: tuple[float, float, float], right: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (left[0] - right[0], left[1] - right[1], left[2] - right[2])
+
+
+def vector3_add(left: tuple[float, float, float], right: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (left[0] + right[0], left[1] + right[1], left[2] + right[2])
+
+
+def vector3_scale(vector: tuple[float, float, float], scalar: float) -> tuple[float, float, float]:
+    return (vector[0] * scalar, vector[1] * scalar, vector[2] * scalar)
+
+
+def point_to_segment_distance3(
+    point: tuple[float, float, float],
+    start: tuple[float, float, float],
+    end: tuple[float, float, float],
+) -> tuple[float, float]:
+    segment = vector3_sub(end, start)
+    segment_len_sq = segment[0] ** 2 + segment[1] ** 2 + segment[2] ** 2
+    if segment_len_sq == 0:
+        return (vector3_distance(point, start), 0.0)
+    start_to_point = vector3_sub(point, start)
+    projection = (
+        start_to_point[0] * segment[0]
+        + start_to_point[1] * segment[1]
+        + start_to_point[2] * segment[2]
+    ) / segment_len_sq
+    clamped = min(1.0, max(0.0, projection))
+    closest = vector3_add(start, vector3_scale(segment, clamped))
+    return (vector3_distance(point, closest), projection)
+
+
 def dot_matches_direction(
     actual: tuple[float, float] | None,
     origin: tuple[float, float] | None,
@@ -1426,6 +1476,62 @@ def spatial_contract_coordinate_type(contract: dict[str, Any]) -> str:
     return str(coordinate_space.get("type") or "").strip()
 
 
+def panel_screen_2d_exception_reason(page: dict[str, Any], contract: dict[str, Any]) -> str:
+    coordinate_space = contract.get("coordinate_space") or {}
+    extraction = page.get("spatial_contract_extraction") or {}
+    candidates = [
+        coordinate_space.get("exception_reason"),
+        coordinate_space.get("panel_screen_2d_reason"),
+        coordinate_space.get("scene_3d_exception_reason"),
+        contract.get("exception_reason"),
+        contract.get("panel_screen_2d_reason"),
+        extraction.get("coordinate_space_exception_reason"),
+        extraction.get("panel_screen_2d_reason"),
+        extraction.get("scene_3d_exception_reason"),
+    ]
+    return next((str(candidate).strip() for candidate in candidates if str(candidate or "").strip()), "")
+
+
+def spatial_contract_has_scene_3d_default_cues(page: dict[str, Any], contract: dict[str, Any]) -> bool:
+    constraint_types = {str(constraint.get("type") or "") for constraint in contract.get("constraints", [])}
+    if constraint_types & SCENE_3D_ONLY_CONSTRAINT_TYPES:
+        return True
+    if constraint_types & {
+        "cover_between",
+        "behind_cover_from",
+        "line_of_sight_blocked",
+        "trajectory_to",
+        "allowed_transition",
+        "requires_cause",
+        "same_cover_as",
+        "state_persists_from",
+        "occlusion_persists_from",
+    }:
+        return True
+    if len(contract.get("panel_snapshots", [])) > 1:
+        return True
+    haystack = json.dumps(
+        {
+            "narrative_plan": page.get("narrative_plan"),
+            "spatial_logic_notes": page.get("spatial_logic_notes"),
+            "motion_checks": page.get("motion_checks"),
+            "must_match": page.get("must_match"),
+            "location_continuity": page.get("location_continuity"),
+            "spatial_contract": contract,
+        },
+        ensure_ascii=False,
+    ).lower()
+    return bool(
+        re.search(
+            r"multi[-_ ]?floor|floor_2|floor2|2층|upper|above|below|stair|railing|balcony|level|층|계단|난간|"
+            r"distance|거리|line of sight|occlusion|occluder|blocked|blocking|가림|차폐|엄폐|behind|"
+            r"path|trajectory|route|movement|transfer|handoff|deliver|throw|roll|pass|전달|던지|굴러|패스|"
+            r"vehicle|door|window|pillar|stage|court|room|corridor|hall|차량|문|창문|기둥|무대|코트|복도",
+            haystack,
+        )
+    )
+
+
 def scene_3d_scenes_by_id(spatial_continuity_plan: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     plan = normalize_spatial_continuity_plan(spatial_continuity_plan)
     return {
@@ -1453,6 +1559,128 @@ def scene_3d_level_contains_z(level: dict[str, Any], z: float) -> bool:
         return True
     lower, upper = sorted((float(z_range[0]), float(z_range[1])))
     return lower <= z <= upper
+
+
+def scene_3d_level_floor_z(level: dict[str, Any] | None) -> float | None:
+    if not level:
+        return None
+    z_range = vector_numbers(level.get("z_range"))
+    if not z_range or len(z_range) < 2:
+        return None
+    return min(float(z_range[0]), float(z_range[1]))
+
+
+def scene_3d_entity_definitions(scene: dict[str, Any] | None, contract: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    definitions: dict[str, dict[str, Any]] = {}
+    for entity in (scene or {}).get("fixed_entities", []):
+        entity_id = str(entity.get("id") or "")
+        if entity_id:
+            definitions[entity_id] = entity
+    for entity in contract.get("entities", []):
+        entity_id = str(entity.get("id") or "")
+        if entity_id:
+            definitions[entity_id] = {**definitions.get(entity_id, {}), **entity}
+    return definitions
+
+
+def scene_3d_snapshot_or_defined_state(
+    snapshots: dict[str, dict[str, dict[str, Any]]],
+    panel: str,
+    entity_id: str,
+    scene: dict[str, Any] | None,
+    contract: dict[str, Any],
+    issues: list[str],
+    label: str,
+) -> dict[str, Any] | None:
+    if not entity_id:
+        issues.append(f"{label}: missing entity id.")
+        return None
+    if panel in snapshots and entity_id in snapshots[panel]:
+        return snapshots[panel][entity_id]
+    definition = scene_3d_entity_definitions(scene, contract).get(entity_id)
+    if definition and vector3(definition.get("position")) is not None:
+        return definition
+    if panel not in snapshots:
+        issues.append(f"{label}: unknown panel snapshot {panel}.")
+    else:
+        issues.append(f"{label}: entity {entity_id} has no state in panel {panel}.")
+    return None
+
+
+def scene_3d_resolve_position(
+    value: Any,
+    snapshots: dict[str, dict[str, dict[str, Any]]],
+    panel: str,
+    scene: dict[str, Any] | None,
+    contract: dict[str, Any],
+    issues: list[str],
+    label: str,
+    field_label: str,
+) -> tuple[tuple[float, float, float] | None, str]:
+    direct = vector3(value)
+    if direct is not None:
+        return direct, str(value)
+    entity_id = str(value or "")
+    if not entity_id:
+        issues.append(f"{label}: needs {field_label}.")
+        return None, field_label
+    state = scene_3d_snapshot_or_defined_state(snapshots, panel, entity_id, scene, contract, issues, label)
+    return state_position3(state, issues, label), entity_id
+
+
+def scene_3d_constraint_position(
+    constraint: dict[str, Any],
+    names: list[str],
+    snapshots: dict[str, dict[str, dict[str, Any]]],
+    panel: str,
+    scene: dict[str, Any] | None,
+    contract: dict[str, Any],
+    issues: list[str],
+    label: str,
+) -> tuple[tuple[float, float, float] | None, str]:
+    value = spatial_constraint_value(constraint, *names)
+    return scene_3d_resolve_position(value, snapshots, panel, scene, contract, issues, label, "/".join(names))
+
+
+def scene_3d_constraint_path_points(
+    constraint: dict[str, Any],
+    snapshots: dict[str, dict[str, dict[str, Any]]],
+    panel: str,
+    scene: dict[str, Any] | None,
+    contract: dict[str, Any],
+    issues: list[str],
+    label: str,
+) -> list[tuple[float, float, float]]:
+    raw_path = constraint.get("path") or constraint.get("waypoints") or []
+    if not isinstance(raw_path, list):
+        issues.append(f"{label}: path/waypoints must be a list.")
+        return []
+    points: list[tuple[float, float, float]] = []
+    for index, entry in enumerate(raw_path, start=1):
+        point, _ = scene_3d_resolve_position(entry, snapshots, panel, scene, contract, issues, label, f"path[{index}]")
+        if point is not None:
+            points.append(point)
+    return points
+
+
+def scene_3d_axis_vector(value: Any) -> tuple[float, float, float] | None:
+    vector = vector3(value)
+    if vector is not None:
+        return vector
+    axis = str(value or "").strip().lower()
+    if axis in {"x", "+x", "east", "right"}:
+        return (1.0, 0.0, 0.0)
+    if axis in {"-x", "west", "left"}:
+        return (-1.0, 0.0, 0.0)
+    if axis in {"y", "+y", "north", "forward"}:
+        return (0.0, 1.0, 0.0)
+    if axis in {"-y", "south", "back"}:
+        return (0.0, -1.0, 0.0)
+    if axis in {"z", "+z", "up"}:
+        return (0.0, 0.0, 1.0)
+    if axis in {"-z", "down"}:
+        return (0.0, 0.0, -1.0)
+    return None
 
 
 def scene_3d_transition_matches(
@@ -1483,6 +1711,176 @@ def scene_3d_transition_matches(
     return True
 
 
+SCENE_3D_MAJOR_SPATIAL_TERMS = {
+    "building",
+    "room",
+    "street",
+    "road",
+    "corridor",
+    "hall",
+    "stage",
+    "court",
+    "vehicle",
+    "car",
+    "truck",
+    "apc",
+    "furniture",
+    "sofa",
+    "table",
+    "desk",
+}
+SCENE_3D_SINGLE_BOX_ALLOWED_TERMS = {"door", "window", "pillar", "column", "railing", "sign", "marker"}
+SCENE_3D_GROUNDED_TERMS = {
+    "ground",
+    "floor",
+    "street",
+    "road",
+    "rubble",
+    "debris",
+    "vehicle",
+    "car",
+    "truck",
+    "apc",
+    "furniture",
+    "table",
+    "desk",
+    "chair",
+    "wall",
+    "door",
+    "pillar",
+    "column",
+    "stage",
+    "court",
+    "platform",
+    "crate",
+}
+SCENE_3D_SLOPE_TERMS = {"sloped", "slope", "ramp", "tilted", "incline", "inclined", "경사", "기울"}
+
+
+def preview_geometry_for_entity(entity: dict[str, Any]) -> dict[str, Any]:
+    geometry = entity.get("preview_geometry") or {}
+    return geometry if isinstance(geometry, dict) else {}
+
+
+def scene_3d_entity_text(entity: dict[str, Any], geometry: dict[str, Any]) -> str:
+    payload = {
+        "id": entity.get("id"),
+        "type": entity.get("type"),
+        "role": entity.get("role"),
+        "style": geometry.get("style"),
+        "shape": geometry.get("shape"),
+        "label": geometry.get("preview_label"),
+        "description": entity.get("description"),
+    }
+    return json.dumps(payload, ensure_ascii=False).lower()
+
+
+def scene_3d_geometry_max_size(geometry: dict[str, Any]) -> float:
+    size = vector_numbers(geometry.get("size"))
+    if not size:
+        return 0.0
+    return max(abs(float(value)) for value in size)
+
+
+def scene_3d_is_major_single_box_entity(entity: dict[str, Any], geometry: dict[str, Any]) -> bool:
+    shape = str(geometry.get("shape") or "").lower()
+    if shape not in {"box", "building_shell"}:
+        return False
+    text = scene_3d_entity_text(entity, geometry)
+    if any(term in text for term in SCENE_3D_SINGLE_BOX_ALLOWED_TERMS):
+        return False
+    if not any(term in text for term in SCENE_3D_MAJOR_SPATIAL_TERMS):
+        return False
+    if scene_3d_geometry_max_size(geometry) < 1.5:
+        return False
+    parts = geometry.get("parts") or []
+    return not isinstance(parts, list) or len(parts) == 0
+
+
+def scene_3d_is_grounded_entity(entity: dict[str, Any], geometry: dict[str, Any]) -> bool:
+    text = scene_3d_entity_text(entity, geometry)
+    if any(tag in text for tag in ("airborne", "flying", "thrown", "floating", "suspended")):
+        return False
+    if any(tag in text for tag in ("railing", "balcony")):
+        return False
+    return any(term in text for term in SCENE_3D_GROUNDED_TERMS)
+
+
+def scene_3d_entity_floor_z(scene: dict[str, Any], entity: dict[str, Any], position: tuple[float, float, float]) -> float | None:
+    levels = scene_3d_levels_by_id(scene)
+    level_id = str(entity.get("level_id") or "")
+    if level_id in levels:
+        return scene_3d_level_floor_z(levels[level_id])
+    containing_levels = [level for level in levels.values() if scene_3d_level_contains_z(level, position[2])]
+    if containing_levels:
+        return scene_3d_level_floor_z(containing_levels[0])
+    floor_values = [scene_3d_level_floor_z(level) for level in levels.values()]
+    valid_floor_values = [value for value in floor_values if value is not None]
+    if valid_floor_values:
+        return min(valid_floor_values)
+    return 0.0
+
+
+def scene_3d_quality_issues(
+    page: dict[str, Any],
+    contract: dict[str, Any],
+    scene: dict[str, Any],
+    issues: list[str],
+) -> None:
+    label_prefix = f"{page['id']} spatial_contract scene_3d quality_gate"
+    records: list[tuple[str, dict[str, Any]]] = []
+    for entity in scene.get("fixed_entities", []):
+        records.append(("fixed_entity", entity))
+    for entity in contract.get("entities", []):
+        records.append(("contract_entity", entity))
+    for snapshot in contract.get("panel_snapshots", []):
+        panel = panel_key(snapshot.get("panel"))
+        for entity in snapshot.get("entities", []):
+            merged = {**scene_3d_entity_definitions(scene, contract).get(str(entity.get("id") or ""), {}), **entity}
+            records.append((f"panel {panel}", merged))
+
+    seen: set[tuple[str, str]] = set()
+    for source, entity in records:
+        entity_id = str(entity.get("id") or "")
+        geometry = preview_geometry_for_entity(entity)
+        if not geometry:
+            continue
+        key = (source, entity_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        shape = str(geometry.get("shape") or "").lower()
+        if scene_3d_is_major_single_box_entity(entity, geometry):
+            issues.append(
+                f"{label_prefix} {source} {entity_id}: major spatial element uses a single {shape}; "
+                "add preview_geometry.parts[] for inspectable floor/wall/opening/pillar/doorway/ramp/occluder/landmark structure."
+            )
+        position = vector3(entity.get("position"))
+        anchor = str(geometry.get("anchor") or "").lower()
+        if position is not None and anchor == "base_center" and scene_3d_is_grounded_entity(entity, geometry):
+            expected_z = scene_3d_entity_floor_z(scene, entity, position)
+            tolerance = float(geometry.get("ground_tolerance", 0.15))
+            if expected_z is not None and abs(position[2] - expected_z) > tolerance:
+                issues.append(
+                    f"{label_prefix} {source} {entity_id}: base_center z={position[2]:.2f} appears to float above floor z={expected_z:.2f}; "
+                    "move the base to the floor or mark it as airborne/suspended."
+                )
+        text = scene_3d_entity_text(entity, geometry)
+        if any(term in text for term in SCENE_3D_SLOPE_TERMS):
+            pitch = geometry.get("pitch_degrees", geometry.get("pitch"))
+            roll = geometry.get("roll_degrees", geometry.get("roll"))
+            try:
+                pitch_value = abs(float(pitch or 0))
+                roll_value = abs(float(roll or 0))
+            except (TypeError, ValueError):
+                pitch_value = 0.0
+                roll_value = 0.0
+            if pitch_value < 0.001 and roll_value < 0.001:
+                issues.append(
+                    f"{label_prefix} {source} {entity_id}: sloped/tilted geometry needs pitch_degrees or roll_degrees."
+                )
+
+
 def validate_scene_3d_contract(
     page: dict[str, Any],
     contract: dict[str, Any],
@@ -1500,6 +1898,8 @@ def validate_scene_3d_contract(
     if scene is None:
         issues.append(f"{label_prefix}: unknown scene_3d scene_id {scene_id}.")
         return
+
+    scene_3d_quality_issues(page, contract, scene, issues)
 
     levels = scene_3d_levels_by_id(scene)
     locations = scene_3d_locations_by_id(scene)
@@ -1636,7 +2036,21 @@ def validate_scene_3d_contract(
             ):
                 issues.append(f"{label}: allowed_transition has no matching scene_3d transition.")
             continue
-        if constraint_type not in {"on_level", "above", "below", "vertical_separation", "same_location_as", "trajectory_to"}:
+        if constraint_type not in {
+            "on_level",
+            "above",
+            "below",
+            "vertical_separation",
+            "same_location_as",
+            "trajectory_to",
+            "distance_less_than",
+            "distance_at_least",
+            "occluder_between_3d",
+            "same_side_as",
+            "opposite_side_from",
+            "max_transfer_distance",
+            "path_via",
+        }:
             issues.append(f"{label}: unsupported scene_3d constraint type.")
             continue
 
@@ -1697,6 +2111,162 @@ def validate_scene_3d_contract(
             actual = state_vector3(object_state, ["trajectory_vector", "motion_vector", "velocity_vector"], issues, label)
             min_dot = float(constraint.get("min_dot", 0.5))
             dot_matches_direction3(actual, origin, target, issues, label, min_dot)
+        elif constraint_type == "distance_less_than":
+            subject, subject_label = scene_3d_constraint_position(
+                constraint, ["subject", "entity", "actor", "a"], snapshots, panel, scene, contract, issues, label
+            )
+            target, target_label = scene_3d_constraint_position(
+                constraint, ["target", "to", "anchor", "b"], snapshots, panel, scene, contract, issues, label
+            )
+            comparison, comparison_label = scene_3d_constraint_position(
+                constraint, ["comparison", "other", "reference", "c", "farther_than"], snapshots, panel, scene, contract, issues, label
+            )
+            if subject is None or target is None or comparison is None:
+                continue
+            subject_distance = vector3_distance(subject, target)
+            comparison_distance = vector3_distance(comparison, target)
+            margin = float(constraint.get("margin", constraint.get("min_delta", 0.001)))
+            if subject_distance + margin >= comparison_distance:
+                issues.append(
+                    f"{label}: {subject_label} is not closer to {target_label} than {comparison_label} "
+                    f"(subject_distance={subject_distance:.3f}, comparison_distance={comparison_distance:.3f}, margin={margin:.3f})."
+                )
+        elif constraint_type == "distance_at_least":
+            subject, subject_label = scene_3d_constraint_position(
+                constraint, ["subject", "entity", "actor", "a"], snapshots, panel, scene, contract, issues, label
+            )
+            target, target_label = scene_3d_constraint_position(
+                constraint, ["target", "to", "anchor", "b"], snapshots, panel, scene, contract, issues, label
+            )
+            if subject is None or target is None:
+                continue
+            min_distance = float(constraint.get("min_distance", constraint.get("distance", constraint.get("min", 0))))
+            actual_distance = vector3_distance(subject, target)
+            if actual_distance < min_distance:
+                issues.append(
+                    f"{label}: distance between {subject_label} and {target_label} is {actual_distance:.3f}, "
+                    f"min={min_distance:.3f}."
+                )
+        elif constraint_type == "occluder_between_3d":
+            subject, subject_label = scene_3d_constraint_position(
+                constraint, ["subject", "actor", "protected", "entity", "target"], snapshots, panel, scene, contract, issues, label
+            )
+            source, source_label = scene_3d_constraint_position(
+                constraint, ["source", "threat", "from", "viewpoint_entity"], snapshots, panel, scene, contract, issues, label
+            )
+            occluder, occluder_label = scene_3d_constraint_position(
+                constraint, ["occluder", "cover", "blocker", "object"], snapshots, panel, scene, contract, issues, label
+            )
+            if subject is None or source is None or occluder is None:
+                continue
+            segment_length = vector3_distance(subject, source)
+            if segment_length == 0:
+                issues.append(f"{label}: subject and source positions overlap, so occluder_between_3d cannot be validated.")
+                continue
+            tolerance = float(constraint.get("tolerance", segment_length * float(constraint.get("tolerance_ratio", 0.18))))
+            tolerance = max(tolerance, 0.15)
+            perpendicular, projection = point_to_segment_distance3(occluder, subject, source)
+            if projection <= 0 or projection >= 1:
+                issues.append(f"{label}: {occluder_label} is not between {subject_label} and {source_label} in 3D.")
+            if perpendicular > tolerance:
+                issues.append(
+                    f"{label}: {occluder_label} is too far from the {subject_label}/{source_label} line "
+                    f"(distance={perpendicular:.3f}, max={tolerance:.3f})."
+                )
+        elif constraint_type in {"same_side_as", "opposite_side_from"}:
+            subject, subject_label = scene_3d_constraint_position(
+                constraint, ["subject", "entity", "actor"], snapshots, panel, scene, contract, issues, label
+            )
+            reference, reference_label = scene_3d_constraint_position(
+                constraint, ["reference_object", "reference", "anchor", "object"], snapshots, panel, scene, contract, issues, label
+            )
+            comparison, comparison_label = scene_3d_constraint_position(
+                constraint, ["same_as", "as", "target", "comparison", "other"], snapshots, panel, scene, contract, issues, label
+            )
+            if subject is None or reference is None or comparison is None:
+                continue
+            normal = scene_3d_axis_vector(spatial_constraint_value(constraint, "normal_vector", "normal", "axis"))
+            epsilon = float(constraint.get("tolerance", constraint.get("min_side_distance", 0.001)))
+            if normal is not None:
+                normal_len = vector3_length(normal)
+                if normal_len == 0:
+                    issues.append(f"{label}: side normal/axis cannot be zero-length.")
+                    continue
+                normal = (normal[0] / normal_len, normal[1] / normal_len, normal[2] / normal_len)
+                subject_side = (
+                    (subject[0] - reference[0]) * normal[0]
+                    + (subject[1] - reference[1]) * normal[1]
+                    + (subject[2] - reference[2]) * normal[2]
+                )
+                comparison_side = (
+                    (comparison[0] - reference[0]) * normal[0]
+                    + (comparison[1] - reference[1]) * normal[1]
+                    + (comparison[2] - reference[2]) * normal[2]
+                )
+                product = subject_side * comparison_side
+            else:
+                product = (
+                    (subject[0] - reference[0]) * (comparison[0] - reference[0])
+                    + (subject[1] - reference[1]) * (comparison[1] - reference[1])
+                    + (subject[2] - reference[2]) * (comparison[2] - reference[2])
+                )
+            if abs(product) <= epsilon:
+                issues.append(f"{label}: side relation around {reference_label} is too close to the dividing plane to validate.")
+            elif constraint_type == "same_side_as" and product < 0:
+                issues.append(f"{label}: {subject_label} is not on the same side of {reference_label} as {comparison_label}.")
+            elif constraint_type == "opposite_side_from" and product > 0:
+                issues.append(f"{label}: {subject_label} is not on the opposite side of {reference_label} from {comparison_label}.")
+        elif constraint_type == "max_transfer_distance":
+            max_distance = float(constraint.get("max_distance", constraint.get("distance", constraint.get("max", 0))))
+            if max_distance <= 0:
+                issues.append(f"{label}: max_transfer_distance requires max_distance > 0.")
+                continue
+            origin, origin_label = scene_3d_constraint_position(
+                constraint, ["origin", "from", "source", "sender", "actor"], snapshots, panel, scene, contract, issues, label
+            )
+            destination, destination_label = scene_3d_constraint_position(
+                constraint, ["destination", "target", "to", "recipient"], snapshots, panel, scene, contract, issues, label
+            )
+            path_points = scene_3d_constraint_path_points(constraint, snapshots, panel, scene, contract, issues, label)
+            if origin is None or destination is None:
+                continue
+            route = [origin] + path_points + [destination]
+            actual_distance = sum(vector3_distance(route[index], route[index + 1]) for index in range(len(route) - 1))
+            if actual_distance > max_distance:
+                issues.append(
+                    f"{label}: transfer distance from {origin_label} to {destination_label} is {actual_distance:.3f}, "
+                    f"max={max_distance:.3f}."
+                )
+        elif constraint_type == "path_via":
+            start, start_label = scene_3d_constraint_position(
+                constraint, ["object", "entity", "subject", "source", "from"], snapshots, panel, scene, contract, issues, label
+            )
+            via, via_label = scene_3d_constraint_position(
+                constraint, ["via", "waypoint", "through"], snapshots, panel, scene, contract, issues, label
+            )
+            destination, _ = scene_3d_constraint_position(
+                constraint, ["destination", "target", "to"], snapshots, panel, scene, contract, [], label
+            )
+            if start is None or via is None:
+                continue
+            path_points = scene_3d_constraint_path_points(constraint, snapshots, panel, scene, contract, issues, label)
+            if not path_points:
+                object_id = str(spatial_constraint_value(constraint, "object", "entity", "subject", "source", "from") or "")
+                object_state = scene_3d_snapshot_or_defined_state(snapshots, panel, object_id, scene, contract, [], label)
+                motion = state_vector3(object_state, ["trajectory_vector", "motion_vector", "velocity_vector"], [], label)
+                if motion is not None:
+                    path_points = [vector3_add(start, motion)]
+            route = [start] + path_points + ([destination] if destination is not None else [])
+            if len(route) < 2:
+                issues.append(f"{label}: path_via needs a path/waypoints, destination, or trajectory_vector.")
+                continue
+            tolerance = float(constraint.get("tolerance", 0.75))
+            nearest = min(point_to_segment_distance3(via, route[index], route[index + 1])[0] for index in range(len(route) - 1))
+            if nearest > tolerance:
+                issues.append(
+                    f"{label}: path from {start_label} does not pass near {via_label} "
+                    f"(distance={nearest:.3f}, max={tolerance:.3f})."
+                )
 
 
 def scene_3d_contract_warnings(page: dict[str, Any], contract: dict[str, Any]) -> list[str]:
@@ -1745,6 +2315,12 @@ def spatial_contract_issues(
         if spatial_contract_coordinate_type(contract) == "scene_3d":
             validate_scene_3d_contract(page, contract, spatial_continuity_plan, issues)
             continue
+        if spatial_contract_coordinate_type(contract) == "panel_screen_2d":
+            if spatial_contract_has_scene_3d_default_cues(page, contract) and not panel_screen_2d_exception_reason(page, contract):
+                issues.append(
+                    f"{page['id']} spatial_contract: spatially important page should use coordinate_space.type scene_3d "
+                    "or provide an explicit panel_screen_2d exception_reason."
+                )
         snapshots = spatial_snapshots_by_panel(contract)
         non_firing_payload = {
             "narrative_plan": page.get("narrative_plan"),
@@ -2838,10 +3414,44 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
           shape,
           size,
           yaw: Number(source.yaw_degrees || source.yaw || 0) * Math.PI / 180,
+          pitch: Number(source.pitch_degrees || source.pitch || 0) * Math.PI / 180,
+          roll: Number(source.roll_degrees || source.roll || 0) * Math.PI / 180,
           anchor: String(source.anchor || 'base_center'),
           style: String(source.style || entityStyle(meta)),
           parts: Array.isArray(source.parts) ? source.parts : []
         }};
+      }}
+
+      function transformLocalPoint(point, geometry) {{
+        let x = point[0];
+        let y = point[1];
+        let z = point[2];
+        const roll = (geometry || {{}}).roll || 0;
+        if (roll) {{
+          const cosRoll = Math.cos(roll);
+          const sinRoll = Math.sin(roll);
+          const rolledX = x * cosRoll + z * sinRoll;
+          const rolledZ = -x * sinRoll + z * cosRoll;
+          x = rolledX;
+          z = rolledZ;
+        }}
+        const pitch = (geometry || {{}}).pitch || 0;
+        if (pitch) {{
+          const cosPitch = Math.cos(pitch);
+          const sinPitch = Math.sin(pitch);
+          const pitchedY = y * cosPitch - z * sinPitch;
+          const pitchedZ = y * sinPitch + z * cosPitch;
+          y = pitchedY;
+          z = pitchedZ;
+        }}
+        const yaw = (geometry || {{}}).yaw || 0;
+        const cosYaw = Math.cos(yaw);
+        const sinYaw = Math.sin(yaw);
+        return [
+          x * cosYaw - y * sinYaw,
+          x * sinYaw + y * cosYaw,
+          z
+        ];
       }}
 
       function boxCorners(position, geometry) {{
@@ -2852,17 +3462,18 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
         const sz = geometry.size[2] / 2;
         const centerZ = geometry.anchor === 'center' ? base[2] : base[2] + sz;
         const center = [base[0], base[1], centerZ];
-        const cosYaw = Math.cos(geometry.yaw || 0);
-        const sinYaw = Math.sin(geometry.yaw || 0);
         const local = [
           [-sx, -sy, -sz], [sx, -sy, -sz], [sx, sy, -sz], [-sx, sy, -sz],
           [-sx, -sy, sz], [sx, -sy, sz], [sx, sy, sz], [-sx, sy, sz]
         ];
-        return local.map(point => [
-          center[0] + point[0] * cosYaw - point[1] * sinYaw,
-          center[1] + point[0] * sinYaw + point[1] * cosYaw,
-          center[2] + point[2]
-        ]);
+        return local.map(point => {{
+          const transformed = transformLocalPoint(point, geometry);
+          return [
+            center[0] + transformed[0],
+            center[1] + transformed[1],
+            center[2] + transformed[2]
+          ];
+        }});
       }}
 
       function snapshotPositions(snapshot, definitions) {{
@@ -3245,6 +3856,8 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
             Math.max(0.05, numberAt(rawSize, 2, parent.size[2]))
           ],
           yaw: (parent.yaw || 0) + Number(part.yaw_degrees || part.yaw || 0) * Math.PI / 180,
+          pitch: (parent.pitch || 0) + Number(part.pitch_degrees || part.pitch || 0) * Math.PI / 180,
+          roll: (parent.roll || 0) + Number(part.roll_degrees || part.roll || 0) * Math.PI / 180,
           anchor: String(part.anchor || 'base_center'),
           style: String(part.style || part.shape || parent.style || 'building'),
           parts: []
@@ -3253,12 +3866,13 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
 
       function partPositionFrom(base, parent, part) {{
         const rawOffset = Array.isArray(part.offset) ? part.offset : [0, 0, 0];
-        const offset = rotateLocalYaw([
+        const offset = [
           numberAt(rawOffset, 0, 0),
           numberAt(rawOffset, 1, 0),
           numberAt(rawOffset, 2, 0)
-        ], parent.yaw || 0);
-        return [base[0] + offset[0], base[1] + offset[1], base[2] + offset[2]];
+        ];
+        const transformed = transformLocalPoint(offset, parent || {{}});
+        return [base[0] + transformed[0], base[1] + transformed[1], base[2] + transformed[2]];
       }}
 
       function defaultBuildingShellParts(geometry) {{
@@ -3678,7 +4292,7 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
 
       function relationTargetIds(item) {{
         const ids = [];
-        ['actor', 'anchor', 'cover', 'destination_entity', 'entity', 'object', 'occluder', 'origin_entity', 'source', 'subject', 'target', 'threat', 'vector_entity', 'viewpoint_entity', 'line_from', 'line_to'].forEach(field => {{
+        ['actor', 'anchor', 'as', 'comparison', 'cover', 'destination', 'destination_entity', 'entity', 'from', 'object', 'occluder', 'origin', 'origin_entity', 'recipient', 'reference', 'reference_object', 'same_as', 'sender', 'source', 'subject', 'target', 'threat', 'to', 'vector_entity', 'via', 'viewpoint_entity', 'waypoint', 'line_from', 'line_to'].forEach(field => {{
           const value = (item || {{}})[field];
           if (typeof value === 'string' && value) ids.push(value);
           else if (Array.isArray(value) && !value.every(entry => typeof entry === 'number')) value.forEach(entry => {{ if (entry) ids.push(String(entry)); }});
@@ -3713,7 +4327,21 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
             if (start && end) drawArrowLine(ctx, projector, start, end, '#2563eb', alpha, 1.55, true);
             return;
           }}
-          if (type === 'cover_between' || type === 'behind_cover_from' || type === 'line_of_sight_blocked') {{
+          if (type === 'max_transfer_distance') {{
+            const start = firstPosition(positions, [constraint.origin, constraint.from, constraint.source, constraint.sender, constraint.actor]);
+            const end = firstPosition(positions, [constraint.destination, constraint.target, constraint.to, constraint.recipient]);
+            if (start && end) drawArrowLine(ctx, projector, start, end, '#2563eb', alpha, 1.45, true);
+            return;
+          }}
+          if (type === 'path_via') {{
+            const start = firstPosition(positions, [constraint.object, constraint.entity, constraint.subject, constraint.source, constraint.from]);
+            const via = firstPosition(positions, [constraint.via, constraint.waypoint, constraint.through]);
+            const end = firstPosition(positions, [constraint.destination, constraint.target, constraint.to]);
+            if (start && via) drawLine(ctx, projector, start, via, '#0ea5e9', alpha, 1.35, true);
+            if (via && end) drawArrowLine(ctx, projector, via, end, '#0ea5e9', alpha, 1.35, true);
+            return;
+          }}
+          if (type === 'cover_between' || type === 'behind_cover_from' || type === 'line_of_sight_blocked' || type === 'occluder_between_3d') {{
             const actor = firstPosition(positions, [constraint.actor, constraint.subject, constraint.entity, constraint.target]);
             const cover = firstPosition(positions, [constraint.cover, constraint.occluder, constraint.anchor]);
             const threat = firstPosition(positions, [constraint.threat, constraint.source, constraint.viewpoint_entity]);
@@ -3738,6 +4366,22 @@ def render_spatial_preview_html(model: dict[str, Any]) -> str:
               const levelTarget = [subject[0], subject[1], subject[2] + (type === 'on_level' ? 0.65 : 1.0)];
               drawLine(ctx, projector, subject, levelTarget, '#7c3aed', alpha, 1.1, true);
             }}
+            return;
+          }}
+          if (type === 'distance_less_than' || type === 'distance_at_least') {{
+            const subject = firstPosition(positions, [constraint.subject, constraint.entity, constraint.actor, constraint.a]);
+            const target = firstPosition(positions, [constraint.target, constraint.to, constraint.anchor, constraint.b]);
+            const comparison = firstPosition(positions, [constraint.comparison, constraint.other, constraint.reference, constraint.c, constraint.farther_than]);
+            if (subject && target) drawLine(ctx, projector, subject, target, '#9333ea', alpha, 1.25, true);
+            if (comparison && target) drawLine(ctx, projector, comparison, target, '#a855f7', alpha * 0.78, 1.05, true);
+            return;
+          }}
+          if (type === 'same_side_as' || type === 'opposite_side_from') {{
+            const subject = firstPosition(positions, [constraint.subject, constraint.entity, constraint.actor]);
+            const reference = firstPosition(positions, [constraint.reference_object, constraint.reference, constraint.anchor, constraint.object]);
+            const comparison = firstPosition(positions, [constraint.same_as, constraint.as, constraint.target, constraint.comparison, constraint.other]);
+            if (reference && subject) drawLine(ctx, projector, reference, subject, '#f97316', alpha, 1.25, true);
+            if (reference && comparison) drawLine(ctx, projector, reference, comparison, '#fb923c', alpha * 0.82, 1.1, true);
           }}
         }});
       }}
@@ -5408,7 +6052,7 @@ def stage_instruction(stage_id: str) -> str:
             "Simplify or omit unimportant props/background elements when they are not needed for story readability, "
             "action readability, visibility/occlusion, landmark continuity, or page composition. Do not render detailed "
             "faces, anatomy, costume detail, texture, dialogue, SFX, typography, polished ink, tone/color, or final art. "
-            "The image should remain readable as a rough comic page rather than a tactical diagram, while still making "
+            "The image should remain readable as a rough comic page rather than a spatial validation diagram, while still making "
             "entity positions, facing, gaze/direction/movement vectors, visibility, occlusion, and panel-to-panel "
             "state continuity easy to inspect. "
             "Also write the required *_desc.md beside the image with symbol legend, panel spatial map, "
@@ -6210,7 +6854,7 @@ def prompt_text(run_dir: Path, page: dict[str, Any], stage_id: str, state: dict[
             "",
             "Worker inspection checklist:",
             "- Matches this exact page and stage",
-            "- For storyboard_blocking, preserves rough comic-page readability, panel composition, story rhythm, and reader eye flow first; uses quick recognizable 3-second rough forms for important characters, objects, and environment elements; adds arrows/vector/relation marks only where needed for validation; simplifies or omits unimportant props/background elements; rejects meaningless pure-symbol blocking, tactical diagrams, detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
+            "- For storyboard_blocking, preserves rough comic-page readability, panel composition, story rhythm, and reader eye flow first; uses quick recognizable 3-second rough forms for important characters, objects, and environment elements; adds arrows/vector/relation marks only where needed for validation; simplifies or omits unimportant props/background elements; rejects meaningless pure-symbol blocking, spatial validation diagrams, detailed faces, anatomy, costume rendering, dialogue, SFX, typography, polished ink, tone/color, or final art",
             "- For storyboard_blocking, writes the required *_desc.md with Symbol Legend, Panel Spatial Map, Constraint Check, and Temporal Continuity Check sections; heading text stays exact, and body explanation is Korean",
             "- For storyboard_sketch_ink, uses the parent-inspected storyboard_blocking image and *_desc.md as rough comic-page structure plus spatial validation overlay",
             "- For finish, preserves the inspected sketch/ink image while still respecting the blocking *_desc.md spatial validation overlay",
@@ -6830,12 +7474,12 @@ def scene_3d_has_level_cues(page: dict[str, Any], scene: dict[str, Any] | None, 
 
 
 def scene_3d_has_cover_or_sight_cues(contract: dict[str, Any]) -> bool:
-    cover_types = {"cover_between", "behind_cover_from", "line_of_sight_blocked", "no_line_of_fire", "not_aims_at"}
+    cover_types = {"cover_between", "behind_cover_from", "line_of_sight_blocked", "no_line_of_fire", "not_aims_at", "occluder_between_3d"}
     return any(str(constraint.get("type") or "") in cover_types for constraint in contract.get("constraints", []))
 
 
 def scene_3d_has_trajectory_cues(snapshot: dict[str, Any], contract: dict[str, Any]) -> bool:
-    if any(str(constraint.get("type") or "") == "trajectory_to" for constraint in contract.get("constraints", [])):
+    if any(str(constraint.get("type") or "") in {"trajectory_to", "max_transfer_distance", "path_via"} for constraint in contract.get("constraints", [])):
         return True
     return any(
         vector3(entity.get("trajectory_vector") or entity.get("motion_vector") or entity.get("velocity_vector")) is not None

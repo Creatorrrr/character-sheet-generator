@@ -270,6 +270,7 @@ def action_spatial_contract():
             "origin": "top_left",
             "x_axis": "right",
             "y_axis": "down",
+            "exception_reason": "legacy flat screen-space regression fixture for pointer/gaze and screen_box validation",
         },
         "entities": [
             {"id": "guide", "type": "character", "role": "main subject"},
@@ -353,6 +354,7 @@ def tactical_cover_contract(
             "origin": "top_left",
             "x_axis": "right",
             "y_axis": "down",
+            "exception_reason": "legacy flat screen-space cover regression fixture with explicit screen_box checks",
         },
         "entities": [
             {"id": "grok", "type": "character", "role": "support pressure"},
@@ -568,6 +570,195 @@ def scene_3d_plan():
             {"id": "hero-moves-toward-stairs", "type": "trajectory_to", "panel": 2, "object": "hero", "target": "balcony_railing"},
             {"id": "door-open-cause", "type": "requires_cause", "entity": "lobby_door", "state_change": "closed_to_open", "cause_panel": 2},
             {"id": "floor-readability", "type": "visual_evidence_required", "panel": 1, "evidence": ["villain is visibly above hero", "balcony railing separates floor_2 from floor_1"]},
+        ],
+    }
+    return plan
+
+
+def backstage_prop_transfer_plan():
+    plan = sample_plan(page_count=1, panel_count=1)
+    plan["spatial_continuity_plan"] = {
+        "scope": "single-floor backstage prop handoff zone",
+        "scene_3d_scenes": [
+            {
+                "id": "backstage-main",
+                "status": "provisional",
+                "usage": "validation_only",
+                "units": "meters",
+                "origin": "stage-left prop table",
+                "axes": {"x": "stage right", "y": "upstage", "z": "up"},
+                "levels": [{"id": "stage_floor", "label": "stage floor", "z_range": [0, 3]}],
+                "locations": [{"id": "stage_left_wing", "level_id": "stage_floor"}],
+                "fixed_entities": [
+                    {
+                        "id": "curtain_wing",
+                        "type": "wall",
+                        "role": "occluding side curtain",
+                        "position": [3, -2.5, 0],
+                        "level_id": "stage_floor",
+                        "preview_geometry": {
+                            "shape": "wall",
+                            "size": [2.4, 0.18, 3.0],
+                            "anchor": "base_center",
+                            "style": "occluder",
+                        },
+                    },
+                    {
+                        "id": "prop_table",
+                        "type": "furniture",
+                        "role": "low prop handoff table",
+                        "position": [0, 1, 0],
+                        "level_id": "stage_floor",
+                        "preview_geometry": {
+                            "shape": "box",
+                            "size": [1.2, 0.7, 0.8],
+                            "anchor": "base_center",
+                            "style": "table",
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    page = plan["pages"][0]
+    page["location_id"] = "stage_left_wing"
+    page["spatial_logic_notes"] = "A backstage prop box is passed from the stagehand to the actor through a prop-table waypoint."
+    page["spatial_contract"] = {
+        "coordinate_space": {
+            "type": "scene_3d",
+            "usage": "validation_only",
+            "scene_id": "backstage-main",
+            "location_id": "stage_left_wing",
+        },
+        "entities": [
+            {"id": "stagehand", "type": "character", "role": "prop sender"},
+            {"id": "actor", "type": "character", "role": "prop recipient"},
+            {"id": "audience_viewpoint", "type": "landmark", "role": "view line source"},
+            {"id": "prop_box", "type": "object", "role": "transferred prop"},
+            {"id": "curtain_wing", "type": "wall", "role": "occluding side curtain"},
+            {"id": "prop_table", "type": "furniture", "role": "handoff waypoint"},
+        ],
+        "panel_snapshots": [
+            {
+                "panel": 1,
+                "location_id": "stage_left_wing",
+                "entities": [
+                    {"id": "stagehand", "position": [0, 0, 0], "level_id": "stage_floor"},
+                    {"id": "actor", "position": [3, 0, 0], "level_id": "stage_floor"},
+                    {"id": "audience_viewpoint", "position": [3, -5, 0], "level_id": "stage_floor"},
+                    {"id": "prop_box", "position": [0, 0, 0.9], "level_id": "stage_floor", "trajectory_vector": [3, 0, 0]},
+                    {"id": "curtain_wing", "position": [3, -2.5, 0], "level_id": "stage_floor"},
+                    {"id": "prop_table", "position": [0, 1, 0], "level_id": "stage_floor"},
+                ],
+            }
+        ],
+        "constraints": [
+            {"id": "stagehand-closer-than-audience", "type": "distance_less_than", "panel": 1, "subject": "stagehand", "target": "actor", "comparison": "audience_viewpoint"},
+            {"id": "audience-kept-back", "type": "distance_at_least", "panel": 1, "subject": "actor", "target": "audience_viewpoint", "min_distance": 4.0},
+            {"id": "curtain-blocks-viewline", "type": "occluder_between_3d", "panel": 1, "subject": "actor", "source": "audience_viewpoint", "occluder": "curtain_wing", "tolerance": 0.3},
+            {"id": "handoff-within-reach", "type": "max_transfer_distance", "panel": 1, "origin": "stagehand", "destination": "actor", "max_distance": 4.0},
+            {"id": "prop-route-via-table", "type": "path_via", "panel": 1, "object": "prop_box", "via": "prop_table", "path": ["prop_table", "actor"], "tolerance": 0.25},
+            {"id": "sender-recipient-same-table-side", "type": "same_side_as", "panel": 1, "subject": "stagehand", "reference": "prop_table", "same_as": "actor"},
+            {"id": "audience-opposite-curtain-side", "type": "opposite_side_from", "panel": 1, "subject": "audience_viewpoint", "reference": "curtain_wing", "comparison": "actor"},
+        ],
+    }
+    return plan
+
+
+def capacity_drop_spatial_regression_plan():
+    plan = sample_plan(page_count=1, panel_count=1)
+    plan["spatial_continuity_plan"] = {
+        "scope": "ruined street beside a second-floor window",
+        "scene_3d_scenes": [
+            {
+                "id": "ruined-street-window",
+                "status": "provisional",
+                "usage": "validation_only",
+                "units": "meters",
+                "origin": "building-window-ground-projection",
+                "axes": {"x": "street depth", "y": "street width", "z": "up"},
+                "levels": [
+                    {"id": "street_level", "label": "street", "z_range": [0, 3]},
+                    {"id": "floor_2", "label": "second-floor window", "z_range": [3, 6]},
+                ],
+                "locations": [
+                    {"id": "street_cover_lane", "level_id": "street_level"},
+                    {"id": "window_interior", "level_id": "floor_2"},
+                ],
+                "fixed_entities": [
+                    {
+                        "id": "apc",
+                        "type": "vehicle",
+                        "role": "occluding vehicle between helper and observer",
+                        "position": [2, 0, 0],
+                        "level_id": "street_level",
+                        "preview_geometry": {
+                            "shape": "box",
+                            "size": [2.4, 1.2, 1.1],
+                            "anchor": "base_center",
+                            "style": "vehicle",
+                            "parts": [
+                                {"shape": "box", "size": [2.4, 1.2, 0.85], "offset": [0, 0, 0], "style": "vehicle_hull"},
+                                {"shape": "box", "size": [1.4, 0.9, 0.35], "offset": [0.1, 0, 0.85], "style": "vehicle_roof"},
+                            ],
+                        },
+                    },
+                    {
+                        "id": "window_gap",
+                        "type": "opening",
+                        "role": "second-floor receiving opening",
+                        "position": [0, 0, 3.2],
+                        "level_id": "floor_2",
+                        "preview_geometry": {
+                            "shape": "wall",
+                            "size": [1.0, 0.18, 1.2],
+                            "anchor": "center",
+                            "style": "opening",
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    page = plan["pages"][0]
+    page["location_id"] = "street_cover_lane"
+    page["spatial_logic_notes"] = "Capacity Drop regression: helper is closer to the window than the advancing observer, uses the vehicle as occlusion, and sends the magazine through the window gap."
+    page["spatial_contract"] = {
+        "coordinate_space": {
+            "type": "scene_3d",
+            "usage": "validation_only",
+            "scene_id": "ruined-street-window",
+            "location_id": "street_cover_lane",
+        },
+        "entities": [
+            {"id": "clo_window", "type": "character", "role": "recipient at second-floor opening"},
+            {"id": "grok", "type": "character", "role": "near helper on recipient side of vehicle"},
+            {"id": "gipi", "type": "character", "role": "far observer on opposite side of vehicle"},
+            {"id": "magazine", "type": "object", "role": "transferred object"},
+            {"id": "apc", "type": "vehicle", "role": "occluder"},
+            {"id": "window_gap", "type": "opening", "role": "transfer waypoint"},
+        ],
+        "panel_snapshots": [
+            {
+                "panel": 1,
+                "location_id": "street_cover_lane",
+                "entities": [
+                    {"id": "clo_window", "position": [0, 0, 3.2], "level_id": "floor_2"},
+                    {"id": "grok", "position": [1, 0, 0], "level_id": "street_level"},
+                    {"id": "gipi", "position": [6, 0, 0], "level_id": "street_level"},
+                    {"id": "magazine", "position": [1, 0, 1.0], "level_id": "street_level", "trajectory_vector": [-1, 0, 2.2]},
+                    {"id": "apc", "position": [2, 0, 0], "level_id": "street_level"},
+                    {"id": "window_gap", "position": [0, 0, 3.2], "level_id": "floor_2"},
+                ],
+            }
+        ],
+        "constraints": [
+            {"id": "helper-closer-than-observer", "type": "distance_less_than", "panel": 1, "subject": "grok", "target": "clo_window", "comparison": "gipi"},
+            {"id": "vehicle-between-helper-observer", "type": "occluder_between_3d", "panel": 1, "subject": "grok", "source": "gipi", "occluder": "apc", "tolerance": 0.4},
+            {"id": "helper-on-recipient-side", "type": "same_side_as", "panel": 1, "subject": "grok", "reference": "apc", "same_as": "clo_window"},
+            {"id": "observer-opposite-helper", "type": "opposite_side_from", "panel": 1, "subject": "gipi", "reference": "apc", "comparison": "grok"},
+            {"id": "magazine-transfer-range", "type": "max_transfer_distance", "panel": 1, "origin": "grok", "destination": "clo_window", "max_distance": 3.8},
+            {"id": "magazine-through-window", "type": "path_via", "panel": 1, "object": "magazine", "via": "window_gap", "path": ["window_gap"], "tolerance": 0.25},
         ],
     }
     return plan
@@ -1490,6 +1681,138 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             for index, (plan, expected) in enumerate(cases, start=1):
                 with self.subTest(case=index):
                     plan_path = root / f"bad-scene-3d-{index}.json"
+                    plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+                    result = run_cli_raw("spatial-check", "--plan-file", str(plan_path), cwd=root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("SPATIAL_CHECK: fail", result.stdout)
+                    self.assertIn(expected, result.stdout)
+
+    def test_spatially_important_panel_screen_2d_requires_explicit_exception(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = action_spatial_contract()
+            contract["coordinate_space"].pop("exception_reason")
+            plan = plan_with_spatial_contract(contract)
+            plan_path = root / "panel-2d-without-exception.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            result = run_cli_raw("spatial-check", "--plan-file", str(plan_path), cwd=root)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("SPATIAL_CHECK: fail", result.stdout)
+            self.assertIn("should use coordinate_space.type scene_3d", result.stdout)
+
+    def test_scene_3d_quality_gate_rejects_uninspectable_geometry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cases = []
+
+            single_box_building = scene_3d_plan()
+            single_box_building["spatial_continuity_plan"]["scene_3d_scenes"][0]["fixed_entities"].append(
+                {
+                    "id": "gym_stage_block",
+                    "type": "stage",
+                    "role": "large stage platform",
+                    "position": [3.5, 0, 0],
+                    "preview_geometry": {
+                        "shape": "box",
+                        "size": [5.0, 3.0, 1.0],
+                        "anchor": "base_center",
+                        "style": "stage",
+                    },
+                }
+            )
+            cases.append((single_box_building, "major spatial element uses a single box"))
+
+            floating_ground_object = scene_3d_plan()
+            floating_ground_object["spatial_continuity_plan"]["scene_3d_scenes"][0]["fixed_entities"].append(
+                {
+                    "id": "raised_prop_table",
+                    "type": "furniture",
+                    "role": "grounded prop table",
+                    "position": [3.5, 0, 1.2],
+                    "preview_geometry": {
+                        "shape": "box",
+                        "size": [1.2, 0.8, 0.8],
+                        "anchor": "base_center",
+                        "style": "table",
+                    },
+                }
+            )
+            cases.append((floating_ground_object, "appears to float above floor"))
+
+            ramp_without_tilt = scene_3d_plan()
+            ramp_without_tilt["spatial_continuity_plan"]["scene_3d_scenes"][0]["fixed_entities"].append(
+                {
+                    "id": "service_ramp",
+                    "type": "ramp",
+                    "role": "sloped access ramp",
+                    "position": [3.5, 0, 0],
+                    "preview_geometry": {
+                        "shape": "flat_plane",
+                        "size": [2.5, 0.9, 0.08],
+                        "anchor": "base_center",
+                        "style": "ramp",
+                    },
+                }
+            )
+            cases.append((ramp_without_tilt, "sloped/tilted geometry needs pitch_degrees or roll_degrees"))
+
+            for index, (plan, expected) in enumerate(cases, start=1):
+                with self.subTest(case=index):
+                    plan_path = root / f"bad-scene-3d-quality-{index}.json"
+                    plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+                    result = run_cli_raw("spatial-check", "--plan-file", str(plan_path), cwd=root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("SPATIAL_CHECK: fail", result.stdout)
+                    self.assertIn(expected, result.stdout)
+
+    def test_scene_3d_generic_constraints_accept_noncombat_transfer_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = backstage_prop_transfer_plan()
+            plan_path = root / "backstage-transfer.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            result = run_cli("spatial-check", "--plan-file", str(plan_path), cwd=root)
+
+            self.assertIn("SPATIAL_CHECK: pass", result.stdout)
+
+    def test_capacity_drop_regression_uses_generic_distance_occlusion_transfer_constraints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = capacity_drop_spatial_regression_plan()
+            plan_path = root / "capacity-drop-spatial-regression.json"
+            plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+            result = run_cli("spatial-check", "--plan-file", str(plan_path), cwd=root)
+
+            self.assertIn("SPATIAL_CHECK: pass", result.stdout)
+
+    def test_scene_3d_generic_constraints_reject_physical_contradictions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cases = []
+
+            wrong_distance_order = backstage_prop_transfer_plan()
+            wrong_distance_order["pages"][0]["spatial_contract"]["panel_snapshots"][0]["entities"][0]["position"] = [10, 0, 0]
+            cases.append((wrong_distance_order, "is not closer to actor than audience_viewpoint"))
+
+            missing_occluder = backstage_prop_transfer_plan()
+            missing_occluder["pages"][0]["spatial_contract"]["panel_snapshots"][0]["entities"][4]["position"] = [3, -6, 0]
+            cases.append((missing_occluder, "is not between actor and audience_viewpoint in 3D"))
+
+            too_far_transfer = backstage_prop_transfer_plan()
+            too_far_transfer["pages"][0]["spatial_contract"]["constraints"][3]["max_distance"] = 2.0
+            cases.append((too_far_transfer, "transfer distance from stagehand to actor is"))
+
+            misses_waypoint = backstage_prop_transfer_plan()
+            misses_waypoint["pages"][0]["spatial_contract"]["constraints"][4]["path"] = ["actor"]
+            cases.append((misses_waypoint, "does not pass near prop_table"))
+
+            for index, (plan, expected) in enumerate(cases, start=1):
+                with self.subTest(case=index):
+                    plan_path = root / f"bad-backstage-transfer-{index}.json"
                     plan_path.write_text(json.dumps(plan, indent=2), encoding="utf-8")
                     result = run_cli_raw("spatial-check", "--plan-file", str(plan_path), cwd=root)
                     self.assertNotEqual(result.returncode, 0)

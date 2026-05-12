@@ -115,6 +115,38 @@ def make_blocking_description(root, run_dir, item):
     return path
 
 
+def write_revision_manifest(run_dir, stage_id, item, review_id="manual-review"):
+    review_dir = run_dir / "review_overlays" / stage_id / review_id
+    review_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(item).stem
+    overlay = review_dir / f"{stem}_overlay_red.png"
+    request = review_dir / f"{stem}_overlay_red.txt"
+    overlay.write_bytes(b"overlay")
+    request.write_text("Make the hand smaller but keep the panel layout.", encoding="utf-8")
+    manifest = {
+        "workflow": "review-image-overlays",
+        "run_dir": str(run_dir),
+        "stage": stage_id,
+        "items": [
+            {
+                "filename": item,
+                "overlays": [
+                    {
+                        "color_id": "red",
+                        "color": "#ff3b30",
+                        "overlay_path": str(overlay),
+                        "request_path": str(request),
+                        "request": "Make the hand smaller but keep the panel layout.",
+                    }
+                ],
+            }
+        ],
+    }
+    manifest_path = review_dir / "revision_requests.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return manifest_path, overlay
+
+
 def run_dir_from_init(result):
     for line in result.stdout.splitlines():
         if line.startswith("RUN_DIR: "):
@@ -1940,7 +1972,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             page1_finish_path = str(run_dir / "03_finish" / "001-page-1.png")
             self.assertEqual(page2_finish["visual_reference_paths"], [page2_sketch_path, page1_finish_path])
 
-    def test_prior_page_rerun_marks_later_same_stage_pages_for_rerun(self):
+    def test_manual_rerun_defaults_to_requested_page_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             run_dir = init_run(root)
@@ -1959,6 +1991,48 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "page 1 continuity defect",
                 cwd=root,
             )
+            self.assertIn("DOWNSTREAM_UNCHANGED_ITEM: 002-page-2.png", result.stdout)
+            self.assertIn("DOWNSTREAM_UNCHANGED_ITEM: 003-page-3.png", result.stdout)
+            self.assertIn("--cascade-downstream", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            first_stage = state["pages"][0]["stages"][FIRST_STAGE]
+            self.assertEqual(first_stage["status"], "pending")
+            self.assertTrue(first_stage["rerun_pending"])
+            self.assertEqual(first_stage["visual_reference_paths"], [])
+            archive_entry = first_stage["rerun_history"][-1]
+            self.assertTrue(Path(archive_entry["archived_output_path"]).exists())
+            self.assertTrue(Path(archive_entry["archived_description_path"]).exists())
+            for page in state["pages"][1:]:
+                stage = page["stages"][FIRST_STAGE]
+                self.assertEqual(stage["status"], "inspected_pass")
+                self.assertFalse(stage["rerun_pending"])
+            self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
+            scope = state["revision_scope_history"][-1]
+            self.assertEqual(scope["command"], "rerun")
+            self.assertFalse(scope["cascade_downstream"])
+            self.assertEqual(scope["requested_pages"], ["001-page-1.png"])
+            self.assertEqual(scope["downstream_unchanged_pages"], ["002-page-2.png", "003-page-3.png"])
+
+    def test_manual_rerun_cascade_marks_later_same_stage_pages_for_rerun(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            ensure_stage_review_passed(root, run_dir, FIRST_STAGE, note="blocking pass")
+
+            result = run_cli(
+                "rerun",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "page 1 continuity defect",
+                "--cascade-downstream",
+                cwd=root,
+            )
             self.assertIn("DOWNSTREAM_RERUN_ITEM: 002-page-2.png", result.stdout)
             self.assertIn("DOWNSTREAM_RERUN_ITEM: 003-page-3.png", result.stdout)
             state = json.loads((run_dir / "state.json").read_text())
@@ -1967,7 +2041,73 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 self.assertEqual(stage["status"], "pending")
                 self.assertTrue(stage["rerun_pending"])
                 self.assertEqual(stage["visual_reference_paths"], [])
-            self.assertEqual(state["stage_reviews"][FIRST_STAGE]["status"], "pending")
+            scope = state["revision_scope_history"][-1]
+            self.assertTrue(scope["cascade_downstream"])
+            self.assertEqual(scope["downstream_rerun_pages"], ["002-page-2.png", "003-page-3.png"])
+
+    def test_spatial_inspection_needs_rerun_still_cascades_downstream_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            ensure_stage_review_passed(root, run_dir, FIRST_STAGE, note="blocking pass")
+
+            result = run_cli(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent finds hard spatial contradiction",
+                "--spatial-verdict",
+                "needs_rerun",
+                "--spatial-note",
+                "page 1 breaks a hard continuity reference",
+                cwd=root,
+            )
+
+            self.assertIn("SPATIAL_RERUN_REQUIRED: 001-page-1.png", result.stdout)
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 002-page-2.png", result.stdout)
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 003-page-3.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            for page in state["pages"]:
+                stage = page["stages"][FIRST_STAGE]
+                self.assertEqual(stage["status"], "pending")
+                self.assertTrue(stage["rerun_pending"])
+
+    def test_anchor_review_needs_rerun_still_cascades_downstream_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            ensure_stage_review_passed(root, run_dir, FIRST_STAGE, note="blocking pass")
+
+            result = run_cli(
+                "anchor-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--item",
+                "001-page-1.png",
+                "--status",
+                "needs_rerun",
+                "--note",
+                "blocking anchor changes the stage level",
+                cwd=root,
+            )
+
+            self.assertIn("RERUN_ITEM: 001-page-1.png", result.stdout)
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 002-page-2.png", result.stdout)
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 003-page-3.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            for page in state["pages"]:
+                stage = page["stages"][FIRST_STAGE]
+                self.assertEqual(stage["status"], "pending")
+                self.assertTrue(stage["rerun_pending"])
 
     def test_legacy_stage_names_are_not_cli_choices(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3185,6 +3325,74 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertIn("002-page-2.png", next_batch.stdout)
             self.assertNotIn(f"STAGE: {FINISH_STAGE}", next_batch.stdout)
 
+    def test_stage_review_needs_rerun_defaults_to_requested_page_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            ensure_stage_review_passed(root, run_dir, FIRST_STAGE, note="blocking pass")
+
+            result = run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "needs_rerun",
+                "--note",
+                "page 1 needs a manual composition fix",
+                "--rerun-item",
+                "001-page-1.png",
+                cwd=root,
+            )
+
+            self.assertIn("DOWNSTREAM_UNCHANGED_ITEM: 002-page-2.png", result.stdout)
+            self.assertIn("DOWNSTREAM_UNCHANGED_ITEM: 003-page-3.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            self.assertEqual(state["pages"][0]["stages"][FIRST_STAGE]["status"], "pending")
+            for page in state["pages"][1:]:
+                stage = page["stages"][FIRST_STAGE]
+                self.assertEqual(stage["status"], "inspected_pass")
+                self.assertFalse(stage["rerun_pending"])
+            scope = state["revision_scope_history"][-1]
+            self.assertEqual(scope["command"], "stage-review")
+            self.assertFalse(scope["cascade_downstream"])
+
+    def test_stage_review_needs_rerun_cascade_marks_later_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            ensure_stage_review_passed(root, run_dir, FIRST_STAGE, note="blocking pass")
+
+            result = run_cli(
+                "stage-review",
+                "--run-dir",
+                str(run_dir),
+                "--stage",
+                FIRST_STAGE,
+                "--status",
+                "needs_rerun",
+                "--note",
+                "page 1 changes the continuity anchor",
+                "--rerun-item",
+                "001-page-1.png",
+                "--cascade-downstream",
+                cwd=root,
+            )
+
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 002-page-2.png", result.stdout)
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 003-page-3.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            for page in state["pages"]:
+                stage = page["stages"][FIRST_STAGE]
+                self.assertEqual(stage["status"], "pending")
+                self.assertTrue(stage["rerun_pending"])
+            scope = state["revision_scope_history"][-1]
+            self.assertTrue(scope["cascade_downstream"])
+            self.assertEqual(scope["downstream_rerun_pages"], ["002-page-2.png", "003-page-3.png"])
+
     def test_request_revisions_marks_overlay_items_for_rerun_and_prompts_include_overlays(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3233,33 +3441,7 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 "first stage continuity pass",
                 cwd=root,
             )
-            review_dir = run_dir / "review_overlays" / FIRST_STAGE / "manual-review"
-            review_dir.mkdir(parents=True)
-            overlay = review_dir / "001-page-1_overlay_red.png"
-            request = review_dir / "001-page-1_overlay_red.txt"
-            overlay.write_bytes(b"overlay")
-            request.write_text("Make the hand smaller but keep the panel layout.", encoding="utf-8")
-            manifest = {
-                "workflow": "review-image-overlays",
-                "run_dir": str(run_dir),
-                "stage": FIRST_STAGE,
-                "items": [
-                    {
-                        "filename": "001-page-1.png",
-                        "overlays": [
-                            {
-                                "color_id": "red",
-                                "color": "#ff3b30",
-                                "overlay_path": str(overlay),
-                                "request_path": str(request),
-                                "request": "Make the hand smaller but keep the panel layout.",
-                            }
-                        ],
-                    }
-                ],
-            }
-            manifest_path = review_dir / "revision_requests.json"
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            manifest_path, overlay = write_revision_manifest(run_dir, FIRST_STAGE, "001-page-1.png")
 
             result = run_cli(
                 "request-revisions",
@@ -3295,6 +3477,69 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
                 self.assertIn("User revision overlays", text)
                 self.assertIn(str(overlay.resolve(strict=False)), text)
                 self.assertIn("Make the hand smaller", text)
+
+    def test_request_revisions_defaults_to_requested_page_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            ensure_stage_review_passed(root, run_dir, FIRST_STAGE, note="blocking pass")
+            manifest_path, _overlay = write_revision_manifest(run_dir, FIRST_STAGE, "001-page-1.png")
+
+            result = run_cli(
+                "request-revisions",
+                "--run-dir",
+                str(run_dir),
+                "--review-manifest",
+                str(manifest_path),
+                cwd=root,
+            )
+
+            self.assertIn("RERUN_ITEM: 001-page-1.png", result.stdout)
+            self.assertIn("DOWNSTREAM_UNCHANGED_ITEM: 002-page-2.png", result.stdout)
+            self.assertIn("DOWNSTREAM_UNCHANGED_ITEM: 003-page-3.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            first = state["pages"][0]["stages"][FIRST_STAGE]
+            self.assertEqual(first["status"], "pending")
+            self.assertTrue(first["rerun_pending"])
+            for page in state["pages"][1:]:
+                stage = page["stages"][FIRST_STAGE]
+                self.assertEqual(stage["status"], "inspected_pass")
+                self.assertFalse(stage["rerun_pending"])
+            scope = state["revision_scope_history"][-1]
+            self.assertEqual(scope["command"], "request-revisions")
+            self.assertFalse(scope["cascade_downstream"])
+            self.assertEqual(scope["requested_pages"], ["001-page-1.png"])
+            self.assertEqual(scope["downstream_unchanged_pages"], ["002-page-2.png", "003-page-3.png"])
+
+    def test_request_revisions_cascade_marks_later_same_stage_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=3)
+            ensure_stage_review_passed(root, run_dir, FIRST_STAGE, note="blocking pass")
+            manifest_path, _overlay = write_revision_manifest(run_dir, FIRST_STAGE, "001-page-1.png")
+
+            result = run_cli(
+                "request-revisions",
+                "--run-dir",
+                str(run_dir),
+                "--review-manifest",
+                str(manifest_path),
+                "--cascade-downstream",
+                cwd=root,
+            )
+
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 002-page-2.png", result.stdout)
+            self.assertIn("DOWNSTREAM_RERUN_ITEM: 003-page-3.png", result.stdout)
+            state = json.loads((run_dir / "state.json").read_text())
+            for page in state["pages"]:
+                stage = page["stages"][FIRST_STAGE]
+                self.assertEqual(stage["status"], "pending")
+                self.assertTrue(stage["rerun_pending"])
+            scope = state["revision_scope_history"][-1]
+            self.assertTrue(scope["cascade_downstream"])
+            self.assertEqual(scope["downstream_rerun_pages"], ["002-page-2.png", "003-page-3.png"])
 
     def test_finish_stage_review_required_before_workflow_complete(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -152,14 +152,14 @@
 - `finish`는 앞선 단계에서 생성한 이미지를 필수 입력/구조 참조로 사용합니다.
 - 사용자가 소스/레퍼런스 경로를 지정하지 않으면 `/Users/chasoik/Projects/character-sheet-generator/sources/`에서 필요한 자료를 참고하고, `/Users/chasoik/Projects/character-sheet-generator/output/` 하위 파일은 소스 데이터로 쓰지 않습니다.
 - 승인된 각색 대사, 효과음, 짧은 캡션은 말풍선/효과음 글자/캡션 영역으로 페이지 이미지 내부에 포함합니다.
-- 단계 마무리 검수에서 캐릭터/소품/프로필/배경 등 소스 데이터 일관성과 컷 내부/컷 사이/페이지 간 연속성을 확인하고, 필요하면 해당 페이지를 rerun으로 보완합니다.
+- 단계 마무리 검수에서 캐릭터/소품/프로필/배경 등 소스 데이터 일관성과 컷 내부/컷 사이/페이지 간 연속성을 확인하고, 필요하면 기본적으로 해당 페이지만 rerun으로 보완합니다.
 - 캐릭터, 물체, 소품, 배경의 위치와 움직임이 상식적인지 worker와 부모 세션이 모두 검수합니다.
 - `spatial_contract`가 있는 계획은 `spatial-preview`로 정적 HTML 검수 화면을 생성해 컷별 위치, 방향 벡터, 이동 경로, 가림·차단/시선 관계, 랜드마크/상태 유지 조건과 `spatial-check` 이슈를 이미지 생성 전에 확인할 수 있습니다. `scene_3d`가 있으면 level/camera/snapshot/transition/lock 데이터를 외부 의존성 없는 orbit-capable canvas preview로 함께 표시하며, 기본 isometric view, 드래그 회전, shift/middle 드래그 pan, wheel zoom, top/front/side/iso/camera preset, 같은 `scene_id` preview의 선택적 sync를 지원합니다. 기본 라벨은 짧은 key label이고, `key/all/off` label mode, 라벨 충돌 회피/leader line, z-level rail, 페이지별 status strip, legend/constraint hover highlight를 제공합니다. 또한 주요 건물/차량/벽/슬랩/엄폐물은 preview-only wireframe box로, 캐릭터와 이동 오브젝트는 방향 wedge로, 궤적/엄폐/차단 관계는 점선·화살표 overlay로 표시하며, 각 level plane은 전체 전장에 깔지 않고 해당 level의 active/referenced entity footprint 주변으로 제한해 건물 내부/상층/도로/경사로가 한 평면처럼 보이지 않게 합니다. Actors/Obstacles/Landmarks/Relations/Vectors/Camera/Ghost panels/Levels 필터로 복잡도를 조절합니다. 선택 필드인 `preview_geometry`는 fixed entity, `spatial_contract.entities[]`, `panel_snapshots[].entities[]`에 `shape`, `size`, `yaw_degrees`, `anchor`, `style`을 지정하는 검수용 보조 정보이고, 없으면 id/type/role에서 보수적으로 footprint를 추론합니다. 이 정보는 `spatial-check` hard validation과 이미지 생성 reference에 영향을 주지 않습니다. `scene_3d` 페이지에서는 raw x/y world coordinate가 의미 있는 panel-screen projection이 아니므로 기존 2D SVG 보조 뷰를 렌더링하지 않습니다. 이는 WebGL/Three.js 렌더러나 generation reference가 아니라 검수용 lightweight 3D projection입니다. 이 검수는 승인된 만화 페이지 설계를 확인하는 단계이며, 페이지/컷 설계를 대체하지 않습니다.
 - 승인 계획의 `character_locks`와 `must_match`에 캐릭터 외형/해부 고정 조건을 기록하고, 종족/신체 구조, 얼굴 구조, 눈 개수/배치, 손/손가락/팔/다리 개수, 실루엣, 체형 비율, 자세를 독립 검수합니다.
 - 승인안이나 source가 외눈/비대칭/비인간 구조를 명시하지 않았다면 눈 누락/추가/병합, 두 눈 캐릭터가 외눈처럼 보이는 경우, 손가락/팔/다리 누락이나 추가, 종족/체형 변경, 관절/비율 붕괴는 rerun 대상입니다.
 - 예: 두 눈 캐릭터는 두 눈이 보이거나 각도상 자연스럽게 가려져야 하며, 외눈 캐릭터처럼 보이면 rerun합니다.
 - 다음 단계는 이전 단계의 모든 페이지가 부모 검수와 단계 마무리 검수를 통과하고 사용자가 진행을 승인한 뒤에만 진행합니다.
-- 이전 페이지가 rerun되면 같은 단계에서 그 이미지를 참조한 뒤쪽 페이지들은 stale reference 방지를 위해 rerun-pending으로 되돌립니다. 기존 산출 파일은 audit artifact로 보존합니다.
+- 수동 수정 요청(`rerun`, `request-revisions`, `stage-review --status needs_rerun`)은 기본적으로 요청된 페이지만 rerun합니다. 뒤쪽 같은 단계 페이지까지 다시 생성해야 한다고 명시한 경우에만 `--cascade-downstream`을 사용하며, 기존 산출 파일은 `rerun_archive/`와 `rerun_history`에 audit artifact로 보존합니다.
 
 ```bash
 python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_runner.py spatial-preview --plan-file <approved-plan.json>

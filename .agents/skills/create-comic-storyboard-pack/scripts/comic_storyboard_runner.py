@@ -4920,25 +4920,62 @@ def assert_valid_feedback_approval(
     return request_path
 
 
-def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) -> None:
+def archive_existing_stage_artifacts(
+    run_dir: Path | None,
+    page: dict[str, Any],
+    stage_id: str,
+    stage: dict[str, Any],
+) -> dict[str, str]:
+    if run_dir is None:
+        return {}
+    archive: dict[str, str] = {}
+    timestamp = now_iso().replace("-", "").replace(":", "").replace("+", "")
+    archive_index = len(stage.get("rerun_history", [])) + 1
+    archive_dir = run_dir / "rerun_archive" / stage_id / Path(page["filename"]).stem
+    output_value = str(stage.get("output_path") or "").strip()
+    if output_value:
+        output_path = Path(output_value)
+        if output_path.exists():
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archived_output = archive_dir / f"{timestamp}-{archive_index:03d}-output{output_path.suffix}"
+            shutil.copy2(output_path, archived_output)
+            archive["archived_output_path"] = str(archived_output)
+    description_value = str(stage.get("description_path") or "").strip()
+    if description_value:
+        description_path = Path(description_value)
+        if description_path.exists():
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archived_description = archive_dir / f"{timestamp}-{archive_index:03d}-desc{description_path.suffix}"
+            shutil.copy2(description_path, archived_description)
+            archive["archived_description_path"] = str(archived_description)
+    return archive
+
+
+def mark_page_stage_for_rerun(
+    page: dict[str, Any],
+    stage_id: str,
+    note: str,
+    run_dir: Path | None = None,
+) -> None:
     stage = stage_state(page, stage_id)
     if stage.get("status") not in {"pending", "generation_requested", "imported", "inspected_pass", "complete"}:
         raise SystemExit(f"Cannot rerun page stage in status {stage.get('status')}: {page['filename']} {stage_id}")
+    archived_artifacts = archive_existing_stage_artifacts(run_dir, page, stage_id, stage)
     history = stage.setdefault("rerun_history", [])
-    history.append(
-        {
-            "at": now_iso(),
-            "from_status": stage.get("status"),
-            "note": note,
-            "output_path": stage.get("output_path", ""),
-            "worker_status": stage.get("worker_status", ""),
-            "worker_note": stage.get("worker_note", ""),
-            "spatial_verdict": stage.get("spatial_verdict", ""),
-            "spatial_note": stage.get("spatial_note", ""),
-            "user_revision_overlays": stage.get("user_revision_overlays", []),
-            "visual_reference_paths": stage.get("visual_reference_paths", []),
-        }
-    )
+    history_entry = {
+        "at": now_iso(),
+        "from_status": stage.get("status"),
+        "note": note,
+        "output_path": stage.get("output_path", ""),
+        "worker_status": stage.get("worker_status", ""),
+        "worker_note": stage.get("worker_note", ""),
+        "spatial_verdict": stage.get("spatial_verdict", ""),
+        "spatial_note": stage.get("spatial_note", ""),
+        "user_revision_overlays": stage.get("user_revision_overlays", []),
+        "visual_reference_paths": stage.get("visual_reference_paths", []),
+    }
+    history_entry.update(archived_artifacts)
+    history.append(history_entry)
     stage["status"] = "pending"
     stage["rerun_pending"] = True
     stage["batch_id"] = ""
@@ -4954,11 +4991,10 @@ def mark_page_stage_for_rerun(page: dict[str, Any], stage_id: str, note: str) ->
     stage["visual_reference_paths"] = []
 
 
-def mark_downstream_prior_page_dependents_for_rerun(
+def downstream_prior_page_dependents(
     state: dict[str, Any],
     source_page: dict[str, Any],
     stage_id: str,
-    note: str,
 ) -> list[dict[str, Any]]:
     if not sequential_prior_pages_mode(state):
         return []
@@ -4969,12 +5005,23 @@ def mark_downstream_prior_page_dependents_for_rerun(
     )
     if source_index is None:
         return []
+    return [
+        downstream_page
+        for downstream_page in pages[source_index + 1 :]
+        if stage_state(downstream_page, stage_id).get("status") != "pending"
+    ]
+
+
+def mark_downstream_prior_page_dependents_for_rerun(
+    state: dict[str, Any],
+    source_page: dict[str, Any],
+    stage_id: str,
+    note: str,
+    run_dir: Path | None = None,
+) -> list[dict[str, Any]]:
     updated: list[dict[str, Any]] = []
-    for downstream_page in pages[source_index + 1 :]:
-        stage = stage_state(downstream_page, stage_id)
-        if stage.get("status") == "pending":
-            continue
-        mark_page_stage_for_rerun(downstream_page, stage_id, note)
+    for downstream_page in downstream_prior_page_dependents(state, source_page, stage_id):
+        mark_page_stage_for_rerun(downstream_page, stage_id, note, run_dir)
         updated.append(downstream_page)
     return updated
 
@@ -4982,6 +5029,46 @@ def mark_downstream_prior_page_dependents_for_rerun(
 def append_unique_page(pages: list[dict[str, Any]], page: dict[str, Any]) -> None:
     if page.get("id") not in {entry.get("id") for entry in pages}:
         pages.append(page)
+
+
+def pages_excluding(pages: list[dict[str, Any]], excluded: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    excluded_ids = {page.get("id") for page in excluded}
+    return [page for page in pages if page.get("id") not in excluded_ids]
+
+
+def print_downstream_unchanged_hint(pages: list[dict[str, Any]]) -> None:
+    if not pages:
+        return
+    for page in pages:
+        print(f"DOWNSTREAM_UNCHANGED_ITEM: {page['filename']}")
+    print("DOWNSTREAM_SCOPE_HINT: pass --cascade-downstream to rerun later pages in the same stage.")
+
+
+def record_revision_scope_history(
+    state: dict[str, Any],
+    *,
+    command: str,
+    stage_id: str,
+    requested_pages: list[dict[str, Any]],
+    cascade_downstream: bool,
+    downstream_rerun_pages: list[dict[str, Any]],
+    downstream_unchanged_pages: list[dict[str, Any]],
+    manifest: str = "",
+    note: str = "",
+) -> None:
+    state.setdefault("revision_scope_history", []).append(
+        {
+            "at": now_iso(),
+            "command": command,
+            "stage": stage_id,
+            "requested_pages": [page["filename"] for page in requested_pages],
+            "cascade_downstream": bool(cascade_downstream),
+            "downstream_rerun_pages": [page["filename"] for page in downstream_rerun_pages],
+            "downstream_unchanged_pages": [page["filename"] for page in downstream_unchanged_pages],
+            "manifest": manifest,
+            "note": note,
+        }
+    )
 
 
 def stage_instruction(stage_id: str) -> str:
@@ -6650,12 +6737,13 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
         stage["spatial_verdict"] = "needs_rerun"
         stage["spatial_note"] = note
         stage["spatial_checked_at"] = now_iso()
-        mark_page_stage_for_rerun(page, stage_id, f"Spatial inspection needs rerun: {note}")
+        mark_page_stage_for_rerun(page, stage_id, f"Spatial inspection needs rerun: {note}", run_dir)
         downstream_pages = mark_downstream_prior_page_dependents_for_rerun(
             state,
             page,
             stage_id,
             f"Prior page {page['filename']} rerun invalidated this {stage_id} continuity reference.",
+            run_dir,
         )
         if is_stage_anchor_page(state, page, stage_id):
             reset_stage_anchor_review(state, stage_id, f"Stage anchor review reset because {page['filename']} failed spatial inspection.")
@@ -6727,12 +6815,13 @@ def command_anchor_review(args: argparse.Namespace) -> None:
     elif args.status == "needs_rerun":
         review["status"] = "needs_rerun"
         review["anchor_level_note"] = ""
-        mark_page_stage_for_rerun(page, stage_id, f"Stage anchor review needs rerun: {args.note}")
+        mark_page_stage_for_rerun(page, stage_id, f"Stage anchor review needs rerun: {args.note}", run_dir)
         downstream_pages = mark_downstream_prior_page_dependents_for_rerun(
             state,
             page,
             stage_id,
             f"Prior page {page['filename']} anchor rerun invalidated this {stage_id} continuity reference.",
+            run_dir,
         )
         reset_stage_review(state, stage_id, f"Stage review reset because {page['filename']} failed stage anchor review.")
         reset_following_stage_gates(state, stage_id, f"Stage gate reset because {page['filename']} failed stage anchor review.")
@@ -6755,22 +6844,38 @@ def command_rerun(args: argparse.Namespace) -> None:
     state = load_state(run_dir)
     page = resolve_page(state, args.item)
     stage_id = args.stage
-    mark_page_stage_for_rerun(page, stage_id, args.note)
-    downstream_pages = mark_downstream_prior_page_dependents_for_rerun(
-        state,
-        page,
-        stage_id,
-        f"Prior page {page['filename']} rerun invalidated this {stage_id} continuity reference.",
-    )
+    mark_page_stage_for_rerun(page, stage_id, args.note, run_dir)
+    downstream_candidates = downstream_prior_page_dependents(state, page, stage_id)
+    downstream_pages: list[dict[str, Any]] = []
+    if args.cascade_downstream:
+        downstream_pages = mark_downstream_prior_page_dependents_for_rerun(
+            state,
+            page,
+            stage_id,
+            f"Prior page {page['filename']} rerun invalidated this {stage_id} continuity reference.",
+            run_dir,
+        )
     if is_stage_anchor_page(state, page, stage_id):
         reset_stage_anchor_review(state, stage_id, f"Stage anchor review reset because {page['filename']} was marked for rerun.")
     reset_stage_review(state, stage_id, f"Stage review reset because {page['filename']} was marked for rerun.")
     reset_following_stage_gates(state, stage_id, f"Stage gate reset because {page['filename']} was marked for rerun.")
+    record_revision_scope_history(
+        state,
+        command="rerun",
+        stage_id=stage_id,
+        requested_pages=[page],
+        cascade_downstream=args.cascade_downstream,
+        downstream_rerun_pages=downstream_pages,
+        downstream_unchanged_pages=[] if args.cascade_downstream else downstream_candidates,
+        note=args.note,
+    )
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
     print(f"RERUN_PENDING: {page['filename']} {stage_id}")
     for downstream_page in downstream_pages:
         print(f"DOWNSTREAM_RERUN_ITEM: {downstream_page['filename']}")
+    if not args.cascade_downstream:
+        print_downstream_unchanged_hint(downstream_candidates)
     print("NEXT: Resolve any other current items, then run next-batch.")
 
 
@@ -6841,7 +6946,11 @@ def command_request_revisions(args: argparse.Namespace) -> None:
     if not isinstance(items, list) or not items:
         raise SystemExit("Review manifest must contain at least one item.")
 
+    requested_pages: list[dict[str, Any]] = []
     updated_pages: list[dict[str, Any]] = []
+    downstream_rerun_pages: list[dict[str, Any]] = []
+    downstream_unchanged_pages: list[dict[str, Any]] = []
+    revision_notes: list[str] = []
     manifest_dir = manifest_path.parent
     for item in items:
         if not isinstance(item, dict):
@@ -6857,7 +6966,7 @@ def command_request_revisions(args: argparse.Namespace) -> None:
                 f"{overlay['color_id']} overlay={overlay['overlay_path']} request={overlay['request']}"
             )
         note = f"User revision overlays from {manifest_path}: " + "; ".join(note_parts)
-        mark_page_stage_for_rerun(page, stage_id, note)
+        mark_page_stage_for_rerun(page, stage_id, note, run_dir)
         stage = stage_state(page, stage_id)
         stage["user_revision_overlays"] = overlays
         if is_stage_anchor_page(state, page, stage_id):
@@ -6866,28 +6975,55 @@ def command_request_revisions(args: argparse.Namespace) -> None:
                 stage_id,
                 f"Stage anchor review reset because {page['filename']} received user revision overlays.",
             )
+        append_unique_page(requested_pages, page)
         append_unique_page(updated_pages, page)
-        for downstream_page in mark_downstream_prior_page_dependents_for_rerun(
-            state,
-            page,
-            stage_id,
-            f"Prior page {page['filename']} revision invalidated this {stage_id} continuity reference.",
-        ):
-            append_unique_page(updated_pages, downstream_page)
+        revision_notes.append(note)
+        downstream_candidates = downstream_prior_page_dependents(state, page, stage_id)
+        if args.cascade_downstream:
+            for downstream_page in mark_downstream_prior_page_dependents_for_rerun(
+                state,
+                page,
+                stage_id,
+                f"Prior page {page['filename']} revision invalidated this {stage_id} continuity reference.",
+                run_dir,
+            ):
+                append_unique_page(updated_pages, downstream_page)
+                append_unique_page(downstream_rerun_pages, downstream_page)
+        else:
+            for downstream_page in downstream_candidates:
+                append_unique_page(downstream_unchanged_pages, downstream_page)
 
     if not updated_pages:
         raise SystemExit("Review manifest did not contain any overlay revision requests.")
+    downstream_rerun_pages = pages_excluding(downstream_rerun_pages, requested_pages)
+    downstream_unchanged_pages = pages_excluding(downstream_unchanged_pages, requested_pages)
     reset_stage_review(state, stage_id, "Stage review reset because user revision overlays requested reruns.")
     reset_following_stage_gates(state, stage_id, "Stage gate reset because user revision overlays requested reruns.")
     state.setdefault("notes", []).append(
         f"Requested revisions for {len(updated_pages)} page(s) in {stage_id} from {manifest_path}."
     )
+    record_revision_scope_history(
+        state,
+        command="request-revisions",
+        stage_id=stage_id,
+        requested_pages=requested_pages,
+        cascade_downstream=args.cascade_downstream,
+        downstream_rerun_pages=downstream_rerun_pages,
+        downstream_unchanged_pages=downstream_unchanged_pages,
+        manifest=str(manifest_path),
+        note=" | ".join(revision_notes),
+    )
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
     print(f"REVISION_REQUESTED: {stage_id}")
     print(f"MANIFEST: {manifest_path}")
-    for page in updated_pages:
+    for page in requested_pages:
         print(f"RERUN_ITEM: {page['filename']}")
+    if not args.cascade_downstream:
+        print_downstream_unchanged_hint(downstream_unchanged_pages)
+    else:
+        for page in downstream_rerun_pages:
+            print(f"DOWNSTREAM_RERUN_ITEM: {page['filename']}")
     print("NEXT: Resolve any other current items, then run next-batch.")
 
 
@@ -6895,6 +7031,8 @@ def command_stage_review(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
     stage_id = args.stage
+    if args.status != "needs_rerun" and args.cascade_downstream:
+        raise SystemExit("--cascade-downstream is only valid when stage-review status is needs_rerun.")
     if not pages_complete_for_stage(state, stage_id):
         raise SystemExit(
             f"Stage review requires every page in {stage_id} to be parent-inspected pass or complete first."
@@ -6930,26 +7068,47 @@ def command_stage_review(args: argparse.Namespace) -> None:
             page = resolve_page(state, item)
             append_unique_page(resolved_pages, page)
         rerun_pages = list(resolved_pages)
+        downstream_rerun_pages: list[dict[str, Any]] = []
+        downstream_unchanged_pages: list[dict[str, Any]] = []
         for page in rerun_pages:
-            mark_page_stage_for_rerun(page, stage_id, args.note)
+            mark_page_stage_for_rerun(page, stage_id, args.note, run_dir)
             if is_stage_anchor_page(state, page, stage_id):
                 reset_stage_anchor_review(
                     state,
                     stage_id,
                     f"Stage anchor review reset because {page['filename']} stage-review requested rerun.",
                 )
-            for downstream_page in mark_downstream_prior_page_dependents_for_rerun(
-                state,
-                page,
-                stage_id,
-                f"Prior page {page['filename']} stage-review rerun invalidated this {stage_id} continuity reference.",
-            ):
-                append_unique_page(resolved_pages, downstream_page)
+            downstream_candidates = downstream_prior_page_dependents(state, page, stage_id)
+            if args.cascade_downstream:
+                for downstream_page in mark_downstream_prior_page_dependents_for_rerun(
+                    state,
+                    page,
+                    stage_id,
+                    f"Prior page {page['filename']} stage-review rerun invalidated this {stage_id} continuity reference.",
+                    run_dir,
+                ):
+                    append_unique_page(resolved_pages, downstream_page)
+                    append_unique_page(downstream_rerun_pages, downstream_page)
+            else:
+                for downstream_page in downstream_candidates:
+                    append_unique_page(downstream_unchanged_pages, downstream_page)
+        downstream_rerun_pages = pages_excluding(downstream_rerun_pages, rerun_pages)
+        downstream_unchanged_pages = pages_excluding(downstream_unchanged_pages, rerun_pages)
         review["status"] = "needs_rerun"
         review["note"] = args.note
         review["issues"] = issues + [f"rerun_item={page['filename']}" for page in resolved_pages]
         review["reviewed_at"] = now_iso()
         reset_following_stage_gates(state, stage_id, f"Stage review needs rerun for {stage_id}.")
+        record_revision_scope_history(
+            state,
+            command="stage-review",
+            stage_id=stage_id,
+            requested_pages=rerun_pages,
+            cascade_downstream=args.cascade_downstream,
+            downstream_rerun_pages=downstream_rerun_pages,
+            downstream_unchanged_pages=downstream_unchanged_pages,
+            note=args.note,
+        )
     else:
         raise SystemExit(f"Invalid stage review status: {args.status}")
 
@@ -6964,6 +7123,11 @@ def command_stage_review(args: argparse.Namespace) -> None:
     if rerun_items:
         for item in rerun_items:
             print(f"RERUN_ITEM: {item}")
+        if args.status == "needs_rerun":
+            for page in downstream_rerun_pages:
+                print(f"DOWNSTREAM_RERUN_ITEM: {page['filename']}")
+            if not args.cascade_downstream:
+                print_downstream_unchanged_hint(downstream_unchanged_pages)
 
 
 def command_approve_next_stage(args: argparse.Namespace) -> None:
@@ -7180,12 +7344,14 @@ def build_parser() -> argparse.ArgumentParser:
     rerun.add_argument("--item", required=True)
     rerun.add_argument("--stage", choices=STAGE_IDS, required=True)
     rerun.add_argument("--note", required=True)
+    rerun.add_argument("--cascade-downstream", action="store_true")
     rerun.set_defaults(func=command_rerun)
 
     request_revisions = subparsers.add_parser("request-revisions")
     request_revisions.add_argument("--run-dir", default="")
     request_revisions.add_argument("--stage", choices=STAGE_IDS, default="")
     request_revisions.add_argument("--review-manifest", required=True)
+    request_revisions.add_argument("--cascade-downstream", action="store_true")
     request_revisions.set_defaults(func=command_request_revisions)
 
     stage_review = subparsers.add_parser("stage-review")
@@ -7195,6 +7361,7 @@ def build_parser() -> argparse.ArgumentParser:
     stage_review.add_argument("--note", required=True)
     stage_review.add_argument("--issue", action="append", default=[])
     stage_review.add_argument("--rerun-item", action="append", default=[])
+    stage_review.add_argument("--cascade-downstream", action="store_true")
     stage_review.set_defaults(func=command_stage_review)
 
     approve_next = subparsers.add_parser("approve-next-stage")

@@ -122,7 +122,7 @@ Use this format:
 - sketch/ink 사용자 피드백 게이트 선택지: 그대로 finish 승인(`approve-next-stage --feedback-request ... --feedback-choice approve_finish`) | 수정 UI 열기 또는 에이전트 좌표 마킹 생성(`$review-image-overlays`) | 현재 단계에서 중단(`stop-after-stage`)
 - approve-next-stage 전에는 finish 예약 금지. `stage-review`, `approve-next-stage`, finish `next-batch`를 같은 병렬 실행이나 같은 사용자 응답 없이 연속 실행하지 않는다.
 - 사용자가 중단하면 stop-after-stage로 스케치/펜선 산출물까지만 완료 처리
-- 사용자 또는 에이전트가 수정을 요청하면 `$review-image-overlays`로 색상별 오버레이 PNG/TXT와 `revision_requests.json`을 저장하고, `request-revisions`로 해당 페이지를 rerun 처리
+- 사용자 또는 에이전트가 수정을 요청하면 `$review-image-overlays`로 색상별 오버레이 PNG/TXT와 `revision_requests.json`을 저장하고, `request-revisions`로 해당 페이지만 rerun 처리. 같은 stage의 뒤 페이지까지 함께 다시 생성해야 한다고 사용자가 명시하면 `request-revisions --cascade-downstream`을 사용
 - 사용자가 승인하면 3단계: 톤/채색/마무리 finish
 - 3단계는 $create-comic-storyboard-finish subagent가 생성/1차 검수
 - 3단계는 현재 페이지의 parent-inspected storyboard_sketch_ink 이미지, blocking `*_desc.md` 공간/시간 잠금, 그리고 이전 페이지들의 inspected finish 이미지를 필수 입력으로 사용
@@ -491,6 +491,7 @@ Import blocking revision overlays the same way as later stages:
 
 ```bash
 python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_blocking/<review-id>/revision_requests.json
+# Use --cascade-downstream only when the user explicitly wants later same-stage pages rerun too.
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 
@@ -545,10 +546,11 @@ After the user saves in the browser or an agent creates markup, import the manif
 
 ```bash
 python3 "$RUNNER" request-revisions --run-dir <run-dir> --review-manifest <run-dir>/review_overlays/storyboard_sketch_ink/<review-id>/revision_requests.json
+# Use --cascade-downstream only when the user explicitly wants later same-stage pages rerun too.
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ```
 
-`request-revisions` resets the affected page stage to `pending`, records the color-specific overlay PNG/TXT paths and request text, resets stage-review and following gates, and injects a `User revision overlays` section into the next prompt/subagent prompt. Use the color-specific overlay files as canonical instructions; the combined overlay is only for quick visual review.
+`request-revisions` resets only the affected page stage to `pending` by default, records the color-specific overlay PNG/TXT paths and request text, resets stage-review and following gates, records `revision_scope_history`, and injects a `User revision overlays` section into the next prompt/subagent prompt. Use `--cascade-downstream` only when the user explicitly asks to rerun later pages in the same stage too. Use the color-specific overlay files as canonical instructions; the combined overlay is only for quick visual review.
 
 If the user approves finish:
 
@@ -590,7 +592,7 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 - `finish` requires a parent-inspected or imported prior `storyboard_sketch_ink` image.
 - `next-batch --limit 1` reserves one eligible page in `sequential_prior_pages` mode and writes both `prompts/<stage>/...prompt.txt` and `subagent_prompts/<stage>/...subagent.txt`. Legacy `parallel_batch` states may still reserve up to four pages.
 - `next-batch` records `visual_reference_paths` on the page stage and prints one `VISUAL_REFERENCE_IMAGE: <absolute path>` line per image that must be attached as a local image item when spawning the subagent.
-- In `sequential_prior_pages` mode, page N waits for pages 1..N-1 in the same stage to pass parent inspection before reservation. If an earlier page is rerun, later generated/imported/passed pages in that same stage are reset to rerun-pending because their continuity references may be stale.
+- In `sequential_prior_pages` mode, page N waits for pages 1..N-1 in the same stage to pass parent inspection before reservation. Manual `rerun`, `request-revisions`, and `stage-review --status needs_rerun` reset only the requested page(s) by default; pass `--cascade-downstream` only when the user explicitly wants later generated/imported/passed pages in that same stage reset to `rerun_pending` too.
 - In `sequential_prior_pages` mode, page 2 or later also waits for the same stage's first page to pass `anchor-review`. The runner records this in `stage_anchor_reviews` and injects `Stage level anchor reference` into prompts/subagent prompts.
 - Use `anchor-review --status pass` only after the first page has passed parent `inspect-pass`. Use `anchor-review --status needs_rerun` when the first page is too rough, too polished, or otherwise mismatched for the stage level; this routes the first page back to rerun and resets same-stage review/following gates.
 - `next-batch` injects the top-level `spatial_continuity_plan` and the page's `location_continuity` before narrative-first page design, so subagents keep the same physical set, fixed landmarks, entrances/exits, camera axis, lighting, and allowed page-to-page changes before applying page-specific composition.
@@ -598,12 +600,12 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 - In `scene_3d validation_only` mode, prompts must explicitly say that hard locks are rerun criteria, soft/inferred geometry may reconcile after parent inspection, and the first panel can act as a calibration anchor. Do not attach 3D render images as `VISUAL_REFERENCE_IMAGE` for this mode.
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
-- Parent `inspect-pass --spatial-verdict needs_rerun` never marks the page passed; it routes the page back to `pending` rerun and resets stage review / following gates.
+- Parent `inspect-pass --spatial-verdict needs_rerun` never marks the page passed; it routes the page back to `pending` rerun, resets later same-stage pages, and resets stage review / following gates because hard continuity references are no longer reliable.
 - Parent `inspect-pass --spatial-verdict reconciled --reconciliation-note "<note>"` marks the page passed while recording `spatial_reconciliations[]`. Use this only when hard invariants pass and the generated storyboard should calibrate soft/inferred `scene_3d` geometry without harming the approved page plan or prior continuity.
-- `request-revisions --review-manifest <revision_requests.json>` imports `$review-image-overlays` feedback, marks affected page stages `pending`/`rerun_pending`, resets stage-review and following gates, and adds overlay PNG/TXT paths plus request text to the next rerun prompt.
+- `request-revisions --review-manifest <revision_requests.json>` imports `$review-image-overlays` feedback, marks affected page stages `pending`/`rerun_pending`, resets stage-review and following gates, records scope in `revision_scope_history`, archives existing stage artifacts under `rerun_archive/` when present, and adds overlay PNG/TXT paths plus request text to the next rerun prompt. Use `--cascade-downstream` only for explicit same-stage downstream reruns.
 - `$review-image-overlays create-markup` is valid for subagent self-verification and parent comprehensive verification when the issue can be localized with rect/polygon coordinates; it must still flow through `request-revisions`.
 - If a subagent returns `completed:null`, no final message, or no generated path, do not invent an import path. Route the page to `rerun`.
-- Rerun resets the relevant stage review and any following stage gate.
+- Manual `rerun` resets the requested page, relevant stage review, and any following stage gate by default. Add `--cascade-downstream` only when later same-stage pages should also be reset.
 
 ## Parent Verification
 

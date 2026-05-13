@@ -122,8 +122,9 @@
 진행 단계:
 
 1. `$create-comic-storyboard-sketch-ink`: 콘티/러프 스케치/약식 펜선 + 공간 검수 보조 `storyboard_conti_sketch_ink`
-2. 사용자 피드백 및 finish 진행 승인
-3. `$create-comic-storyboard-finish`: 톤/채색/마무리 `finish`
+2. `$validate-comic-storyboard-spatial-contract` / `$validate-comic-storyboard-physical-causality`: import된 페이지의 필수 검수 보고서 등록
+3. 사용자 피드백 및 finish 진행 승인
+4. `$create-comic-storyboard-finish`: 톤/채색/마무리 `finish`
 
 기본 정책:
 
@@ -143,6 +144,8 @@
 - 첫 페이지 첫 컷처럼 이전 공간 기준이 없는 컷은 calibration anchor로 취급해, 페이지 구성 계획을 해치지 않는 범위에서 soft/inferred `scene_3d` 구조를 승인된 콘티 쪽으로 보정할 수 있습니다.
 - 이미지 생성 단계에서는 `spatial_contract`의 엄폐/가림 조건을 시각적 엄폐 연출 규칙으로 먼저 번역합니다. `allowed_exposure`는 벽 가장자리에 눈/손/무기 끝을 붙이라는 뜻이 아니며, 인물과 벽/기둥/차량/가구/엄폐물 사이에는 분리된 윤곽, 그림자 틈, 또는 여백이 있어야 합니다.
 - 작은 노출이 인물-엄폐물 융합처럼 보일 경우에는 부분 노출보다 명확한 완전 엄폐를 우선합니다. 공유 윤곽선, 공유 해칭, 이어지는 텍스처, 벽 가장자리에 붙은 얼굴/눈/손/무기 끝은 rerun 대상입니다.
+- 이미지 import 후에는 `spatial_contract`와 `physical_causality` 검수 보고서가 모두 `pass` 또는 `reconciled`로 등록되어야 parent `inspect-pass`를 실행할 수 있습니다. `reconciled`는 soft/inferred 공간 보정처럼 hard invariant를 해치지 않는 경우에만 사용하고 보정 사유를 남깁니다.
+- 물리적 인과성 검수는 문 열림/파손/낙하/상처/소품 소유 변경 같은 상태 변화의 원인, 동작·효과선·궤적·결과 위치의 방향 일치, 컷 순서상 원인과 결과의 시간 순서, 순간이동 없는 물리적 연속성을 확인합니다.
 - 과도하게 압축된 페이지, 의도 없는 균일 직각 그리드, 여백 없이 대사/SFX가 꽉 찬 구성은 검수에서 보완 대상으로 봅니다.
 - 모든 페이지의 `storyboard_conti_sketch_ink` 부모 검수와 단계 마무리 검수 통과 전에는 `finish`를 진행하지 않습니다.
 - `storyboard_conti_sketch_ink` 단계 마무리 검수 후에는 사용자 피드백을 받고, `approve-next-stage`로 승인되기 전까지 `finish` batch를 예약하지 않습니다.
@@ -172,6 +175,8 @@ python3 .agents/skills/create-comic-storyboard-pack/scripts/comic_storyboard_run
 | --- | --- |
 | `$create-comic-storyboard-sketch-ink` | 승인된 만화 페이지 plan과 runner prompt를 바탕으로 `storyboard_conti_sketch_ink` 이미지를 생성하고, 공간/시간 검수용 `*_desc.md`를 함께 작성합니다. 의미 없는 기호 콘티가 아니라 인물/오브젝트/주요 배경/가림 요소/동선이 읽히는 콘티/러프 스케치/약식 펜선 단계이며, 최종 톤/컬러/polish는 하지 않습니다. |
 | `$create-comic-storyboard-finish` | 부모 검수 통과한 `storyboard_conti_sketch_ink` 이미지와 `*_desc.md`를 필수 구조 참조로 사용해 톤/채색/마무리를 생성하고 1차 검수합니다. 레이아웃, 컷 수, 동선, 텍스트 정책, 효과선 방향, 눈/얼굴/손/체형 구조와 stage-level anchor 수준을 변경하지 않습니다. |
+| `$validate-comic-storyboard-spatial-contract` | import된 페이지 이미지, 승인 계획, `*_desc.md`, spatial preview/render artifact를 확인하고 `spatial_contract` 검수 보고서를 작성합니다. |
+| `$validate-comic-storyboard-physical-causality` | import된 페이지 이미지와 승인 계획을 확인해 원인 없는 상태 변화, 방향 모순, 시간 순서 역전, 순간이동식 위치/소유 변경을 검수하는 보고서를 작성합니다. |
 
 ## 2D to Photoreal Stage Skills
 

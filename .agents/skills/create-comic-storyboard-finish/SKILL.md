@@ -9,7 +9,7 @@ description: Use when an approved comic storyboard page needs tone, color, lette
 
 Generate exactly one approved comic page for the `finish` stage. This skill is stage-local: it adds tone, color when requested, lighting, final cleanup, and policy-approved lettering or text absence while preserving the parent-inspected `storyboard_conti_sketch_ink` page and its `*_desc.md` spatial validation overlay.
 
-The pack runner owns `state.json`, import, parent inspection, rerun, stage-review, and user approval for entering this stage.
+The pack runner owns `state.json`, import, required external validation reports, parent inspection, rerun, stage-review, and user approval for entering this stage.
 
 ## Inputs
 
@@ -50,7 +50,7 @@ Read the prompt file and use the prior-stage image as the required visual input 
 
 ## Worker Inspection
 
-After generation, inspect the output before returning. Mark `needs_rerun` when finishing changes the inspected conti/sketch/ink structure or violates text policy, source consistency, character locks, character appearance/anatomy lock, visual text guard, spatial validation overlay, spatial logic, motion direction, or technical quality.
+After generation, inspect the output before returning. Mark `needs_rerun` when finishing changes the inspected conti/sketch/ink structure or violates text policy, source consistency, character locks, character appearance/anatomy lock, visual text guard, spatial validation overlay, spatial logic, motion direction, physical causality, or technical quality. This worker self-check is advisory; final acceptance requires the parent to register `$validate-comic-storyboard-spatial-contract` and `$validate-comic-storyboard-physical-causality` reports before `inspect-pass`.
 
 If this page is marked as the stage-level anchor, self-inspect the finish level especially strictly: it must add tone/color/final polish while preserving conti/sketch/ink structure, line rhythm, effect lines, and text policy.
 

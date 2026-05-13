@@ -14,6 +14,11 @@ Actual image generation is delegated to stage skills:
 - `$create-comic-storyboard-sketch-ink` for `storyboard_conti_sketch_ink`
 - `$create-comic-storyboard-finish` for `finish`
 
+Post-import validation is delegated to required validation skills:
+
+- `$validate-comic-storyboard-spatial-contract` for generated-image spatial contract / continuity reports
+- `$validate-comic-storyboard-physical-causality` for physical cause-effect / motion plausibility reports
+
 Use Codex built-in `image_gen` only through one subagent per reserved page. Do not generate any image before the user approves the exact page plan.
 
 ## Default Locations
@@ -107,6 +112,7 @@ Use this format:
 승인 후 진행 방식:
 - 1단계: 콘티/러프 스케치/약식 펜선 + 공간 검수 보조 `storyboard_conti_sketch_ink`
 - 각 페이지는 $create-comic-storyboard-sketch-ink subagent가 생성/1차 검수하되, 새 run은 기본적으로 한 번에 한 페이지만 순차 예약한다.
+- 각 페이지 import 후 `$validate-comic-storyboard-spatial-contract`와 `$validate-comic-storyboard-physical-causality`가 각각 JSON 검수 보고서를 작성하고, runner `validate-spatial` / `validate-physical-causality`로 등록되어야 parent `inspect-pass`가 가능하다.
 - 두 번째 페이지부터는 같은 stage에서 parent-inspection을 통과한 이전 페이지 이미지들을 모두 `Required image attachments` / `Prior page continuity references`로 함께 첨부해 연속성과 일관성을 유지한다.
 - 각 stage의 첫 페이지는 이후 페이지의 수준을 정하는 stage-level anchor다. 첫 페이지가 parent-inspection을 통과한 뒤 `anchor-review`를 통과해야 같은 stage의 두 번째 페이지 이후를 예약한다.
 - 1단계 이미지는 먼저 승인된 만화 페이지의 패널 구도, 장면 리듬, 독자 시선 흐름, 공간 관계, 동선, 가림, 인과관계를 보존한다. 의미 없는 기호 콘티는 금지하고, 중요한 캐릭터/오브젝트/배경/가림 요소는 러프 스케치 형체와 약식 정리선으로 식별 가능해야 한다. 위치/방향/벡터/관계 선, 화살표, 시선/방향선, 이동 궤적선, 가림/차단 표시는 검수에 필요한 만큼만 추가한다. 완성 인킹, 톤, 컬러, 질감, 조명, 최종 polish는 금지한다. 중요하지 않은 소품/배경 요소는 스토리 판독, 액션 판독, 가림/차단, 랜드마크 연속성, 페이지 구성에 필요하지 않으면 단순화하거나 생략한다. 같은 이름의 `<page_stem>_desc.md`를 반드시 작성하고, `*_desc.md`는 runner 필수 heading은 그대로 유지하되 본문 설명은 한국어로 작성한다.
@@ -438,6 +444,10 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 # Use the printed SUBAGENT_PROMPT_FILE content as the subagent task.
 # Attach every printed VISUAL_REFERENCE_IMAGE as a local image item when spawning the subagent.
 python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --generated <generated-path> --description <page_stem>_desc.md --worker-status pass --worker-note "<subagent note>"
+python3 .agents/skills/validate-comic-storyboard-spatial-contract/scripts/validate_spatial_contract.py --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink
+python3 "$RUNNER" validate-spatial --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --report <run-dir>/validation_reports/storyboard_conti_sketch_ink/<page_stem>/spatial_contract.json
+python3 .agents/skills/validate-comic-storyboard-physical-causality/scripts/validate_physical_causality.py --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink
+python3 "$RUNNER" validate-physical-causality --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --report <run-dir>/validation_reports/storyboard_conti_sketch_ink/<page_stem>/physical_causality.json
 python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
 python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage storyboard_conti_sketch_ink --item <first-page> --status pass --note "<stage-level conti/sketch/ink anchor pass>"
 python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage storyboard_conti_sketch_ink --note "<parent inspection note>" --spatial-verdict needs_rerun --spatial-note "<spatial/temporal contradiction found>"
@@ -519,6 +529,10 @@ If the user approves finish:
 python3 "$RUNNER" approve-next-stage --run-dir <run-dir> --from-stage storyboard_conti_sketch_ink --to-stage finish --feedback-request <run-dir>/feedback_requests/storyboard_conti_sketch_ink_to_finish.json --feedback-choice approve_finish --note "<user approved finish>"
 python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 python3 "$RUNNER" import --run-dir <run-dir> --item <page> --stage finish --generated <generated-path> --worker-status pass --worker-note "<subagent note>"
+python3 .agents/skills/validate-comic-storyboard-spatial-contract/scripts/validate_spatial_contract.py --run-dir <run-dir> --item <page> --stage finish
+python3 "$RUNNER" validate-spatial --run-dir <run-dir> --item <page> --stage finish --report <run-dir>/validation_reports/finish/<page_stem>/spatial_contract.json
+python3 .agents/skills/validate-comic-storyboard-physical-causality/scripts/validate_physical_causality.py --run-dir <run-dir> --item <page> --stage finish
+python3 "$RUNNER" validate-physical-causality --run-dir <run-dir> --item <page> --stage finish --report <run-dir>/validation_reports/finish/<page_stem>/physical_causality.json
 python3 "$RUNNER" inspect-pass --run-dir <run-dir> --item <page> --stage finish --note "<parent inspection note>" --spatial-verdict pass --spatial-note "<spatial/temporal contract visual inspection pass>"
 python3 "$RUNNER" anchor-review --run-dir <run-dir> --stage finish --item <first-page> --status pass --note "<stage-level finish anchor pass>"
 ```
@@ -559,6 +573,8 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 - In `scene_3d validation_only` mode, prompts must explicitly say that hard locks are rerun criteria, soft/inferred geometry may reconcile after parent inspection, and the first panel can act as a calibration anchor. 3D render PNGs from `spatial-render-manifest` are inspection aids only; do not attach them as `VISUAL_REFERENCE_IMAGE` or treat them as automatic image-generation references.
 - Do not reserve a new batch while any page stage is `generation_requested` or `imported`.
 - Subagent inspection is advisory. Only the parent session may run `inspect-pass`.
+- Parent `inspect-pass` with a passing or reconciled verdict requires both registered reports: `spatial_contract` from `$validate-comic-storyboard-spatial-contract` and `physical_causality` from `$validate-comic-storyboard-physical-causality`. Reports must live under `<run-dir>/validation_reports/<stage>/<page_stem>/`, match the active run/page/stage, and have verdict `pass` or `reconciled`; `reconciled` requires `reconciliation_note`.
+- If either validation report has verdict `needs_rerun`, do not force `inspect-pass`; route the page through `rerun` or `request-revisions` using the report issues. Spatial hard failures still invalidate downstream same-stage continuity references through the parent rerun path. Physical causality failures rerun the affected page by default unless the report shows later pages also rely on the broken cause/effect chain.
 - Parent `inspect-pass --spatial-verdict needs_rerun` never marks the page passed; it routes the page back to `pending` rerun, resets later same-stage pages, and resets stage review / following gates because hard continuity references are no longer reliable.
 - Parent `inspect-pass --spatial-verdict reconciled --reconciliation-note "<note>"` marks the page passed while recording `spatial_reconciliations[]`. Use this only when hard invariants pass and the generated storyboard should calibrate soft/inferred `scene_3d` geometry without harming the approved page plan or prior continuity.
 - `request-revisions --review-manifest <revision_requests.json>` imports `$review-image-overlays` feedback, marks affected page stages `pending`/`rerun_pending`, resets stage-review and following gates, records scope in `revision_scope_history`, archives existing stage artifacts under `rerun_archive/` when present, and adds overlay PNG/TXT paths plus request text to the next rerun prompt. Use `--cascade-downstream` only for explicit same-stage downstream reruns.
@@ -569,6 +585,8 @@ python3 "$RUNNER" next-batch --run-dir <run-dir> --limit 1
 ## Parent Verification
 
 Inspect every imported page before marking it passed. Check page id, stage, panel count, reading order, layout brief, text policy, character locks, character appearance/anatomy locks, visual text guard, source consistency, pre-page `spatial_continuity_plan` / `location_continuity` compliance, structured `spatial_contract` compliance, temporal continuity, spatial continuity, motion plausibility, visual emphasis, effect-line direction, technical quality, and output filename mapping.
+
+Before `inspect-pass`, run and register both validation skills. Treat their reports as required evidence, not as a replacement for parent judgment: the parent still inspects the image and decides whether to pass, reconcile soft geometry, or rerun.
 
 For `storyboard_conti_sketch_ink`, inspect both the generated PNG and sibling `*_desc.md`. Reject missing required description headings, non-Korean description body text, missing entity ids, missing constraint ids, meaningless pure-symbol conti that makes entities impossible to identify, missing rough sketch forms for important people/objects/background/occluders, missing readable movement/occlusion/cause-effect cues, finished inking, tone/color/texture/final polish, or semantic labels drawn into the image instead of the Markdown description.
 
@@ -584,7 +602,7 @@ Character appearance/anatomy is an independent reject criterion, not just a tech
 
 For `finish`, verify that tone/color/final polish preserved the inspected `storyboard_conti_sketch_ink` layout, panel shapes, negative space, text placement or required text absence, light clean-line structure, line-weight rhythm, visual emphasis, effect lines, character/object placement, `*_desc.md` spatial validation overlay, structured spatial contract, eye/face/hand/limb/silhouette/body proportion/posture structure, movement direction, and action logic.
 
-Do not claim page coverage, text quality, continuity, spatial logic, or stage quality unless the image was inspected.
+Do not claim page coverage, text quality, continuity, spatial logic, physical causality, or stage quality unless the image was inspected and both required validation reports are registered.
 
 ## Reporting
 
@@ -607,6 +625,8 @@ After each batch or gate, report in Korean:
 - 이미지 내 문자 방지 검수: ...
 - 사전 공간 설계/고정 랜드마크 검수: ...
 - 공간/동선/상태유지 검수: ...
+- 물리적 인과성 검수: ...
+- 등록된 검수 보고서: spatial_contract=<path/status>, physical_causality=<path/status>
 - 단계 마무리 검수 결과: ...
 - 다음 단계 사용자 피드백 게이트: storyboard_conti_sketch_ink_to_finish = pending_user_feedback | approved | stopped
 - 피드백 요청 파일: <run-dir>/feedback_requests/<from_stage>_to_<to_stage>.json

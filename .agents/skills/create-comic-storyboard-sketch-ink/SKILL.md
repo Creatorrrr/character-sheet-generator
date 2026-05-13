@@ -7,7 +7,7 @@ description: Use when an approved comic storyboard page needs the integrated con
 
 ## Overview
 
-Generate exactly one approved comic page for the `storyboard_conti_sketch_ink` stage. This skill is stage-local: it creates the combined conti, rough sketch, and light clean-line pass from the approved page plan, writes the required `*_desc.md` spatial validation description, then first-pass inspects the result. The pack runner owns `state.json`, import, parent inspection, rerun, and stage-review.
+Generate exactly one approved comic page for the `storyboard_conti_sketch_ink` stage. This skill is stage-local: it creates the combined conti, rough sketch, and light clean-line pass from the approved page plan, writes the required `*_desc.md` spatial validation description, then first-pass inspects the result. The pack runner owns `state.json`, import, required external validation reports, parent inspection, rerun, and stage-review.
 
 ## Inputs
 
@@ -56,7 +56,7 @@ Read the prompt file before generation. Attach every listed required image path 
 
 ## Worker Inspection
 
-After generation, inspect the output before returning. Mark `needs_rerun` when any required page structure, text policy, character lock, character appearance/anatomy lock, visual text guard, source consistency, description file, spatial logic, temporal continuity, motion direction, or technical quality check fails.
+After generation, inspect the output before returning. Mark `needs_rerun` when any required page structure, text policy, character lock, character appearance/anatomy lock, visual text guard, source consistency, description file, spatial logic, temporal continuity, motion direction, physical causality, or technical quality check fails. This worker self-check is advisory; final acceptance requires the parent to register `$validate-comic-storyboard-spatial-contract` and `$validate-comic-storyboard-physical-causality` reports before `inspect-pass`.
 
 If this page is marked as the stage-level anchor, self-inspect the conti/sketch/light-ink level especially strictly: it must be readable and structurally useful while avoiding tone/color/final polish.
 

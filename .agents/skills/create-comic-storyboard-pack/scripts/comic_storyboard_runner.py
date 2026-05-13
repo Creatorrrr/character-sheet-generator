@@ -12,6 +12,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from comic_storyboard_validators import (  # noqa: E402
+    PASSING_VALIDATION_REPORT_VERDICTS,
+    PHYSICAL_CAUSALITY_VALIDATOR,
+    REQUIRED_IMAGE_STAGE_VALIDATORS,
+    SPATIAL_CONTRACT_VALIDATOR,
+    VALIDATION_REPORT_VERDICTS,
+    normalize_validation_report,
+)
+
 
 WORKFLOW = "create-comic-storyboard-pack"
 REPO_ROOT = Path("/Users/chasoik/Projects/character-sheet-generator")
@@ -4959,6 +4972,9 @@ def blank_stage_state() -> dict[str, Any]:
         "spatial_verdict": "",
         "spatial_note": "",
         "spatial_checked_at": "",
+        "validation_reports": [],
+        "validation_status": "pending",
+        "validation_checked_at": "",
         "current_rerun_correction": "",
         "user_revision_overlays": [],
         "visual_reference_paths": [],
@@ -5111,12 +5127,105 @@ def normalize_stage_anchor_review(review: dict[str, Any], stage_id: str) -> None
         raise SystemExit(f"Invalid stage anchor review status for {stage_id}: {review['status']}")
 
 
+def validation_report_passes(report: dict[str, Any]) -> bool:
+    return str(report.get("verdict") or "") in PASSING_VALIDATION_REPORT_VERDICTS
+
+
+def latest_validation_reports_by_validator(stage: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    reports: dict[str, dict[str, Any]] = {}
+    raw_reports = stage.get("validation_reports")
+    if not isinstance(raw_reports, list):
+        raw_reports = []
+    for report in raw_reports:
+        if not isinstance(report, dict):
+            continue
+        validator = str(report.get("validator") or "")
+        if validator:
+            reports[validator] = report
+    return reports
+
+
+def stage_validation_errors(page: dict[str, Any], stage_id: str) -> list[str]:
+    stage = stage_state(page, stage_id)
+    reports = latest_validation_reports_by_validator(stage)
+    errors: list[str] = []
+    for validator in REQUIRED_IMAGE_STAGE_VALIDATORS:
+        report = reports.get(validator)
+        if not report:
+            errors.append(f"{page['filename']}:{stage_id} missing required {validator} validation report.")
+            continue
+        verdict = str(report.get("verdict") or "")
+        if verdict == "needs_rerun":
+            errors.append(
+                f"{page['filename']}:{stage_id} {validator} validation needs rerun: "
+                f"{report.get('summary') or report.get('report_path') or ''}"
+            )
+        elif not validation_report_passes(report):
+            errors.append(f"{page['filename']}:{stage_id} {validator} validation has invalid verdict: {verdict}.")
+    return errors
+
+
+def update_stage_validation_status(stage: dict[str, Any]) -> None:
+    reports = latest_validation_reports_by_validator(stage)
+    if any(str(report.get("verdict") or "") == "needs_rerun" for report in reports.values()):
+        stage["validation_status"] = "needs_rerun"
+    elif all(validator in reports and validation_report_passes(reports[validator]) for validator in REQUIRED_IMAGE_STAGE_VALIDATORS):
+        stage["validation_status"] = "passed"
+    else:
+        stage["validation_status"] = "pending"
+    if reports and not stage.get("validation_checked_at"):
+        stage["validation_checked_at"] = now_iso()
+    elif not stage.get("validation_checked_at"):
+        stage["validation_checked_at"] = ""
+
+
+def reset_stage_validation(stage: dict[str, Any]) -> None:
+    stage["validation_reports"] = []
+    stage["validation_status"] = "pending"
+    stage["validation_checked_at"] = ""
+
+
+def accepted_validation_report(
+    validator: str,
+    run_dir: Path,
+    page: dict[str, Any],
+    stage_id: str,
+    summary: str,
+    checked_artifacts: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "validator": validator,
+        "run_dir": str(run_dir.resolve(strict=False)),
+        "page_id": str(page.get("id") or ""),
+        "filename": str(page.get("filename") or ""),
+        "stage": stage_id,
+        "verdict": "pass",
+        "summary": summary,
+        "issues": [],
+        "checked_artifacts": checked_artifacts or [],
+        "reconciliation_note": "",
+        "registered_at": now_iso(),
+    }
+
+
 def normalize_stage_record(stage: dict[str, Any], page_id: str, stage_id: str) -> None:
     for key, value in blank_stage_state().items():
         stage.setdefault(key, value)
     if not isinstance(stage.get("user_revision_overlays"), list):
         stage["user_revision_overlays"] = as_list(stage.get("user_revision_overlays"))
     stage["visual_reference_paths"] = [str(path) for path in as_list(stage.get("visual_reference_paths"))]
+    if not isinstance(stage.get("validation_reports"), list):
+        stage["validation_reports"] = [stage["validation_reports"]] if isinstance(stage.get("validation_reports"), dict) else []
+    for report in stage.get("validation_reports", []):
+        if not isinstance(report, dict):
+            raise SystemExit(f"Invalid validation report record for {page_id}:{stage_id}.")
+        if str(report.get("validator") or "") not in REQUIRED_IMAGE_STAGE_VALIDATORS:
+            raise SystemExit(f"Invalid validation report validator for {page_id}:{stage_id}: {report.get('validator')}")
+        if str(report.get("verdict") or "") not in VALIDATION_REPORT_VERDICTS:
+            raise SystemExit(f"Invalid validation report verdict for {page_id}:{stage_id}: {report.get('verdict')}")
+    if stage.get("validation_status") not in {"pending", "passed", "needs_rerun"}:
+        stage["validation_status"] = "pending"
+    update_stage_validation_status(stage)
     if stage["status"] not in VALID_STATUSES:
         raise SystemExit(f"Invalid stage status for {page_id}:{stage_id}: {stage['status']}")
 
@@ -5893,6 +6002,8 @@ def mark_page_stage_for_rerun(
         "worker_note": stage.get("worker_note", ""),
         "spatial_verdict": stage.get("spatial_verdict", ""),
         "spatial_note": stage.get("spatial_note", ""),
+        "validation_reports": stage.get("validation_reports", []),
+        "validation_status": stage.get("validation_status", "pending"),
         "user_revision_overlays": stage.get("user_revision_overlays", []),
         "visual_reference_paths": stage.get("visual_reference_paths", []),
     }
@@ -5908,6 +6019,7 @@ def mark_page_stage_for_rerun(
     stage["spatial_verdict"] = ""
     stage["spatial_note"] = ""
     stage["spatial_checked_at"] = ""
+    reset_stage_validation(stage)
     stage["current_rerun_correction"] = note
     stage["user_revision_overlays"] = []
     stage["visual_reference_paths"] = []
@@ -7737,6 +7849,7 @@ def command_next_batch(args: argparse.Namespace) -> None:
         stage["spatial_note"] = ""
         stage["spatial_checked_at"] = ""
         stage["current_rerun_correction"] = rerun_correction
+        reset_stage_validation(stage)
         stage["visual_reference_paths"] = visual_reference_paths(run_dir, page, stage_id, state)
         prompt_path = stage_prompt_path(run_dir, page, stage_id)
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -7807,6 +7920,7 @@ def command_import(args: argparse.Namespace) -> None:
         if description_source.resolve(strict=False) != description_destination.resolve(strict=False):
             shutil.copy2(description_source, description_destination)
         validate_stage_description(description_destination, page)
+    reset_stage_validation(stage)
     stage["status"] = "imported"
     stage["generated_source"] = str(generated)
     stage["output_path"] = str(destination)
@@ -7824,6 +7938,54 @@ def command_import(args: argparse.Namespace) -> None:
     print("NEXT: Parent must inspect, then run inspect-pass or rerun.")
 
 
+def command_validate_report(args: argparse.Namespace, expected_validator: str) -> None:
+    run_dir = Path(args.run_dir).resolve(strict=False)
+    state = load_state(run_dir)
+    page = resolve_page(state, args.item)
+    stage_id = args.stage
+    stage = stage_state(page, stage_id)
+    if stage.get("status") not in {"imported", "inspected_pass", "complete"}:
+        raise SystemExit(
+            f"Page stage must be imported before validation report registration: "
+            f"{page['filename']} {stage_id} ({stage.get('status')})"
+        )
+    report_path = Path(args.report).resolve(strict=False)
+    if not report_path.exists():
+        raise SystemExit(f"Validation report not found: {report_path}")
+    if not path_is_under(report_path, run_dir):
+        raise SystemExit(f"Validation report must be under the run folder: {report_path}")
+    try:
+        report = normalize_validation_report(
+            load_json(report_path),
+            report_path=report_path,
+            expected_validator=expected_validator,
+            run_dir=run_dir,
+            page=page,
+            stage_id=stage_id,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    report["registered_at"] = now_iso()
+    reports = stage.setdefault("validation_reports", [])
+    reports.append(report)
+    update_stage_validation_status(stage)
+    write_batch_plan(run_dir, state)
+    save_state(run_dir, state)
+    print(f"VALIDATION_REPORT_REGISTERED: {expected_validator}")
+    print(f"ITEM: {page['filename']}")
+    print(f"STAGE: {stage_id}")
+    print(f"VERDICT: {report['verdict']}")
+    print(f"VALIDATION_STATUS: {stage['validation_status']}")
+
+
+def command_validate_spatial(args: argparse.Namespace) -> None:
+    command_validate_report(args, SPATIAL_CONTRACT_VALIDATOR)
+
+
+def command_validate_physical_causality(args: argparse.Namespace) -> None:
+    command_validate_report(args, PHYSICAL_CAUSALITY_VALIDATOR)
+
+
 def command_inspect_pass(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     state = load_state(run_dir)
@@ -7837,6 +7999,11 @@ def command_inspect_pass(args: argparse.Namespace) -> None:
         raise SystemExit(f"Output file does not exist: {output}")
     if stage_id == STORYBOARD_CONTI_SKETCH_INK_STAGE:
         validate_stage_description(recorded_stage_description_path(run_dir, page, stage_id), page)
+    if args.spatial_verdict != "needs_rerun":
+        validation_errors = stage_validation_errors(page, stage_id)
+        if validation_errors:
+            details = "\n".join(f"- {error}" for error in validation_errors)
+            raise SystemExit(f"Required validation reports must pass before inspect-pass:\n{details}")
     spatial_note = args.spatial_note or (
         "parent spatial contract inspection passed"
         if spatial_contract_has_content(page.get("spatial_contract"))
@@ -8157,6 +8324,12 @@ def command_stage_review(args: argparse.Namespace) -> None:
     if args.status == "pass":
         if rerun_items:
             raise SystemExit("Do not pass a stage review while rerun items are specified.")
+        validation_errors = []
+        for page in ordered_pages(state):
+            validation_errors.extend(stage_validation_errors(page, stage_id))
+        if validation_errors:
+            details = "\n".join(f"- {error}" for error in validation_errors)
+            raise SystemExit(f"Stage review requires passed validation reports:\n{details}")
         review["status"] = "passed"
         review["note"] = args.note
         review["issues"] = issues
@@ -8326,6 +8499,28 @@ def command_import_prior_stage(args: argparse.Namespace) -> None:
     stage["parent_note"] = args.note
     stage["imported_at"] = now_iso()
     stage["inspected_at"] = now_iso()
+    checked_artifacts = [str(destination)]
+    if stage.get("description_path"):
+        checked_artifacts.append(str(stage.get("description_path")))
+    stage["validation_reports"] = [
+        accepted_validation_report(
+            SPATIAL_CONTRACT_VALIDATOR,
+            run_dir,
+            page,
+            args.stage,
+            f"external prior-stage spatial validation accepted by import-prior-stage: {args.note}",
+            checked_artifacts,
+        ),
+        accepted_validation_report(
+            PHYSICAL_CAUSALITY_VALIDATOR,
+            run_dir,
+            page,
+            args.stage,
+            f"external prior-stage physical causality validation accepted by import-prior-stage: {args.note}",
+            checked_artifacts,
+        ),
+    ]
+    update_stage_validation_status(stage)
     state.setdefault("notes", []).append(f"Imported external prior-stage reference for {page['filename']}:{args.stage}.")
     write_batch_plan(run_dir, state)
     save_state(run_dir, state)
@@ -8345,7 +8540,10 @@ def command_batch_status(args: argparse.Namespace) -> None:
     for page_id in batch.get("pages", []):
         page = resolve_page(state, page_id)
         stage = stage_state(page, stage_id)
-        print(f"- {page['filename']}: {stage.get('status')} worker={stage.get('worker_status', '')}")
+        print(
+            f"- {page['filename']}: {stage.get('status')} worker={stage.get('worker_status', '')} "
+            f"validation={stage.get('validation_status', 'pending')}"
+        )
 
 
 def command_status(args: argparse.Namespace) -> None:
@@ -8364,6 +8562,14 @@ def command_status(args: argparse.Namespace) -> None:
             counts[status] = counts.get(status, 0) + 1
         parts = ", ".join(f"{status}={counts[status]}" for status in sorted(counts)) or "none"
         print(f"{stage_id}: {parts}")
+        validation_counts: dict[str, int] = {}
+        for page in state.get("pages", []):
+            validation_status = stage_state(page, stage_id).get("validation_status", "pending")
+            validation_counts[validation_status] = validation_counts.get(validation_status, 0) + 1
+        validation_parts = ", ".join(
+            f"{status}={validation_counts[status]}" for status in sorted(validation_counts)
+        ) or "none"
+        print(f"{stage_id}_validation: {validation_parts}")
         review = state.get("stage_reviews", {}).get(stage_id, blank_stage_review())
         print(f"{stage_id}_review: {review.get('status', 'pending')}")
         anchor_review = state.get("stage_anchor_reviews", {}).get(stage_id, blank_stage_anchor_review())
@@ -8436,6 +8642,20 @@ def build_parser() -> argparse.ArgumentParser:
     import_cmd.add_argument("--worker-status", choices=sorted(WORKER_STATUS_VALUES), required=True)
     import_cmd.add_argument("--worker-note", required=True)
     import_cmd.set_defaults(func=command_import)
+
+    validate_spatial = subparsers.add_parser("validate-spatial")
+    validate_spatial.add_argument("--run-dir", required=True)
+    validate_spatial.add_argument("--item", required=True)
+    validate_spatial.add_argument("--stage", choices=STAGE_IDS, required=True)
+    validate_spatial.add_argument("--report", required=True)
+    validate_spatial.set_defaults(func=command_validate_spatial)
+
+    validate_physical = subparsers.add_parser("validate-physical-causality")
+    validate_physical.add_argument("--run-dir", required=True)
+    validate_physical.add_argument("--item", required=True)
+    validate_physical.add_argument("--stage", choices=STAGE_IDS, required=True)
+    validate_physical.add_argument("--report", required=True)
+    validate_physical.set_defaults(func=command_validate_physical_causality)
 
     inspect_pass = subparsers.add_parser("inspect-pass")
     inspect_pass.add_argument("--run-dir", required=True)

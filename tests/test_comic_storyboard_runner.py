@@ -15,6 +15,12 @@ RUNNER = (
     / "scripts"
     / "comic_storyboard_runner.py"
 )
+PACK_SCRIPT_DIR = RUNNER.parent
+if str(PACK_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(PACK_SCRIPT_DIR))
+
+from comic_storyboard_validators import physical_causality_issues_for_page  # noqa: E402
+
 CONTI_SKETCH_INK_STAGE = "storyboard_conti_sketch_ink"
 FIRST_STAGE = CONTI_SKETCH_INK_STAGE
 FINISH_STAGE = "finish"
@@ -23,6 +29,7 @@ STAGE_ORDER = [CONTI_SKETCH_INK_STAGE, FINISH_STAGE]
 
 def run_cli(*args, cwd):
     args = tuple(default_blocking_description_args(args, cwd))
+    ensure_default_validation_reports(args, Path(cwd))
     return subprocess.run(
         [sys.executable, str(RUNNER), *args],
         cwd=cwd,
@@ -112,6 +119,90 @@ def make_blocking_description(root, run_dir, item):
         encoding="utf-8",
     )
     return path
+
+
+def ensure_default_validation_reports(args, root):
+    args = list(args)
+    if not args or args[0] != "inspect-pass":
+        return
+    if "--spatial-verdict" in args:
+        verdict = args[args.index("--spatial-verdict") + 1]
+        if verdict == "needs_rerun":
+            return
+    try:
+        run_dir = Path(args[args.index("--run-dir") + 1])
+        item = args[args.index("--item") + 1]
+        stage_id = args[args.index("--stage") + 1]
+    except (ValueError, IndexError):
+        return
+    state_path = run_dir / "state.json"
+    if not state_path.exists():
+        return
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    page = next(
+        (
+            page
+            for page in state.get("pages", [])
+            if item in {page.get("filename"), page.get("id"), Path(page.get("filename", "")).stem}
+        ),
+        None,
+    )
+    if not page:
+        return
+    stage = page.get("stages", {}).get(stage_id, {})
+    reports = stage.get("validation_reports", [])
+    validators = {report.get("validator") for report in reports if report.get("verdict") in {"pass", "reconciled"}}
+    for validator in ["spatial_contract", "physical_causality"]:
+        if validator in validators:
+            continue
+        report_path = write_validation_report(root, run_dir, page, stage_id, validator)
+        command = "validate-spatial" if validator == "spatial_contract" else "validate-physical-causality"
+        subprocess.run(
+            [
+                sys.executable,
+                str(RUNNER),
+                command,
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                page["filename"],
+                "--stage",
+                stage_id,
+                "--report",
+                str(report_path),
+            ],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+
+def write_validation_report(root, run_dir, page, stage_id, validator, verdict="pass", **overrides):
+    stem = Path(page["filename"]).stem
+    report_path = run_dir / "validation_reports" / stage_id / stem / f"{validator}.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    stage = page.get("stages", {}).get(stage_id, {})
+    checked_artifacts = []
+    for key in ["output_path", "description_path"]:
+        value = stage.get(key)
+        if value and Path(value).exists():
+            checked_artifacts.append(value)
+    report = {
+        "validator": validator,
+        "run_dir": str(run_dir.resolve(strict=False)),
+        "page_id": page["id"],
+        "filename": page["filename"],
+        "stage": stage_id,
+        "verdict": verdict,
+        "summary": f"{validator} test report {verdict}",
+        "issues": [],
+        "checked_artifacts": checked_artifacts,
+        "reconciliation_note": "test reconciliation" if verdict == "reconciled" else "",
+    }
+    report.update(overrides)
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report_path
 
 
 def write_revision_manifest(run_dir, stage_id, item, review_id="manual-review"):
@@ -2099,6 +2190,303 @@ class ComicStoryboardRunnerTest(unittest.TestCase):
             self.assertEqual(stage["spatial_verdict"], "reconciled")
             self.assertEqual(stage["reconciliation_note"], "soft camera and desk offsets calibrated from first panel")
             self.assertEqual(state["spatial_reconciliations"][0]["stage"], FIRST_STAGE)
+
+    def test_inspect_pass_requires_spatial_and_physical_validation_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+
+            missing = run_cli_raw(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("missing required spatial_contract validation report", missing.stderr)
+
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            page = state["pages"][0]
+            spatial_report = write_validation_report(root, run_dir, page, FIRST_STAGE, "spatial_contract")
+            run_cli(
+                "validate-spatial",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--report",
+                str(spatial_report),
+                cwd=root,
+            )
+
+            missing_physical = run_cli_raw(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            self.assertNotEqual(missing_physical.returncode, 0)
+            self.assertIn("missing required physical_causality validation report", missing_physical.stderr)
+
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            page = state["pages"][0]
+            physical_report = write_validation_report(root, run_dir, page, FIRST_STAGE, "physical_causality")
+            run_cli(
+                "validate-physical-causality",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--report",
+                str(physical_report),
+                cwd=root,
+            )
+
+            passed = run_cli_raw(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+            self.assertIn("INSPECTED_PASS", passed.stdout)
+
+    def test_validation_report_needs_rerun_and_mismatches_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            page = state["pages"][0]
+
+            bad_stage_report = write_validation_report(
+                root,
+                run_dir,
+                page,
+                FIRST_STAGE,
+                "spatial_contract",
+                stage=FINISH_STAGE,
+            )
+            mismatch = run_cli_raw(
+                "validate-spatial",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--report",
+                str(bad_stage_report),
+                cwd=root,
+            )
+            self.assertNotEqual(mismatch.returncode, 0)
+            self.assertIn("stage must be storyboard_conti_sketch_ink", mismatch.stderr)
+
+            spatial_report = write_validation_report(root, run_dir, page, FIRST_STAGE, "spatial_contract")
+            run_cli(
+                "validate-spatial",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--report",
+                str(spatial_report),
+                cwd=root,
+            )
+            physical_report = write_validation_report(
+                root,
+                run_dir,
+                page,
+                FIRST_STAGE,
+                "physical_causality",
+                verdict="needs_rerun",
+                issues=[
+                    {
+                        "id": "physical-issue",
+                        "severity": "error",
+                        "panel": 1,
+                        "finding": "object teleports without cause",
+                        "evidence": "test",
+                        "rerun_required": True,
+                    }
+                ],
+            )
+            run_cli(
+                "validate-physical-causality",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--report",
+                str(physical_report),
+                cwd=root,
+            )
+            result = run_cli_raw(
+                "inspect-pass",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--note",
+                "parent pass",
+                cwd=root,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("physical_causality validation needs rerun", result.stderr)
+
+    def test_reconciled_validation_report_requires_reconciliation_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = init_run(root)
+            approve_plan(root, run_dir, page_count=1)
+            generated = generate_file(root)
+
+            run_cli("next-batch", "--run-dir", str(run_dir), cwd=root)
+            run_cli(
+                "import",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--generated",
+                str(generated),
+                "--worker-status",
+                "pass",
+                "--worker-note",
+                "worker pass",
+                cwd=root,
+            )
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            page = state["pages"][0]
+            report = write_validation_report(
+                root,
+                run_dir,
+                page,
+                FIRST_STAGE,
+                "spatial_contract",
+                verdict="reconciled",
+                reconciliation_note="",
+            )
+
+            result = run_cli_raw(
+                "validate-spatial",
+                "--run-dir",
+                str(run_dir),
+                "--item",
+                "001-page-1.png",
+                "--stage",
+                FIRST_STAGE,
+                "--report",
+                str(report),
+                cwd=root,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("reconciliation_note is required", result.stderr)
+
+    def test_physical_causality_validator_detects_state_direction_and_order_failures(self):
+        page = sample_page(1, panel_count=2)
+        page["spatial_contract"] = {
+            "panel_snapshots": [
+                {
+                    "panel": 1,
+                    "entities": [
+                        {"id": "door", "state_tags": ["opened"]},
+                        {"id": "ball", "trajectory_vector": [1, 0], "effect_line_vector": [-1, 0]},
+                        {"id": "vase", "state_tags": ["broken"]},
+                    ],
+                },
+                {"panel": 2, "entities": [{"id": "vase", "state_tags": ["impact"]}]},
+            ],
+            "constraints": [],
+        }
+
+        issues = physical_causality_issues_for_page(page)
+
+        findings = "\n".join(issue["finding"] for issue in issues)
+        self.assertIn("need an approved cause", findings)
+        self.assertIn("opposite directions", findings)
+        self.assertIn("result appears before", findings)
+
+        page["spatial_contract"]["constraints"] = [
+            {"id": "door-open-cause", "type": "allowed_transition", "entity": "door", "to_panel": 1, "cause_panel": 1},
+            {"id": "vase-break-cause", "type": "requires_cause", "entity": "vase", "panel": 1, "cause_panel": 1},
+        ]
+        page["spatial_contract"]["panel_snapshots"][0]["entities"][1]["effect_line_vector"] = [1, 0]
+        page["spatial_contract"]["panel_snapshots"][0]["entities"][2]["state_tags"] = ["impact", "broken"]
+
+        resolved = physical_causality_issues_for_page(page)
+
+        self.assertEqual(resolved, [])
 
     def test_legacy_flat_panels_are_converted_to_single_panel_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
